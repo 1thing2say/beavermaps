@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+@layer base {}
+
+@layer components {
+    .gbutton {
+        @apply border-emerald-400 border rounded-2xl p-3 m-3;
+    }
+}
