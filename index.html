@@ -5,11 +5,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Map Project</title>
-    <link href="./output.css" rel="stylesheet">
+    <!-- Vite loads the source CSS directly -->
+    <link href="/src/input.css" rel="stylesheet">
+    <style>
+      #map {
+        height: 500px;
+        width: 100%;
+        margin-top: 20px;
+      }
+    </style>
 </head>
 
 <body class="gbutton">
-    <h1 class="text-3xl font-bold">Test</h1>
+    <h1 class="text-3xl font-bold">Map Test</h1>
+    <div id="map" class="rounded shadow-lg border border-gray-300"></div>
+
+    <!-- Vite loads JS as a module -->
+    <script type="module" src="/src/main.js"></script>
 </body>
 
 </html>
