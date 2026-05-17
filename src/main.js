@@ -1,29 +1,21 @@
-const apiKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
+import mapboxgl from 'mapbox-gl';
 
-if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
-  console.warn("Please add your Google Maps API Key to the .env file.");
+const accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
+
+if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
+  console.warn("Please add your Mapbox Access Token to the .env file as VITE_MAPBOX_TOKEN.");
 } else {
-  // Dynamically create the Google Maps script tag
-  const script = document.createElement('script');
-  script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap`;
-  script.async = true;
-  document.head.appendChild(script);
-}
+  mapboxgl.accessToken = accessToken;
+  
+  const map = new mapboxgl.Map({
+    container: 'map', // ID of the div element
+    style: 'mapbox://styles/mapbox/streets-v12', // style URL
+    center: [-122.084, 37.422], // starting position [lng, lat]
+    zoom: 14, // starting zoom
+  });
 
-// Make initMap globally available for the callback
-window.initMap = function() {
-  const location = { lat: 37.422, lng: -122.084 };
-  const mapElement = document.getElementById("map");
-  
-  if (mapElement) {
-    const map = new google.maps.Map(mapElement, {
-      zoom: 14,
-      center: location,
-    });
-  
-    new google.maps.Marker({
-      position: location,
-      map: map,
-    });
-  }
-};
+  // Add a simple marker to start
+  new mapboxgl.Marker()
+    .setLngLat([-122.084, 37.422])
+    .addTo(map);
+}

@@ -6,9 +6,9 @@ npm install
 
 ### 2. Environment Setup
 
-Create a `.env` file in the root of the project and add your Google Maps API Key:
+Create a `.env` file in the root of the project and add your Mapbox Access Token:
 ```env
-VITE_GOOGLE_MAPS_KEY=YourActualKeyHere
+VITE_MAPBOX_TOKEN=YourActualTokenHere
 ```
 
 ### 3. Development
