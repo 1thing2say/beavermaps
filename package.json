@@ -26,6 +26,8 @@
     "vite": "^8.0.13"
   },
   "dependencies": {
+    "@turf/turf": "^7.3.5",
+    "geojson-path-finder": "^2.1.0",
     "mapbox-gl": "^3.23.1"
   }
 }

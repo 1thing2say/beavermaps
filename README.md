@@ -1,3 +1,16 @@
+# Custom Map Router
+
+This project is a custom interactive routing application built with Vite, Tailwind CSS, Mapbox GL JS, Turf.js, and geojson-path-finder.
+
+## Features
+*   **Custom Network Routing:** Calculates the shortest path across a user-defined grid instead of public roads.
+*   **Interactive UI:** Click on the map to set Start and End points, with a floating UI displaying live coordinates and distance.
+*   **Intelligent Snapping:** Mouse clicks automatically snap to the nearest valid intersection using geospatial math.
+
+📚 **[Read the Technical Documentation for routing logic details](TECHNICAL_DOCS.md)**
+
+---
+
 ### 1. Install Dependencies
 
 ```bash
