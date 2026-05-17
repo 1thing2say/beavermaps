@@ -7,7 +7,7 @@ This project is a custom interactive routing application built with Vite, Tailwi
 *   **Interactive UI:** Click on the map to set Start and End points, with a floating UI displaying live coordinates and distance.
 *   **Intelligent Snapping:** Mouse clicks automatically snap to the nearest valid intersection using geospatial math.
 
-📚 **[Read the Technical Documentation for routing logic details](TECHNICAL_DOCS.md)**
+★ **[Read the Technical Documentation for routing logic details](TECHNICAL_DOCS.md)**
 
 ---
 
