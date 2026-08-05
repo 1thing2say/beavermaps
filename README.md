@@ -130,11 +130,13 @@ this campus is close to empty. The extraction lives in `scripts/`:
 | `build-labels.mjs` | `labels.json` — 49 labels: the PDF's text, plus building names |
 | `build-amenities.mjs` | `amenities.json` — 72 amenity points in 10 classes |
 | `build-places.mjs` | `places.json` — my campus's 120 destinations, positioned |
+| `build-directory.mjs` | `directory.json` — 30 buildings and what is inside them |
 | `build-landcover.mjs` | `landcover.json` — 593 ground polygons, superseded |
 | `build-boundary.mjs` | `campus-boundary.json` — the OSM campus polygon |
 | `build-snap.mjs` | `path-corrections.json` — per-node alignment fix |
 | `projection.mjs` | the SVG→WGS84 transform every other script uses |
 | `svg-geometry.mjs` | shared SVG path/transform parsing |
+| `building-names.mjs` | grouping, tidying and label anchoring, shared |
 
 `build-basemap.mjs` is the one that reads the drawing whole. The scripts above it
 each take one class of thing off the same sheet, and between them they keep 24%
@@ -160,6 +162,17 @@ Thirty-eight footprints stay unlabelled because no source names them — they ar
 grandstands, annexes and service buildings. Naming them from the nearest entry in
 `places.json` was tried and rejected: it labels an 839 m² building
 *"Defibrillator"* and gives six separate portables the same name.
+
+Tapping a building opens its card instead of dropping a pin. `directory.json`
+joins the three files that were never joined — footprints, printed labels, and
+my campus's 145 positioned destinations, 75 of which fall inside a footprint — so the
+Welcome and Support Center can say it holds the Transfer Center, TRIO, DSPS and
+five more. Amenities are counted separately from destinations: listing them
+together made the Gym's directory read *"Defibrillator, Drink Vending Machine,
+Drink Vending Machine"*, three entries and nowhere to go. The card's **Go here**
+routes to the network node nearest the building's walls rather than to wherever
+the tap landed, and `build-directory.mjs` reads only committed artifacts, so
+unlike its siblings it runs from a bare clone.
 
 `buildings.json` is still separate: it carries heights, and the 3D extrusion
 during navigation needs them. `landcover.json` is kept and still served, but the
@@ -190,6 +203,8 @@ themselves:
 - **the letterform mask**, checked where it acts — on the layers that carry text
   — rather than by counting small shapes, because the sheet is full of
   legitimately small things.
+- **every building's entrance is a real graph node** and its card anchor lies
+  inside its own walls — the two things a pole of inaccessibility exists for.
 - `maneuvers.js` directly, including that collinear vertices never become a turn.
 
 Each of those was confirmed to fail when the thing it guards is deliberately

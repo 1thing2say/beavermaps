@@ -20,6 +20,7 @@ import {
 } from './maneuvers.js';
 import { maneuverIcon } from './nav-icons.js';
 import { loadAmenityIcons, loadLabelPlate } from './map-images.js';
+import { buildingCard } from './building-popup.js';
 import { createThemeToggle, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
 
@@ -231,6 +232,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let campusAmenities = null;
   let campusPlaces = null;
   let campusLabels = null;
+  let campusDirectory = null;
+  // The open building card, and which building it belongs to.
+  let openCard = null;
+  let selectedBuilding = null;
 
   // State variables
   let startMarker = null;
@@ -351,6 +356,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (map.getSource('calculated-route')) {
       map.getSource('calculated-route').setData(EMPTY);
     }
+
+    closeBuildingCard();
 
     // Reset UI. The search box is cleared too: leaving a destination showing
     // next to "Not set" is the kind of stale text people act on.
@@ -630,6 +637,151 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     19, ['*', ['get', 'pt'], 1.9 * scale],
   ];
 
+  /**
+   * Buildings you can tap.
+   *
+   * src/directory.json is one feature per building — footprints folded together,
+   * so tapping one of the Health Education Complex's nine shapes shows the whole
+   * complex — carrying what the sheet calls it and which of my campus's destinations
+   * are inside it.
+   *
+   * The hit layer is drawn at zero opacity rather than left out, because
+   * queryRenderedFeatures only sees layers that are actually in the style. The
+   * highlight is a second layer filtered to the selected building; a filter
+   * needs no feature ids and no promoteId, which a feature-state approach would.
+   */
+  const NOTHING_SELECTED = ['==', ['get', 'officialName'], '\u0000'];
+  // The side panel is w-72 at a 1rem inset, plus a margin; the card is w-72 too
+  // and centres on its anchor, so it needs half its own width of clearance as
+  // well before it stops reaching under the panel.
+  const SIDE_PANEL_WIDTH = 320;
+  const CARD_WIDTH = 288;
+
+  function addDirectoryLayers() {
+    const colors = palette(currentBasemap, currentTheme);
+
+    if (map.getLayer('campus-directory-fill')) {
+      map.setPaintProperty('campus-directory-fill', 'fill-color', colors.route);
+      map.setPaintProperty('campus-directory-line', 'line-color', colors.route);
+      return;
+    }
+    if (!campusDirectory) return; // still in flight; addNetworkLayers re-runs
+
+    if (!map.getSource('campus-directory')) {
+      map.addSource('campus-directory', { type: 'geojson', data: campusDirectory });
+    }
+
+    map.addLayer({
+      id: 'campus-directory-hit',
+      type: 'fill',
+      source: 'campus-directory',
+      slot: 'middle',
+      paint: { 'fill-opacity': 0 },
+    });
+    map.addLayer({
+      id: 'campus-directory-fill',
+      type: 'fill',
+      source: 'campus-directory',
+      slot: 'middle',
+      filter: NOTHING_SELECTED,
+      paint: { 'fill-color': colors.route, 'fill-opacity': 0.22, 'fill-emissive-strength': 1 },
+    });
+    map.addLayer({
+      id: 'campus-directory-line',
+      type: 'line',
+      source: 'campus-directory',
+      slot: 'middle',
+      filter: NOTHING_SELECTED,
+      paint: { 'line-color': colors.route, 'line-width': 2, 'line-emissive-strength': 1 },
+    });
+  }
+
+  function highlightBuilding(officialName) {
+    selectedBuilding = officialName;
+    const filter = officialName ? ['==', ['get', 'officialName'], officialName] : NOTHING_SELECTED;
+    for (const id of ['campus-directory-fill', 'campus-directory-line']) {
+      if (map.getLayer(id)) map.setFilter(id, filter);
+    }
+  }
+
+  function closeBuildingCard() {
+    if (openCard) openCard.remove();
+    openCard = null;
+    highlightBuilding(null);
+  }
+
+  /** The building under a click, or null. */
+  function buildingAt(pointer) {
+    if (!map.getLayer('campus-directory-hit')) return null;
+    const [hit] = map.queryRenderedFeatures(pointer, { layers: ['campus-directory-hit'] });
+    return hit?.properties ?? null;
+  }
+
+  function showBuildingCard(lngLat, raw) {
+    closeBuildingCard();
+    // Vector tiles hand nested properties back as JSON strings.
+    const props = { ...raw };
+    for (const key of ['contents', 'facilities', 'parts', 'entrance', 'anchor']) {
+      if (typeof props[key] === 'string') {
+        try { props[key] = JSON.parse(props[key]); } catch { delete props[key]; }
+      }
+    }
+
+    // Point at the building rather than at the tap, so the card lands in the
+    // same place each time the same building is opened.
+    const at = props.anchor ?? [lngLat.lng, lngLat.lat];
+
+    // The side panel is an HTML overlay, so Mapbox's own edge-flipping cannot
+    // see it and will happily open a card underneath it. Naming an anchor turns
+    // that flipping off entirely, though, so once the horizontal side is forced
+    // the vertical one has to be chosen too or a tall card runs off the top.
+    const screen = map.project(at);
+    const height = map.getCanvas().clientHeight;
+    const overPanel = screen.x < SIDE_PANEL_WIDTH + CARD_WIDTH / 2;
+    const vertical = screen.y < height / 3 ? 'top-' : screen.y > (height * 2) / 3 ? 'bottom-' : '';
+    const anchor = overPanel ? `${vertical}left` : undefined;
+
+    openCard = new mapboxgl.Popup({
+      closeButton: true,
+      closeOnClick: false,
+      maxWidth: 'none',
+      className: 'campus-popup',
+      offset: 10,
+      ...(anchor ? { anchor } : {}),
+    })
+      .setLngLat(at)
+      .setDOMContent(buildingCard(props, {
+        onStart: (coords, name) => {
+          if (startPoint && endPoint) resetMap();
+          closeBuildingCard();
+          placeStart(coords, name);
+          setStatus(`Start set at ${name}. Now pick a destination.`);
+        },
+        onEnd: async (coords, name) => {
+          closeBuildingCard();
+          if (!startPoint) {
+            pendingEnd = { coords, name };
+            setStatus(`${name} set as the destination. Click the map to set a start point.`);
+            return;
+          }
+          if (endPoint) resetMap0(coords, name);
+          else await placeEnd(coords, name);
+        },
+      }))
+      .addTo(map);
+
+    openCard.on('close', () => { openCard = null; highlightBuilding(null); });
+    highlightBuilding(props.officialName);
+  }
+
+  /** Re-route from the existing start to a newly chosen destination. */
+  async function resetMap0(coords, name) {
+    if (endMarker) endMarker.remove();
+    endMarker = null;
+    endPoint = null;
+    await placeEnd(coords, name);
+  }
+
   function addLabelLayers() {
     const colors = palette(currentBasemap, currentTheme);
 
@@ -865,6 +1017,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
 
     // Last, so the symbols and labels sit above the route rather than under it.
+    addDirectoryLayers();
     addAmenityLayer();
     addLabelLayers();
 
@@ -1176,7 +1329,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // All from the same server, so ask together. They are settled separately
     // because only the network is load-bearing: without it nothing can be
     // routed, whereas every overlay is decoration and its loss costs one layer.
-    const [networkResult, buildings, basemap, amenities, places, labels] =
+    const [networkResult, buildings, basemap, amenities, places, labels, directory] =
       await Promise.allSettled([
         fetchNetwork(),
         fetchOverlay('buildings'),
@@ -1184,6 +1337,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         fetchOverlay('amenities'),
         fetchOverlay('places'),
         fetchOverlay('labels'),
+        fetchOverlay('directory'),
       ]);
 
     if (buildings.status === 'fulfilled') {
@@ -1218,6 +1372,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       buildSearchIndex();
     } else {
       console.error(places.reason);
+    }
+
+    if (directory.status === 'fulfilled') {
+      campusDirectory = directory.value;
+      addDirectoryLayers();
+    } else {
+      console.error(directory.reason);
     }
 
     if (labels.status === 'fulfilled') {
@@ -1323,6 +1484,16 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
   map.on('click', async (e) => {
     if (navActive || !networkPoints) return;
+
+    // A tap on a building asks what it is rather than dropping a pin on it.
+    // The card's own buttons then set a start or destination, and they do it at
+    // the entrance node rather than wherever the finger landed.
+    const building = buildingAt(e.point);
+    if (building) {
+      showBuildingCard(e.lngLat, building);
+      return;
+    }
+    closeBuildingCard();
 
     const clicked = point([e.lngLat.lng, e.lngLat.lat]);
     // Snapping the click locally keeps the marker instant; the server snaps

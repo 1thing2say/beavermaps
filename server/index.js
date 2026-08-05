@@ -40,10 +40,11 @@ const network = JSON.parse(readFileSync(path.join(root, 'src/paths.json'), 'utf8
  * needs a restart.
  */
 const OVERLAYS = Object.fromEntries(
-  ['buildings', 'basemap', 'landcover', 'amenities', 'places', 'labels'].map((name) => [
-    name,
-    JSON.parse(readFileSync(path.join(root, `src/${name}.json`), 'utf8')),
-  ]),
+  ['buildings', 'basemap', 'landcover', 'amenities', 'places', 'labels', 'directory']
+    .map((name) => [
+      name,
+      JSON.parse(readFileSync(path.join(root, `src/${name}.json`), 'utf8')),
+    ]),
 );
 
 const buildStart = Date.now();

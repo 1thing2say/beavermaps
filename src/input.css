@@ -207,3 +207,40 @@
         }
     }
 }
+
+/* Mapbox's popup chrome gets out of the way; the card in src/building-popup.js
+   brings its own surface, border and shadow so it can follow the theme. */
+.campus-popup .mapboxgl-popup-content {
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0.5rem;
+}
+
+.campus-popup .mapboxgl-popup-close-button {
+    width: 1.75rem;
+    height: 1.75rem;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: #9ca3af;
+}
+
+.campus-popup .mapboxgl-popup-close-button:hover {
+    background: transparent;
+    color: #374151;
+}
+
+[data-theme="dark"] .campus-popup .mapboxgl-popup-close-button:hover {
+    color: #e5e7eb;
+}
+
+/* The tip is drawn from the popup's own background, which is now transparent. */
+.campus-popup .mapboxgl-popup-tip {
+    border-top-color: #ffffff;
+    border-bottom-color: #ffffff;
+}
+
+[data-theme="dark"] .campus-popup .mapboxgl-popup-tip {
+    border-top-color: #262626;
+    border-bottom-color: #262626;
+}
