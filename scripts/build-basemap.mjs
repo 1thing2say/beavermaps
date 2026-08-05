@@ -96,7 +96,9 @@ const LAYERS = [
   /*  7 */ { kind: 'label', keep: false, text: true }, // public street names, nothing else
   /*  8 */ { kind: 'walkway', text: ['#4d4d4f', '#fff'] }, // footpath network + path names
   /*  9 */ { kind: 'tree' },                        // 509 canopies
-  /* 10 */ { kind: 'building', by: { '#37afcb': 'pool', '#8c8c8c': 'closed' } },
+  // The stroke-only entries here are 27 evenly spaced 13.9 m rules, 24 of them
+  // at STADIUM and 3 at Main Gym: the seating rows on the grandstands.
+  /* 10 */ { kind: 'building', by: { '#37afcb': 'pool', '#8c8c8c': 'closed', none: 'bleachers' } },
   /* 11 */ { kind: 'shrub' },                       // small planting, median 6 m2
   /* 12 */ { kind: 'marker', text: ['#fff'] },      // P badges and permit machines, mixed
   /* 13 */ { kind: 'crossing' },                    // crossing and stair hatching
@@ -180,6 +182,16 @@ function toPolygons(rings) {
   return polys;
 }
 
+/**
+ * RFC 7946 winding: exteriors counter-clockwise, holes clockwise.
+ *
+ * This must run on lon/lat, never on SVG units. SVG y grows downward and the
+ * projection flips it, so the shoelace sign inverts — winding before projecting
+ * gives every ring exactly the wrong hand. build-landcover.mjs did that and its
+ * 593 exteriors are all backwards; build-buildings.mjs projects first and is
+ * right. Mapbox tolerates either, so nothing renders wrong and it only surfaces
+ * when the file reaches something that follows the spec.
+ */
 const wind = (ring, exterior) => ((shoelace(ring) >= 0) === exterior ? ring : [...ring].reverse());
 const toWgs = (pts) => pts.map((p) => {
   const [lon, lat] = project(p);
@@ -204,6 +216,11 @@ for (const el of elements) {
 
   const fill = norm(el.attrs.fill);
   const stroke = norm(el.attrs.stroke);
+  const painted = (f) => f && f !== 'none';
+  // One element in layer 10 is fill:none with no stroke. It draws nothing, and
+  // carrying it forward would put a feature in the file that cannot be seen.
+  if (!painted(fill) && !painted(stroke)) { bump('invisible_skipped'); continue; }
+
   const kind = layer.by?.[fill] ?? layer.kind;
   bump(kind);
   if (layer.keep === false) hidden += 1;
@@ -229,7 +246,7 @@ for (const el of elements) {
 
   if (closed.length) {
     const polys = toPolygons(closed).map((rings) =>
-      rings.map((ring, n) => toWgs(wind(ring, n === 0))));
+      rings.map((ring, n) => wind(toWgs(ring), n === 0)));
     if (polys.length === 1) emit({ type: 'Polygon', coordinates: polys[0] });
     else emit({ type: 'MultiPolygon', coordinates: polys });
     // A few elements mix a closed ring with a stray open one; the open part is

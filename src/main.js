@@ -73,7 +73,6 @@ const THEMES = {
     casing: '#101c1a',
     route: '#00ffcc',
     building: '#3b4a63',
-    buildingFill: '#39404f',
     buildingLine: '#20252f',
     mask: '#2f3546',
     label: '#ccd5e6',
@@ -109,7 +108,6 @@ const THEMES = {
     casing: '#0f3d38',
     route: '#0d9488',
     building: '#c7cdda',
-    buildingFill: '#fbfaf6',
     buildingLine: '#9ba4b1',
     mask: '#ece7db',
     label: '#3b4757',
@@ -157,7 +155,6 @@ const SATELLITE = {
   // a photograph of the actual lawns and car parks hides the better data. The
   // amenity symbols and place labels stay, because the imagery carries neither.
   land: null,
-  buildingFill: null,
   buildingLine: null,
   label: '#ffffff',
   labelHalo: '#101828',
@@ -513,7 +510,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const lineColour = sheetPaint(
       { walkway: land.walkway, driveway: land.driveway, offsite_road: land.offsite_road, crossing: land.crossing },
       'stroke',
-      { building: colors.buildingLine, sport: colors.sportLine },
+      { building: colors.buildingLine, bleachers: colors.buildingLine, sport: colors.sportLine },
     );
 
     if (map.getLayer('campus-sheet-fill')) {
@@ -563,54 +560,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         'line-emissive-strength': 1,
       },
     }, anchor);
-  }
-
-  /**
-   * Footprints drawn flat, always.
-   *
-   * addBuildingsLayer extrudes the same source, but only while navigating. On
-   * its own that was fine when the campus was an empty mask; now that the ground
-   * cover is drawn, leaving the buildings out means the map shows my campus's lawns,
-   * trees and parking aisles with nothing standing on them. This is the 2D
-   * counterpart, and the extrusion still takes over during navigation.
-   */
-  function addBuildingFillLayer() {
-    const colors = palette(currentBasemap, currentTheme);
-
-    // Over imagery the real roofs are already there — see SATELLITE.
-    if (!colors.buildingFill) {
-      for (const id of ['campus-building-fill', 'campus-building-line']) {
-        if (map.getLayer(id)) map.removeLayer(id);
-      }
-      return;
-    }
-    if (map.getLayer('campus-building-fill')) {
-      map.setPaintProperty('campus-building-fill', 'fill-color', colors.buildingFill);
-      map.setPaintProperty('campus-building-line', 'line-color', colors.buildingLine);
-      return;
-    }
-    if (!campusBuildings) return; // still in flight; addNetworkLayers re-runs
-
-    if (!map.getSource('campus-buildings')) {
-      map.addSource('campus-buildings', { type: 'geojson', data: campusBuildings });
-    }
-    const before = map.getLayer('network-lines') ? 'network-lines' : undefined;
-    map.addLayer({
-      id: 'campus-building-fill',
-      type: 'fill',
-      source: 'campus-buildings',
-      slot: 'middle',
-      paint: { 'fill-color': colors.buildingFill, 'fill-emissive-strength': 1 },
-    }, before);
-    // my campus outlines every footprint, and without it adjacent buildings in a
-    // terrace merge into one shape.
-    map.addLayer({
-      id: 'campus-building-line',
-      type: 'line',
-      source: 'campus-buildings',
-      slot: 'middle',
-      paint: { 'line-color': colors.buildingLine, 'line-width': 0.8 },
-    }, before);
   }
 
   /**
@@ -854,7 +803,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     addCampusMask();
     addBasemapLayers();
-    addBuildingFillLayer();
 
     if (!map.getSource('custom-network')) {
       map.addSource('custom-network', { type: 'geojson', data: customNetwork ?? EMPTY });
@@ -1230,7 +1178,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     if (buildings.status === 'fulfilled') {
       campusBuildings = buildings.value;
-      addBuildingFillLayer();
       if (navActive) addBuildingsLayer();
     } else {
       console.error(buildings.reason);

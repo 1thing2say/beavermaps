@@ -153,6 +153,31 @@ runnable from a bare clone** — but every output they produce is committed. Eac
 script's header carries its own derivation, including the measurements that
 ruled out the approaches that did not work.
 
+### Tests
+
+```bash
+npm test          # node --test, no framework
+```
+
+The suite runs against the committed artifacts rather than the generators, so it
+works from a bare clone. It is aimed at the failures that do not announce
+themselves:
+
+- **the walkable network is one connected component.** A fragmented graph draws
+  identically and fails only when someone asks for a route across the split.
+- **draw order and ring winding** in `basemap.json`. Mapbox tolerates backwards
+  winding, so this never appears as a rendering bug — it appears when the file
+  reaches anything that follows RFC 7946.
+- **the joins between files**: every amenity class has an icon registered in
+  `map-images.js`, and every place resolves onto the routing graph.
+- **the letterform mask**, checked where it acts — on the layers that carry text
+  — rather than by counting small shapes, because the sheet is full of
+  legitimately small things.
+- `maneuvers.js` directly, including that collinear vertices never become a turn.
+
+Each of those was confirmed to fail when the thing it guards is deliberately
+broken; a test that has never been red is not evidence of anything.
+
 ## License
 
 ISC (see `package.json`).

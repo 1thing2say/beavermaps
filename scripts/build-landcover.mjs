@@ -104,6 +104,8 @@ function toPolygons(rings) {
  * GeoJSON's right-hand rule: exterior counter-clockwise, holes clockwise.
  * Projecting flips the sign, because SVG y grows downward and latitude grows up.
  */
+// Must run on lon/lat: SVG y grows downward and the projection flips it, so
+// winding in SVG units gives every ring the wrong hand.
 function wind(ring, exterior) {
   const ccw = shoelace(ring) >= 0;
   return ccw === exterior ? ring : [...ring].reverse();
@@ -152,7 +154,7 @@ for (const { kind, fill } of CLASSES) {
         properties: { kind, area_m2: Math.round(m2) },
         geometry: {
           type: 'Polygon',
-          coordinates: poly.map((ring, i) => wind(ring, i === 0).map(project)),
+          coordinates: poly.map((ring, i) => wind(ring.map(project), i === 0)),
         },
       });
     }
