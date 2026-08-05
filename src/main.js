@@ -8,6 +8,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import campusBoundary from './campus-boundary.json';
 import { point, lineString, featureCollection } from '@turf/helpers';
 import { nearestPoint } from '@turf/nearest-point';
+import { distance } from '@turf/distance';
 import { nearestPointOnLine } from '@turf/nearest-point-on-line';
 import { along } from '@turf/along';
 import { bearing } from '@turf/bearing';
@@ -329,7 +330,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       map.getSource('calculated-route').setData(EMPTY);
     }
 
-    // Reset UI
+    // Reset UI. The search box is cleared too: leaving a destination showing
+    // next to "Not set" is the kind of stale text people act on.
+    pendingEnd = null;
+    if (searchInput) {
+      searchInput.value = '';
+      searchClear.classList.add('hidden');
+      closeResults();
+    }
     setStatus("Click on the map to set a start point.");
     startCoordText.textContent = "Not set";
     endCoordText.textContent = "Not set";
@@ -1160,6 +1168,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         type: 'FeatureCollection',
         features: places.value.features.filter((feature) => feature.geometry),
       };
+      buildSearchIndex();
     } else {
       console.error(places.reason);
     }
@@ -1194,50 +1203,47 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     map.getSource('custom-network').setData(customNetwork);
   });
 
-  map.on('click', async (e) => {
-    if (navActive || !networkPoints) return;
+  // -------------------------------------------------------------------------
+  // Setting the two ends
+  //
+  // Both the map click and the search box arrive here, so a searched
+  // destination and a clicked one behave identically from this point on.
+  // -------------------------------------------------------------------------
 
-    const clicked = point([e.lngLat.lng, e.lngLat.lat]);
-    // Snapping the click locally keeps the marker instant; the server snaps
-    // again on its own side, and lands on the same vertex.
-    const snappedPoint = nearestPoint(clicked, networkPoints);
-    const snappedCoords = snappedPoint.geometry.coordinates;
-    const formattedCoords = `${snappedCoords[1].toFixed(4)}, ${snappedCoords[0].toFixed(4)}`;
+  const coordLabel = (c) => `${c[1].toFixed(4)}, ${c[0].toFixed(4)}`;
 
-    // Clear map if both points are already set and user clicks again
-    if (startPoint && endPoint) {
-      resetMap();
-    }
+  /** A destination chosen before a start point, held until there is one. */
+  let pendingEnd = null;
 
-    if (!startPoint) {
-      startPoint = snappedPoint;
-      startMarker = new mapboxgl.Marker({ color: '#22c55e' }) // Tailwind green-500
-        .setLngLat(snappedCoords)
-        .addTo(map);
-
-      startCoordText.textContent = formattedCoords;
-      setStatus("Great! Now click to set an end point.");
-      return;
-    }
-
-    endPoint = snappedPoint;
-    endMarker = new mapboxgl.Marker({ color: '#ef4444' }) // Tailwind red-500
-      .setLngLat(snappedCoords)
+  function placeStart(coords, label) {
+    startPoint = point(coords);
+    startMarker?.remove();
+    startMarker = new mapboxgl.Marker({ color: '#22c55e' }) // Tailwind green-500
+      .setLngLat(coords)
       .addTo(map);
+    startCoordText.textContent = label ?? coordLabel(coords);
+  }
 
-    endCoordText.textContent = formattedCoords;
+  async function placeEnd(coords, label) {
+    endPoint = point(coords);
+    endMarker?.remove();
+    endMarker = new mapboxgl.Marker({ color: '#ef4444' }) // Tailwind red-500
+      .setLngLat(coords)
+      .addTo(map);
+    endCoordText.textContent = label ?? coordLabel(coords);
     setStatus('Calculating route…');
 
     // Guard against a stale response landing after the user has moved on.
     const seq = ++requestSeq;
     let result;
     try {
-      result = await requestRoute(startPoint.geometry.coordinates, snappedCoords);
+      result = await requestRoute(startPoint.geometry.coordinates, coords);
     } catch (error) {
       console.error(error);
       setStatus('Routing server unreachable — is `npm run dev` still running?', true);
       endPoint = null;
       endMarker.remove();
+      endMarker = null;
       return;
     }
     if (seq !== requestSeq) return;
@@ -1247,6 +1253,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       distanceText.innerHTML = 'N/A';
       endPoint = null;
       endMarker.remove();
+      endMarker = null;
       return;
     }
 
@@ -1265,5 +1272,229 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const turns = maneuvers.length - 2;
     setStatus(`Route calculated — ${turns} turn${turns === 1 ? '' : 's'}.`);
     setNavButtonsEnabled(true);
+  }
+
+  map.on('click', async (e) => {
+    if (navActive || !networkPoints) return;
+
+    const clicked = point([e.lngLat.lng, e.lngLat.lat]);
+    // Snapping the click locally keeps the marker instant; the server snaps
+    // again on its own side, and lands on the same vertex.
+    const snapped = nearestPoint(clicked, networkPoints).geometry.coordinates;
+
+    // Both ends already set: start over rather than accumulating markers.
+    if (startPoint && endPoint) resetMap();
+
+    if (!startPoint) {
+      placeStart(snapped);
+      // A destination picked before a start has been waiting for exactly this.
+      if (pendingEnd) {
+        const { coords, name } = pendingEnd;
+        pendingEnd = null;
+        await placeEnd(coords, name);
+      } else {
+        setStatus('Great! Now click to set an end point.');
+      }
+      return;
+    }
+
+    await placeEnd(snapped);
+  });
+
+  // -------------------------------------------------------------------------
+  // Destination search
+  //
+  // Over places.json, which is my campus's own directory rather than anything derived
+  // — 120 rows, names and descriptions as they publish them. Their descriptions
+  // enumerate what is inside each building ("This building consists of Board
+  // Room, Cafeteria…"), so searching "cafeteria" has to find Student Center;
+  // that is why descriptions are in the haystack and not just the names.
+  //
+  // Every row is bound to routing nodes, so a chosen destination is already a
+  // graph vertex and needs no snapping.
+  // -------------------------------------------------------------------------
+
+  const searchInput = document.getElementById('place-search');
+  const searchResults = document.getElementById('place-results');
+  const searchClear = document.getElementById('place-clear');
+
+  const MAX_RESULTS = 8;
+  let searchIndex = [];
+  let searchHits = [];
+  let activeHit = -1;
+
+  const normalise = (s) => (s ?? '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+  function buildSearchIndex() {
+    // my campus lists a class like "Defibrillator" once per node, which build-places
+    // splits into one feature each. Six identical rows in a result list is
+    // noise, so they collapse to one entry holding every position.
+    const groups = new Map();
+    for (const feature of campusPlaces.features) {
+      const { name, description } = feature.properties;
+      const group = groups.get(name) ?? { name, description, points: [] };
+      group.points.push(feature.geometry.coordinates);
+      groups.set(name, group);
+    }
+    searchIndex = [...groups.values()].map((group) => ({
+      ...group,
+      nameKey: normalise(group.name),
+      haystack: normalise(`${group.name} ${group.description ?? ''}`),
+    }));
+    searchInput.disabled = false;
+  }
+
+  /** 0 when a term is absent. Higher is a better place for it to have matched. */
+  function scoreTerm(entry, term) {
+    if (entry.nameKey === term) return 100;
+    if (entry.nameKey.startsWith(`${term} `) || entry.nameKey === term) return 80;
+    if (entry.nameKey.split(' ').some((w) => w.startsWith(term))) return 60;
+    if (entry.nameKey.includes(term)) return 35;
+    if (entry.haystack.includes(term)) return 12;
+    return 0;
+  }
+
+  function runSearch(query) {
+    const terms = normalise(query).split(' ').filter(Boolean);
+    if (!terms.length) return [];
+    const scored = [];
+    for (const entry of searchIndex) {
+      let total = 0;
+      // Every term has to land somewhere, so "student center" cannot match a
+      // row that only has "student".
+      for (const term of terms) {
+        const score = scoreTerm(entry, term);
+        if (!score) { total = 0; break; }
+        total += score;
+      }
+      // Shorter names break ties, so "Library" beats "Lockers for Library".
+      if (total) scored.push({ entry, score: total - entry.nameKey.length / 1000 });
+    }
+    return scored.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS).map((s) => s.entry);
+  }
+
+  function closeResults() {
+    searchResults.classList.add('hidden');
+    searchResults.replaceChildren();
+    searchInput.setAttribute('aria-expanded', 'false');
+    searchInput.removeAttribute('aria-activedescendant');
+    searchHits = [];
+    activeHit = -1;
+  }
+
+  function highlight(index) {
+    activeHit = index;
+    [...searchResults.children].forEach((li, i) => {
+      const on = i === index;
+      li.setAttribute('aria-selected', String(on));
+      li.classList.toggle('bg-cyan-50', on);
+      li.classList.toggle('dark:bg-neutral-700', on);
+    });
+    if (index >= 0) {
+      searchInput.setAttribute('aria-activedescendant', `place-result-${index}`);
+      searchResults.children[index]?.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function renderResults(hits) {
+    searchHits = hits;
+    if (!hits.length) { closeResults(); return; }
+    searchResults.replaceChildren(...hits.map((entry, i) => {
+      const li = document.createElement('li');
+      li.id = `place-result-${i}`;
+      li.setAttribute('role', 'option');
+      li.className = 'px-3 py-2 cursor-pointer hover:bg-cyan-50 dark:hover:bg-neutral-700';
+      const name = document.createElement('div');
+      name.className = 'text-gray-800 dark:text-gray-100';
+      name.textContent = entry.name;
+      li.append(name);
+      // Only worth a second line when it says something the name did not.
+      const hint = entry.points.length > 1
+        ? `${entry.points.length} locations`
+        : entry.description;
+      if (hint) {
+        const sub = document.createElement('div');
+        sub.className = 'text-xs text-gray-500 dark:text-gray-400 line-clamp-2';
+        sub.textContent = hint;
+        li.append(sub);
+      }
+      li.addEventListener('mousedown', (event) => {
+        // mousedown, not click: blur would close the list first.
+        event.preventDefault();
+        chooseDestination(entry);
+      });
+      return li;
+    }));
+    searchResults.classList.remove('hidden');
+    searchInput.setAttribute('aria-expanded', 'true');
+    highlight(0);
+  }
+
+  /** The instance of a multi-location entry nearest whatever we can measure from. */
+  function nearestInstance(entry) {
+    if (entry.points.length === 1) return entry.points[0];
+    const from = startPoint?.geometry.coordinates ?? map.getCenter().toArray();
+    return entry.points.reduce((best, candidate) => (
+      distance(point(candidate), point(from)) < distance(point(best), point(from))
+        ? candidate : best
+    ));
+  }
+
+  async function chooseDestination(entry) {
+    const coords = nearestInstance(entry);
+    searchInput.value = entry.name;
+    searchClear.classList.remove('hidden');
+    closeResults();
+    searchInput.blur();
+
+    if (startPoint && endPoint) resetMap();
+
+    map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 17), duration: 900 });
+
+    if (!startPoint) {
+      pendingEnd = { coords, name: entry.name };
+      endMarker?.remove();
+      endMarker = new mapboxgl.Marker({ color: '#ef4444' }).setLngLat(coords).addTo(map);
+      endCoordText.textContent = entry.name;
+      setStatus(`${entry.name} — now click the map to set where you are starting from.`);
+      return;
+    }
+    await placeEnd(coords, entry.name);
+  }
+
+  searchInput.addEventListener('input', () => {
+    searchClear.classList.toggle('hidden', !searchInput.value);
+    renderResults(runSearch(searchInput.value));
+  });
+
+  searchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { closeResults(); return; }
+    if (!searchHits.length) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      highlight((activeHit + 1) % searchHits.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      highlight((activeHit - 1 + searchHits.length) % searchHits.length);
+    } else if (event.key === 'Enter' && activeHit >= 0) {
+      event.preventDefault();
+      chooseDestination(searchHits[activeHit]);
+    }
+  });
+
+  searchInput.addEventListener('focus', () => {
+    if (searchInput.value) renderResults(runSearch(searchInput.value));
+  });
+  searchInput.addEventListener('blur', () => setTimeout(closeResults, 0));
+
+  searchClear.addEventListener('click', () => {
+    searchInput.value = '';
+    searchClear.classList.add('hidden');
+    closeResults();
+    searchInput.focus();
   });
 }

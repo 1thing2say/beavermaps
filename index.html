@@ -73,10 +73,27 @@
                     Click on the map to set a start point.
                 </p>
 
+                <!--
+                  Destination search over my campus's own directory (src/places.json).
+                  Every entry is bound to a routing node, so picking one lands on
+                  a graph vertex exactly rather than being snapped to the nearest.
+                -->
+                <div class="relative mb-4">
+                    <label for="place-search" class="sr-only">Search for a destination</label>
+                    <input id="place-search" type="text" role="combobox" autocomplete="off"
+                        aria-expanded="false" aria-controls="place-results" aria-autocomplete="list"
+                        placeholder="Search buildings and services" disabled
+                        class="w-full text-sm rounded-md border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-900 text-gray-800 dark:text-gray-100 px-3 py-2 pr-8 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:opacity-50">
+                    <button id="place-clear" type="button" aria-label="Clear search"
+                        class="hidden absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-xl leading-none">&times;</button>
+                    <ul id="place-results" role="listbox" aria-label="Matching destinations"
+                        class="hidden absolute z-30 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 shadow-lg text-sm"></ul>
+                </div>
+
                 <div class="space-y-3 mb-4 text-sm font-medium text-gray-700 dark:text-gray-300">
                     <div class="flex items-start gap-3">
                         <div class="w-4 h-4 rounded-full bg-green-500 mt-0.5 flex-shrink-0 shadow-sm border border-green-700"></div>
-                        <div class="flex flex-col">
+                        <div class="flex flex-col min-w-0">
                             <span class="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">Start Point</span>
                             <span id="start-coord" class="truncate">Not set</span>
                         </div>
@@ -84,7 +101,7 @@
 
                     <div class="flex items-start gap-3">
                         <div class="w-4 h-4 rounded-full bg-red-500 mt-0.5 flex-shrink-0 shadow-sm border border-red-700"></div>
-                        <div class="flex flex-col">
+                        <div class="flex flex-col min-w-0">
                             <span class="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">End Point</span>
                             <span id="end-coord" class="truncate">Not set</span>
                         </div>
