@@ -18,7 +18,7 @@ import {
   FEET_PER_KM,
 } from './maneuvers.js';
 import { maneuverIcon } from './nav-icons.js';
-import { loadAmenityIcons } from './amenity-icons.js';
+import { loadAmenityIcons, loadLabelPlate } from './map-images.js';
 import { createThemeToggle, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
 
@@ -75,6 +75,9 @@ const THEMES = {
     mask: '#2f3546',
     label: '#ccd5e6',
     labelHalo: '#181d29',
+    areaLabel: '#a9c08c',
+    plate: '#1e232d',
+    plateText: '#eaf0fb',
     land: {
       lawn: '#2b3a2f',
       tree: '#3a5341',
@@ -97,6 +100,9 @@ const THEMES = {
     mask: '#ece7db',
     label: '#3b4757',
     labelHalo: '#f8f5ee',
+    areaLabel: '#5d6d49',
+    plate: '#4e4e4f',
+    plateText: '#ffffff',
     land: {
       lawn: '#d5e2b2',
       tree: '#9cba7c',
@@ -132,6 +138,9 @@ const SATELLITE = {
   buildingLine: null,
   label: '#ffffff',
   labelHalo: '#101828',
+  areaLabel: '#ffffff',
+  plate: '#151b28',
+  plateText: '#ffffff',
 };
 
 /** Layer colours and basemap style for the current basemap/theme pair. */
@@ -198,6 +207,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let campusLandcover = null;
   let campusAmenities = null;
   let campusPlaces = null;
+  let campusLabels = null;
 
   // State variables
   let startMarker = null;
@@ -540,46 +550,103 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }).catch((error) => console.error('amenity icons unavailable:', error));
   }
 
-  function addPlaceLayer() {
+  /**
+   * The printed map's own labels.
+   *
+   * These used to come from places.json, which is my campus's destination database —
+   * names written to be unambiguous in a search box, not on a map, so the
+   * Portable Village arrived as "Manufacturing, Construction, and Transportation
+   * Division - Portable Village, Room 603B". scripts/build-labels.mjs takes what
+   * their cartographer actually set instead: "Library", "Main Gym", "STADIUM".
+   * places.json is still what search reads; it was only ever wrong for labels.
+   *
+   * Three layers rather than one because the sheet sets three kinds of label and
+   * they differ in more than colour: areas are letterspaced capitals, and the
+   * larger building names are reversed out of a dark plate, which needs an icon
+   * behind the text that a single layer cannot apply selectively.
+   */
+  const LABEL_KINDS = ['area', 'plate', 'building'];
+
+  /**
+   * Text size from the label's own point size on the sheet, so my campus's hierarchy
+   * survives — Library is 13.1 pt against Oak Cafe's 6.6 and stays bigger here.
+   * Ground-true scaling was tried and grows far too fast, roughly doubling per
+   * zoom level; this is gentler and stays readable across the useful range.
+   */
+  const labelSize = (scale) => [
+    'interpolate', ['linear'], ['zoom'],
+    15, ['*', ['get', 'pt'], 1.1 * scale],
+    17, ['*', ['get', 'pt'], 1.45 * scale],
+    19, ['*', ['get', 'pt'], 1.9 * scale],
+  ];
+
+  function addLabelLayers() {
     const colors = palette(currentBasemap, currentTheme);
 
-    if (map.getLayer('campus-places')) {
-      map.setPaintProperty('campus-places', 'text-color', colors.label);
-      map.setPaintProperty('campus-places', 'text-halo-color', colors.labelHalo);
+    // An image cannot be recoloured in place, so the plate is re-registered.
+    if (campusLabels) loadLabelPlate(map, colors.plate);
+
+    if (map.getLayer('campus-labels-building')) {
+      map.setPaintProperty('campus-labels-building', 'text-color', colors.label);
+      map.setPaintProperty('campus-labels-building', 'text-halo-color', colors.labelHalo);
+      map.setPaintProperty('campus-labels-area', 'text-color', colors.areaLabel);
+      map.setPaintProperty('campus-labels-area', 'text-halo-color', colors.labelHalo);
+      map.setPaintProperty('campus-labels-plate', 'text-color', colors.plateText);
       return;
     }
-    if (!campusPlaces) return;
+    if (!campusLabels) return;
 
-    if (!map.getSource('campus-places')) {
-      map.addSource('campus-places', { type: 'geojson', data: campusPlaces });
+    if (!map.getSource('campus-labels')) {
+      map.addSource('campus-labels', { type: 'geojson', data: campusLabels });
     }
-    map.addLayer({
-      id: 'campus-places',
+
+    const common = {
       type: 'symbol',
-      source: 'campus-places',
+      source: 'campus-labels',
       slot: 'middle',
-      minzoom: 16,
-      // The file is the whole directory, including the rows my campus lists with no
-      // room of their own; only the ones that resolved to a single building
-      // get a label. See scripts/build-places.mjs.
-      filter: ['==', ['get', 'kind'], 'place'],
-      layout: {
-        'text-field': ['get', 'name'],
-        'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 16, 10, 19, 13],
-        'text-max-width': 9,
-        'text-line-height': 1.1,
-        // my campus's own ordering, so when two labels collide the one their app
-        // considers more important is the one that survives.
-        'symbol-sort-key': ['get', 'sortPriority'],
-      },
-      paint: {
-        'text-color': colors.label,
-        'text-halo-color': colors.labelHalo,
-        'text-halo-width': 1.4,
-        'text-emissive-strength': 1,
-      },
-    });
+      // Below this the campus is a few hundred pixels wide and the labels are
+      // stacked on top of each other.
+      minzoom: 15,
+    };
+    // Bigger type wins a collision, which is my campus's own hierarchy again.
+    const sortKey = ['-', 0, ['get', 'pt']];
+
+    for (const kind of LABEL_KINDS) {
+      const area = kind === 'area';
+      const plate = kind === 'plate';
+      map.addLayer({
+        ...common,
+        id: `campus-labels-${kind}`,
+        filter: ['==', ['get', 'kind'], kind],
+        layout: {
+          'text-field': ['get', 'text'],
+          'text-font': area
+            ? ['DIN Pro Bold', 'Arial Unicode MS Bold']
+            : ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+          'text-size': labelSize(area ? 0.95 : 1),
+          // The sheet breaks its own labels at about this width, so keeping to
+          // it reproduces the same line breaks.
+          'text-max-width': 8,
+          'text-line-height': 1.05,
+          'text-letter-spacing': area ? 0.14 : 0,
+          'symbol-sort-key': sortKey,
+          ...(plate ? {
+            'icon-image': 'label-plate',
+            'icon-text-fit': 'both',
+            'icon-text-fit-padding': [3, 6, 3, 6],
+          } : {}),
+        },
+        paint: {
+          'text-color': area ? colors.areaLabel : plate ? colors.plateText : colors.label,
+          // A plate is its own background; a halo on top of it only muddies the
+          // edge of the type.
+          'text-halo-color': colors.labelHalo,
+          'text-halo-width': plate ? 0 : 1.4,
+          'text-emissive-strength': 1,
+          'icon-emissive-strength': 1,
+        },
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -743,7 +810,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     // Last, so the symbols and labels sit above the route rather than under it.
     addAmenityLayer();
-    addPlaceLayer();
+    addLabelLayers();
 
     if (navActive) addBuildingsLayer();
     map.getCanvas().style.cursor = 'crosshair';
@@ -1053,13 +1120,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // All from the same server, so ask together. They are settled separately
     // because only the network is load-bearing: without it nothing can be
     // routed, whereas every overlay is decoration and its loss costs one layer.
-    const [networkResult, buildings, landcover, amenities, places] =
+    const [networkResult, buildings, landcover, amenities, places, labels] =
       await Promise.allSettled([
         fetchNetwork(),
         fetchOverlay('buildings'),
         fetchOverlay('landcover'),
         fetchOverlay('amenities'),
         fetchOverlay('places'),
+        fetchOverlay('labels'),
       ]);
 
     if (buildings.status === 'fulfilled') {
@@ -1092,9 +1160,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         type: 'FeatureCollection',
         features: places.value.features.filter((feature) => feature.geometry),
       };
-      addPlaceLayer();
     } else {
       console.error(places.reason);
+    }
+
+    if (labels.status === 'fulfilled') {
+      campusLabels = labels.value;
+      addLabelLayers();
+    } else {
+      console.error(labels.reason);
     }
 
     if (networkResult.status === 'rejected') {

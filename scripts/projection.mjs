@@ -115,6 +115,37 @@ export const TOP_LAT = 38.653866848;
 export const SVG_TO_LON = 0.000018957771;
 export const SVG_TO_LAT = 0.000014855558;
 
+/**
+ * PDF page points -> WGS84, for campus-data/wayfind/external/campus-map.pdf.
+ *
+ * That PDF is the same vector drawing as ActiveMap.svg — measured, not assumed:
+ * fitting its page space to src/buildings.json by iterated mutual-nearest over
+ * building centroids gives a median residual of 0.07 m across 49 pairs under
+ * plain least squares, 90% of them inside 3 cm, one outlier at 3.1 m. A per-axis
+ * scale+offset maps one onto the other exactly.
+ *
+ * Least squares is what is quoted. The IRLS fit reports 0.01 m, but a robust fit
+ * whose residuals collapse toward zero is largely marking its own homework.
+ *
+ * The anisotropy is real: 1.3979 m/pt in x against 1.4023 in y, a difference of
+ * -0.32%. The artwork was placed on the letter sheet at a slightly non-uniform
+ * scale. It is absorbed here rather than averaged away.
+ *
+ * Used only by build-labels.mjs, which lifts the printed map's own label text.
+ * Everything else reads the SVG and wants the transform below.
+ */
+export const PDF_TO_LON = 0.000016079053;
+export const PDF_LON_0 = -121.3515446398;
+export const PDF_TO_LAT = -0.000012597203;
+export const PDF_LAT_0 = 38.6547489481;
+
+export function projectPdf([x, y]) {
+  return [
+    Number((PDF_LON_0 + x * PDF_TO_LON).toFixed(DECIMALS)),
+    Number((PDF_LAT_0 + y * PDF_TO_LAT).toFixed(DECIMALS)),
+  ];
+}
+
 /** Ground metres per SVG unit, along each axis. */
 export const M_PER_UNIT_X = 1.6503;
 export const M_PER_UNIT_Y = 1.6491;

@@ -35,7 +35,7 @@ const network = JSON.parse(readFileSync(path.join(root, 'src/paths.json'), 'utf8
  * needs a restart.
  */
 const OVERLAYS = Object.fromEntries(
-  ['buildings', 'landcover', 'amenities', 'places'].map((name) => [
+  ['buildings', 'landcover', 'amenities', 'places', 'labels'].map((name) => [
     name,
     JSON.parse(readFileSync(path.join(root, `src/${name}.json`), 'utf8')),
   ]),

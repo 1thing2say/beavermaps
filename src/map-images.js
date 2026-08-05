@@ -1,4 +1,7 @@
-// Amenity pictograms for the symbol layer, drawn as SVG rather than shipped as
+// Images registered with the map at runtime: the amenity pictograms, and the
+// plate that sits behind a label.
+//
+// Amenity pictograms are drawn as SVG rather than shipped as
 // a sprite sheet so there is no binary asset to keep in step with the data.
 //
 // The set is deliberately one shape — a filled disc with a white glyph — so a
@@ -75,6 +78,41 @@ function svgFor(kind) {
 }
 
 export const AMENITY_KINDS = Object.keys(COLOURS);
+
+// --- label plate ------------------------------------------------------------
+
+const PLATE = 32;
+const PLATE_RADIUS = 7;
+
+/**
+ * The rounded plate my campus sets its larger building names on, in white out of a
+ * dark box. Registered as a stretchable image so `icon-text-fit` can size one
+ * plate to any label rather than needing one asset per name.
+ *
+ * The stretch bands exclude the corner radius, which is what stops the corners
+ * being smeared as the box widens. Re-registered on a theme change, because the
+ * plate colour follows the theme and an image cannot be recoloured in place.
+ */
+export function loadLabelPlate(map, colour, id = 'label-plate') {
+  const canvas = document.createElement('canvas');
+  canvas.width = PLATE;
+  canvas.height = PLATE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  ctx.roundRect(0, 0, PLATE, PLATE, PLATE_RADIUS);
+  ctx.fill();
+
+  const edge = PLATE_RADIUS + 1;
+  if (map.hasImage(id)) map.removeImage(id);
+  map.addImage(id, ctx.getImageData(0, 0, PLATE, PLATE), {
+    pixelRatio: 2,
+    stretchX: [[edge, PLATE - edge]],
+    stretchY: [[edge, PLATE - edge]],
+    content: [2, 2, PLATE - 2, PLATE - 2],
+  });
+}
 
 /**
  * Rasterise every pictogram and register it under its `kind`, so the symbol
