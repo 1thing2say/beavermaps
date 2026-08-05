@@ -83,6 +83,7 @@ const THEMES = {
     // Pitch and court markings. my campus prints them white, which at
     // fill-emissive-strength 1 glares against night ground.
     sportLine: '#66795a',
+    parkingLabel: '#9aa6bd',
     land: {
       lawn: '#2b3a2f',
       tree: '#3a5341',
@@ -116,6 +117,7 @@ const THEMES = {
     plate: '#4e4e4f',
     plateText: '#ffffff',
     sportLine: '#ffffff',
+    parkingLabel: '#6b7280',
     land: {
       lawn: '#d5e2b2',
       tree: '#9cba7c',
@@ -159,6 +161,7 @@ const SATELLITE = {
   label: '#ffffff',
   labelHalo: '#101828',
   areaLabel: '#ffffff',
+  parkingLabel: '#dbeafe',
   plate: '#151b28',
   plateText: '#ffffff',
 };
@@ -612,7 +615,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * larger building names are reversed out of a dark plate, which needs an icon
    * behind the text that a single layer cannot apply selectively.
    */
-  const LABEL_KINDS = ['area', 'plate', 'building'];
+  const LABEL_KINDS = ['area', 'plate', 'building', 'parking'];
 
   /**
    * Text size from the label's own point size on the sheet, so my campus's hierarchy
@@ -639,6 +642,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       map.setPaintProperty('campus-labels-area', 'text-color', colors.areaLabel);
       map.setPaintProperty('campus-labels-area', 'text-halo-color', colors.labelHalo);
       map.setPaintProperty('campus-labels-plate', 'text-color', colors.plateText);
+      map.setPaintProperty('campus-labels-parking', 'text-color', colors.parkingLabel);
+      map.setPaintProperty('campus-labels-parking', 'text-halo-color', colors.labelHalo);
       return;
     }
     if (!campusLabels) return;
@@ -671,9 +676,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
             ? ['DIN Pro Bold', 'Arial Unicode MS Bold']
             : ['DIN Pro Medium', 'Arial Unicode MS Regular'],
           'text-size': labelSize(area ? 0.95 : 1),
-          // The sheet breaks its own labels at about this width, so keeping to
-          // it reproduces the same line breaks.
-          'text-max-width': 8,
+          // 8 ems is where the sheet breaks its own labels, so the printed ones
+          // keep their original line breaks. The names added from my campus's database
+          // have no printed breaks to reproduce and carry a width fitted to the
+          // footprint instead — see build-labels.mjs.
+          'text-max-width': ['coalesce', ['get', 'maxWidth'], 8],
           'text-line-height': 1.05,
           'text-letter-spacing': area ? 0.14 : 0,
           'symbol-sort-key': sortKey,
@@ -684,7 +691,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           } : {}),
         },
         paint: {
-          'text-color': area ? colors.areaLabel : plate ? colors.plateText : colors.label,
+          'text-color': area ? colors.areaLabel
+            : plate ? colors.plateText
+            : kind === 'parking' ? colors.parkingLabel
+            : colors.label,
           // A plate is its own background; a halo on top of it only muddies the
           // edge of the type.
           'text-halo-color': colors.labelHalo,

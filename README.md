@@ -127,7 +127,7 @@ this campus is close to empty. The extraction lives in `scripts/`:
 | `build-basemap.mjs` | `basemap.json` — the whole printed sheet, 2,284 features |
 | `build-paths.mjs` | `paths.json` — 581 nodes, 696 walkable segments |
 | `build-buildings.mjs` | `buildings.json` — 96 footprints, 58 of them named |
-| `build-labels.mjs` | `labels.json` — 44 labels lifted from the PDF's text layer |
+| `build-labels.mjs` | `labels.json` — 49 labels: the PDF's text, plus building names |
 | `build-amenities.mjs` | `amenities.json` — 72 amenity points in 10 classes |
 | `build-places.mjs` | `places.json` — my campus's 120 destinations, positioned |
 | `build-landcover.mjs` | `landcover.json` — 593 ground polygons, superseded |
@@ -143,6 +143,23 @@ driveway linework, 555 trees, the crossings, the icons — is what makes the
 printed map look like a map, and it is what the client now draws. Classification
 comes from the artwork's own 24 Illustrator layers rather than from colour,
 because three fills each carry more than one kind of thing.
+
+Building names come from two places, in that order of preference. The printed
+sheet's own labels win wherever it sets one, because its placement carries
+information a centroid cannot: `Fine and Applied Arts` is a single 4,960 m²
+footprint carrying three printed labels — *Music*, *Theatre* and the plate —
+each set inside the wing it names. Where the sheet leaves a building bare,
+`build-labels.mjs` falls back to my campus's database name, reduces it to something a
+map can carry (`Bookstore - College Store` → `Bookstore`), and anchors it at the
+footprint's **pole of inaccessibility** — the point furthest from any wall, which
+a centroid is not: my campus has L-shaped buildings whose centroid falls on the lawn
+outside. That radius also measures how much room the building has for type, and
+sets the label's size and wrap width.
+
+Thirty-eight footprints stay unlabelled because no source names them — they are
+grandstands, annexes and service buildings. Naming them from the nearest entry in
+`places.json` was tried and rejected: it labels an 839 m² building
+*"Defibrillator"* and gives six separate portables the same name.
 
 `buildings.json` is still separate: it carries heights, and the 3D extrusion
 during navigation needs them. `landcover.json` is kept and still served, but the
