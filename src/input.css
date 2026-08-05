@@ -1,9 +1,209 @@
 @import "tailwindcss";
 
-@layer base {}
+/* Tailwind 4 keys `dark:` off the OS preference by default. We drive it from an
+   explicit attribute instead so the in-app toggle can override the OS. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+    --color-sign-slate: #4b5a74;
+}
+
+:root {
+    /* One grid colour, one cell size, nudged off the corner so the ruling never
+       lines up with the sign's edges. Proportions follow the DS menu that
+       inspired it: a 28px cell with a 3px line, roughly its 8:1 ratio. */
+    --grid-cell: 28px;
+    --grid-line: 3px;
+    --grid-offset-x: 9px;
+    --grid-offset-y: 7px;
+
+    /* Both halves of a sign swap run for this long, at the same time. */
+    --banner-swap: 320ms;
+
+    /* Seconds for the grid to drift exactly one cell. The pattern repeats every
+       cell, so translating by one cell and looping is invisibly seamless. */
+    --grid-drift: 18s;
+
+    /* Light: white sign, grid drawn darker than the background. */
+    --sign-bg: #ffffff;
+    --sign-grid: rgba(75, 90, 116, 0.14);
+    --sign-ring: rgba(75, 90, 116, 0.4);
+    --sign-text: #1f2937;
+    --sign-text-dim: rgba(31, 41, 55, 0.7);
+    --sign-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+    --sign-text-shadow: none;
+    --sign-btn: rgba(75, 90, 116, 0.12);
+    --sign-btn-hover: rgba(75, 90, 116, 0.22);
+}
+
+:root[data-theme="dark"] {
+    /* Dark: charcoal sign, grid drawn lighter than the background. */
+    --sign-bg: #292929;
+    --sign-grid: rgba(75, 90, 116, 0.35);
+    --sign-ring: rgba(75, 90, 116, 0.85);
+    --sign-text: #f5f5f5;
+    --sign-text-dim: rgba(245, 245, 245, 0.75);
+    --sign-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+    --sign-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --sign-btn: rgba(75, 90, 116, 0.35);
+    --sign-btn-hover: rgba(75, 90, 116, 0.6);
+}
+
+@layer base {
+    /* Navigation takes over the whole viewport — a 600px map inside a padded
+       page is unusable on a phone while you are actually walking. */
+    body.navigating {
+        padding: 0;
+        overflow: hidden;
+    }
+
+    body.navigating .app-chrome {
+        display: none;
+    }
+
+    body.navigating .app-shell {
+        max-width: none;
+    }
+
+    body.navigating .map-frame {
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    body.navigating #map {
+        height: 100dvh !important;
+    }
+
+    /* The "you are here" puck. */
+    .user-dot {
+        width: 18px;
+        height: 18px;
+        border-radius: 9999px;
+        background: #2d7dfa;
+        border: 3px solid #ffffff;
+        box-shadow: 0 0 0 6px rgba(45, 125, 250, 0.25), 0 2px 6px rgba(0, 0, 0, 0.4);
+    }
+}
 
 @layer components {
     .gbutton {
         @apply border-emerald-400 border rounded-2xl p-3 m-3;
+    }
+
+    /* Turn-by-turn banner: a single soft grid, like the DS system menus. Two
+       tiles the size of one cell, each drawing one line, repeated. Tiling this
+       way (rather than a repeating-gradient) is what lets background-position
+       shift the ruling off the corner. */
+    .nav-sign {
+        position: relative;
+        overflow: hidden;
+        border-radius: 0.85rem;
+        color: var(--sign-text);
+        text-shadow: var(--sign-text-shadow);
+        background-color: var(--sign-bg);
+        box-shadow:
+            inset 0 0 0 2px var(--sign-ring),
+            var(--sign-shadow);
+    }
+
+    /* The grid lives on its own layer so it can drift under the text.
+       Oversized by two cells in every direction, it is painted exactly once and
+       then moved by the compositor — animating `transform` costs no repaint,
+       whereas animating `background-position` would repaint the whole sign on
+       every frame. That, not the gradient, is what would cost a phone. */
+    .nav-sign::before {
+        content: "";
+        position: absolute;
+        inset: calc(var(--grid-cell) * -2);
+        pointer-events: none;
+        background-image:
+            linear-gradient(to bottom,
+                var(--sign-grid) 0 var(--grid-line),
+                transparent var(--grid-line)),
+            linear-gradient(to right,
+                var(--sign-grid) 0 var(--grid-line),
+                transparent var(--grid-line));
+        background-size: var(--grid-cell) var(--grid-cell);
+        background-position: var(--grid-offset-x) var(--grid-offset-y);
+        animation: grid-drift var(--grid-drift) linear infinite;
+        will-change: transform;
+    }
+
+    /* Up and to the right, by exactly one cell, forever. */
+    @keyframes grid-drift {
+        from { transform: translate3d(0, 0, 0); }
+        to   { transform: translate3d(var(--grid-cell), calc(var(--grid-cell) * -1), 0); }
+    }
+
+    /* An absolutely positioned ::before paints above static in-flow siblings, so
+       the sign's contents have to be lifted back over the grid. */
+    .nav-sign > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    .nav-sign-dim {
+        color: var(--sign-text-dim);
+    }
+
+    .nav-end-btn {
+        background-color: var(--sign-btn);
+        color: var(--sign-text);
+        transition: background-color 150ms ease;
+    }
+
+    .nav-end-btn:hover {
+        background-color: var(--sign-btn-hover);
+    }
+
+    /* A step change slides two complete signs at once. The pair moves in the
+       same direction and the same distance, so they read as one strip being
+       pulled along rather than two things crossing. No opacity fade — at the
+       midpoint they sit edge to edge, and the map frame clips the overhang. */
+    @keyframes nav-sign-out {
+        from { transform: translateX(0); }
+        to   { transform: translateX(104%); }
+    }
+
+    @keyframes nav-sign-in {
+        from { transform: translateX(-104%); }
+        to   { transform: translateX(0); }
+    }
+
+    /* The outgoing sign leaves the flow so the incoming one lands in its box. */
+    .nav-sign--out {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        animation: nav-sign-out var(--banner-swap) cubic-bezier(0.4, 0, 0.25, 1) forwards;
+    }
+
+    .nav-sign--in {
+        animation: nav-sign-in var(--banner-swap) cubic-bezier(0.4, 0, 0.25, 1) forwards;
+    }
+
+    /* The first sign of a route has nothing to replace, so it just drops in. */
+    @keyframes nav-sign-first {
+        from { transform: translateY(-115%); }
+        to   { transform: translateY(0); }
+    }
+
+    .nav-sign--first {
+        animation: nav-sign-first var(--banner-swap) cubic-bezier(0.16, 0.84, 0.32, 1) forwards;
+    }
+
+    /* Respect users who have asked the OS for less motion. */
+    @media (prefers-reduced-motion: reduce) {
+        .nav-sign--out,
+        .nav-sign--in,
+        .nav-sign--first {
+            animation-duration: 1ms;
+        }
+
+        /* A perpetually moving background is exactly what this setting is for. */
+        .nav-sign::before {
+            animation: none;
+        }
     }
 }

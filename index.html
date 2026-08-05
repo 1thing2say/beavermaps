@@ -5,51 +5,105 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Map Project - Custom Routing</title>
+    <!-- mapbox-gl.css is imported by src/main.js from the installed package, so
+         it always matches the library version rather than a pinned CDN copy. -->
     <link href="/src/input.css" rel="stylesheet">
-    <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
 </head>
 
-<body class="bg-gray-100 min-h-screen p-4 md:p-8 font-sans">
-    <div class="max-w-6xl mx-auto">
-        <h1 class="text-3xl font-bold mb-6 text-gray-800">Custom Map Router</h1>
-        
-        <div class="relative rounded-xl shadow-xl overflow-hidden border border-gray-300 bg-white">
-            
+<body class="bg-gray-100 dark:bg-neutral-900 min-h-screen p-4 md:p-8 font-sans transition-colors">
+    <div class="app-shell max-w-6xl mx-auto">
+        <div class="app-chrome flex items-center justify-between mb-6 gap-4">
+            <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-100">Custom Map Router</h1>
+            <div class="flex items-center gap-2">
+                <button id="basemap-toggle" type="button"
+                    class="flex items-center gap-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-neutral-700 transition-colors">
+                    <span id="basemap-toggle-icon" class="w-4 h-4 block"></span>
+                    <span id="basemap-toggle-label">Satellite</span>
+                </button>
+                <button id="theme-toggle" type="button"
+                    class="flex items-center gap-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-neutral-700 transition-colors">
+                    <span id="theme-toggle-icon" class="w-4 h-4 block"></span>
+                    <span id="theme-toggle-label">Dark</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="map-frame relative rounded-xl shadow-xl overflow-hidden border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-800">
+
             <!-- Map Container -->
             <div id="map" style="height: 600px; width: 100%;"></div>
 
+            <!-- Turn-by-turn banner. Hidden until navigation starts. During a
+                 step change two whole signs exist here at once: the outgoing one
+                 is taken out of flow so both occupy the same box and travel
+                 together like a filmstrip. -->
+            <div id="nav-banner" class="hidden absolute top-0 left-0 right-0 z-30 p-3">
+                <div id="nav-stack" class="relative"></div>
+            </div>
+
+            <template id="nav-sign-template">
+                <div class="nav-sign flex items-center gap-4 px-4 py-3">
+                    <div class="nav-arrow w-16 h-16 flex-shrink-0"></div>
+                    <div class="flex-1 min-w-0">
+                        <div class="nav-distance text-4xl font-bold leading-none">—</div>
+                        <div class="nav-instruction nav-sign-dim text-lg font-medium truncate mt-1">—</div>
+                    </div>
+                    <button type="button" class="nav-exit nav-end-btn flex-shrink-0 text-sm font-semibold px-4 py-2 rounded-lg">
+                        End
+                    </button>
+                </div>
+            </template>
+
+            <!-- Remaining-distance strip along the bottom, iOS-6 style. -->
+            <div id="nav-footer" class="hidden absolute bottom-0 left-0 right-0 z-30 bg-gray-900/85 dark:bg-black/80 backdrop-blur-sm text-white px-5 py-3 flex items-center justify-between">
+                <div>
+                    <div class="text-xs uppercase tracking-wider text-gray-400">Remaining</div>
+                    <div id="nav-remaining" class="text-xl font-bold">—</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-xs uppercase tracking-wider text-gray-400">Arrive in</div>
+                    <div id="nav-eta" class="text-xl font-bold">—</div>
+                </div>
+            </div>
+
             <!-- GUI Overlay -->
-            <div class="absolute top-4 left-4 bg-white/95 backdrop-blur-sm p-5 rounded-lg shadow-lg border border-gray-200 w-72 z-10">
-                <h2 class="font-bold text-xl mb-1 text-gray-800">Route Info</h2>
-                <p id="instruction-text" class="text-sm text-gray-500 mb-4 pb-3 border-b border-gray-200">
+            <div id="side-panel" class="absolute top-4 left-4 bg-white/95 dark:bg-neutral-800/95 backdrop-blur-sm p-5 rounded-lg shadow-lg border border-gray-200 dark:border-neutral-700 w-72 z-10">
+                <h2 class="font-bold text-xl mb-1 text-gray-800 dark:text-gray-100">Route Info</h2>
+                <p id="instruction-text" class="text-sm text-gray-500 dark:text-gray-400 mb-4 pb-3 border-b border-gray-200 dark:border-neutral-700">
                     Click on the map to set a start point.
                 </p>
-                
-                <div class="space-y-3 mb-4 text-sm font-medium text-gray-700">
+
+                <div class="space-y-3 mb-4 text-sm font-medium text-gray-700 dark:text-gray-300">
                     <div class="flex items-start gap-3">
                         <div class="w-4 h-4 rounded-full bg-green-500 mt-0.5 flex-shrink-0 shadow-sm border border-green-700"></div>
                         <div class="flex flex-col">
-                            <span class="text-xs text-gray-400 uppercase tracking-wider">Start Point</span>
+                            <span class="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">Start Point</span>
                             <span id="start-coord" class="truncate">Not set</span>
                         </div>
                     </div>
-                    
+
                     <div class="flex items-start gap-3">
                         <div class="w-4 h-4 rounded-full bg-red-500 mt-0.5 flex-shrink-0 shadow-sm border border-red-700"></div>
                         <div class="flex flex-col">
-                            <span class="text-xs text-gray-400 uppercase tracking-wider">End Point</span>
+                            <span class="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">End Point</span>
                             <span id="end-coord" class="truncate">Not set</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="pt-3 border-t border-gray-200 bg-gray-50 -mx-5 px-5 py-3 mt-4">
-                    <div class="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Total Distance</div>
-                    <div id="distance-text" class="text-3xl font-bold text-cyan-600">0.00 <span class="text-lg text-gray-500 font-medium">units</span></div>
+                <div class="pt-3 border-t border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-900/60 -mx-5 px-5 py-3 mt-4">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider font-semibold mb-1">Total Distance</div>
+                    <div id="distance-text" class="text-3xl font-bold text-cyan-600 dark:text-cyan-400">0 <span class="text-lg text-gray-500 dark:text-gray-400 font-medium">ft</span></div>
                 </div>
 
-                <div class="px-5 pb-5 -mx-5 bg-gray-50 rounded-b-lg">
-                    <button id="clear-btn" class="w-full bg-gray-800 text-white font-semibold py-2.5 rounded-md shadow-sm hover:bg-gray-700 hover:shadow transition-all duration-200">
+                <div class="px-5 pb-5 -mx-5 bg-gray-50 dark:bg-neutral-900/60 rounded-b-lg space-y-2">
+                    <button id="start-nav-btn" disabled class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-md shadow-sm hover:bg-emerald-500 hover:shadow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-600 disabled:hover:shadow-sm">
+                        Start Navigation
+                    </button>
+                    <button id="simulate-btn" disabled class="w-full bg-emerald-800 text-white text-sm font-semibold py-2 rounded-md shadow-sm hover:bg-emerald-700 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-800">
+                        Simulate Walk (desktop testing)
+                    </button>
+                    <button id="clear-btn" class="w-full bg-gray-800 dark:bg-neutral-700 text-white font-semibold py-2.5 rounded-md shadow-sm hover:bg-gray-700 dark:hover:bg-neutral-600 hover:shadow transition-all duration-200">
                         Clear Map
                     </button>
                 </div>

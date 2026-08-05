@@ -17,5 +17,8 @@ yarn-error.log*
 .env
 .env.*
 
+# Scraped third-party campus data (see campus-data/MANIFEST.md)
+campus-data/
+
 # Other stuff
 *Screenshot*
