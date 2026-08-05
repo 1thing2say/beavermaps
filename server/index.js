@@ -24,7 +24,22 @@ const PORT = process.env.PORT || 8080;
 // visitor's phone.
 // ---------------------------------------------------------------------------
 const network = JSON.parse(readFileSync(path.join(root, 'src/paths.json'), 'utf8'));
-const buildings = JSON.parse(readFileSync(path.join(root, 'src/buildings.json'), 'utf8'));
+
+/**
+ * Everything the client draws but never routes over, extracted from my campus's own
+ * basemap by the scripts/build-*.mjs pair of passes. None of it goes into the
+ * graph; these are served rather than bundled so ~370 kB of geometry stays out
+ * of the JS and editing the data does not mean rebuilding the front-end.
+ *
+ * Read once at boot, like the network — so like the network, changing a file
+ * needs a restart.
+ */
+const OVERLAYS = Object.fromEntries(
+  ['buildings', 'landcover', 'amenities', 'places'].map((name) => [
+    name,
+    JSON.parse(readFileSync(path.join(root, `src/${name}.json`), 'utf8')),
+  ]),
+);
 
 const buildStart = Date.now();
 // The default vertex-snapping precision is 1e-5 degrees, and the closest pair of
@@ -107,13 +122,12 @@ app.get('/api/network', (_req, res) => {
   res.json(network);
 });
 
-// Building footprints are never routed over, so unlike the network they are not
-// loaded into the graph — this endpoint exists only so the client can extrude
-// them without bundling 36 kB of geometry into the JS.
-app.get('/api/buildings', (_req, res) => {
-  res.set('Cache-Control', 'public, max-age=300');
-  res.json(buildings);
-});
+for (const [name, data] of Object.entries(OVERLAYS)) {
+  app.get(`/api/${name}`, (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(data);
+  });
+}
 
 app.get('/healthz', (_req, res) => res.json({ ok: true, vertices: vertices.length }));
 

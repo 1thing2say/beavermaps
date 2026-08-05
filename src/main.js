@@ -18,6 +18,7 @@ import {
   FEET_PER_KM,
 } from './maneuvers.js';
 import { maneuverIcon } from './nav-icons.js';
+import { loadAmenityIcons } from './amenity-icons.js';
 import { createThemeToggle, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
 
@@ -54,6 +55,13 @@ const STANDARD = 'mapbox://styles/mapbox/standard';
 // #0e111d, and raising the authored value threefold moved the rendered pixel by
 // about a tenth — so it is not a multiply that can be pre-compensated for. The
 // fix belongs in the paint spec, not in these numbers.
+//
+// `land` recolours the ground cover traced out of the same my campus sheet as the
+// buildings. It is keyed by the `kind` written by scripts/build-landcover.mjs,
+// and every key that file emits needs an entry here or that class falls back to
+// lawn. Deliberately desaturated against my campus's own print palette: their sheet is
+// a standalone illustration, whereas these sit inside Mapbox Standard and have
+// to look like they belong to it rather than like a picture pasted on top.
 const THEMES = {
   dark: {
     style: STANDARD,
@@ -62,7 +70,20 @@ const THEMES = {
     casing: '#101c1a',
     route: '#00ffcc',
     building: '#3b4a63',
+    buildingFill: '#39404f',
+    buildingLine: '#20252f',
     mask: '#2f3546',
+    label: '#ccd5e6',
+    labelHalo: '#181d29',
+    land: {
+      lawn: '#2b3a2f',
+      tree: '#3a5341',
+      paving: '#343a48',
+      parking: '#2a2f3c',
+      track: '#443c32',
+      pool: '#1d4a5b',
+      closed: '#31353f',
+    },
   },
   light: {
     style: STANDARD,
@@ -71,7 +92,20 @@ const THEMES = {
     casing: '#0f3d38',
     route: '#0d9488',
     building: '#c7cdda',
+    buildingFill: '#fbfaf6',
+    buildingLine: '#9ba4b1',
     mask: '#ece7db',
+    label: '#3b4757',
+    labelHalo: '#f8f5ee',
+    land: {
+      lawn: '#d5e2b2',
+      tree: '#9cba7c',
+      paving: '#e7e2d6',
+      parking: '#d8d7cf',
+      track: '#ecdcc2',
+      pool: '#8ac9db',
+      closed: '#c6c2b8',
+    },
   },
 };
 
@@ -90,6 +124,14 @@ const SATELLITE = {
   // basemap, so here the campus only gets the clip, which removes Mapbox's
   // labels and 3D objects while leaving the photograph intact.
   mask: null,
+  // Same reasoning for the ground cover: painting my campus's lawns and car parks over
+  // a photograph of the actual lawns and car parks hides the better data. The
+  // amenity symbols and place labels stay, because the imagery carries neither.
+  land: null,
+  buildingFill: null,
+  buildingLine: null,
+  label: '#ffffff',
+  labelHalo: '#101828',
 };
 
 /** Layer colours and basemap style for the current basemap/theme pair. */
@@ -151,6 +193,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let customNetwork = null;
   let networkPoints = null;
   let campusBuildings = null;
+  // Ground cover, amenity symbols and the destination directory, all traced out
+  // of my campus's own basemap. Every one is decoration: the map works without them.
+  let campusLandcover = null;
+  let campusAmenities = null;
+  let campusPlaces = null;
 
   // State variables
   let startMarker = null;
@@ -309,9 +356,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return response.json();
   }
 
-  async function fetchBuildings() {
-    const response = await fetch('/api/buildings');
-    if (!response.ok) throw new Error(`buildings request failed (${response.status})`);
+  /** One of the draw-only overlays: buildings, landcover, amenities, places. */
+  async function fetchOverlay(name) {
+    const response = await fetch(`/api/${name}`);
+    if (!response.ok) throw new Error(`${name} request failed (${response.status})`);
     return response.json();
   }
 
@@ -355,6 +403,183 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         'fill-extrusion-opacity': 0.85,
       },
     }, 'route-casing');
+  }
+
+  // -------------------------------------------------------------------------
+  // Campus overlay
+  //
+  // Ground cover, amenity symbols and place labels, all traced out of the same
+  // my campus basemap as the buildings. Each of these is written to be safe to call
+  // repeatedly: they recolour an existing layer rather than rebuilding it, so a
+  // theme switch — which no longer reloads the style — updates in place.
+  // -------------------------------------------------------------------------
+
+  /** Fill colour keyed on the `kind` written by scripts/build-landcover.mjs. */
+  function landcoverPaint(land) {
+    return [
+      'match',
+      ['get', 'kind'],
+      ...Object.entries(land).flat(),
+      land.lawn, // a class with no entry reads as ground rather than vanishing
+    ];
+  }
+
+  function addLandcoverLayer() {
+    const { land } = palette(currentBasemap, currentTheme);
+
+    // Over imagery there is nothing to add — see SATELLITE.land.
+    if (!land) {
+      if (map.getLayer('campus-landcover')) map.removeLayer('campus-landcover');
+      return;
+    }
+    if (map.getLayer('campus-landcover')) {
+      map.setPaintProperty('campus-landcover', 'fill-color', landcoverPaint(land));
+      return;
+    }
+    if (!campusLandcover) return; // still in flight; addNetworkLayers re-runs
+
+    if (!map.getSource('campus-landcover')) {
+      map.addSource('campus-landcover', { type: 'geojson', data: campusLandcover });
+    }
+    map.addLayer({
+      id: 'campus-landcover',
+      type: 'fill',
+      source: 'campus-landcover',
+      slot: 'middle',
+      paint: {
+        'fill-color': landcoverPaint(land),
+        // Same reasoning as the mask: Standard would otherwise light these
+        // through its own model, and the night preset swallows them.
+        'fill-emissive-strength': 1,
+      },
+      // Above the mask, below the network. Re-added after a basemap swap this
+      // would otherwise land on top of the paths it is meant to sit under.
+    }, map.getLayer('network-lines') ? 'network-lines' : undefined);
+  }
+
+  /**
+   * Footprints drawn flat, always.
+   *
+   * addBuildingsLayer extrudes the same source, but only while navigating. On
+   * its own that was fine when the campus was an empty mask; now that the ground
+   * cover is drawn, leaving the buildings out means the map shows my campus's lawns,
+   * trees and parking aisles with nothing standing on them. This is the 2D
+   * counterpart, and the extrusion still takes over during navigation.
+   */
+  function addBuildingFillLayer() {
+    const colors = palette(currentBasemap, currentTheme);
+
+    // Over imagery the real roofs are already there — see SATELLITE.
+    if (!colors.buildingFill) {
+      for (const id of ['campus-building-fill', 'campus-building-line']) {
+        if (map.getLayer(id)) map.removeLayer(id);
+      }
+      return;
+    }
+    if (map.getLayer('campus-building-fill')) {
+      map.setPaintProperty('campus-building-fill', 'fill-color', colors.buildingFill);
+      map.setPaintProperty('campus-building-line', 'line-color', colors.buildingLine);
+      return;
+    }
+    if (!campusBuildings) return; // still in flight; addNetworkLayers re-runs
+
+    if (!map.getSource('campus-buildings')) {
+      map.addSource('campus-buildings', { type: 'geojson', data: campusBuildings });
+    }
+    const before = map.getLayer('network-lines') ? 'network-lines' : undefined;
+    map.addLayer({
+      id: 'campus-building-fill',
+      type: 'fill',
+      source: 'campus-buildings',
+      slot: 'middle',
+      paint: { 'fill-color': colors.buildingFill, 'fill-emissive-strength': 1 },
+    }, before);
+    // my campus outlines every footprint, and without it adjacent buildings in a
+    // terrace merge into one shape.
+    map.addLayer({
+      id: 'campus-building-line',
+      type: 'line',
+      source: 'campus-buildings',
+      slot: 'middle',
+      paint: { 'line-color': colors.buildingLine, 'line-width': 0.8 },
+    }, before);
+  }
+
+  /**
+   * Amenity pictograms. Nothing here is theme-dependent — the icons carry their
+   * own colour and a white rim so they read on lawn, paving and imagery alike.
+   *
+   * The layer is added inside the promise because setStyle drops registered
+   * images along with the layers, so the icons have to be re-registered before
+   * anything can reference them.
+   */
+  function addAmenityLayer() {
+    if (!campusAmenities || map.getLayer('campus-amenities')) return;
+
+    if (!map.getSource('campus-amenities')) {
+      map.addSource('campus-amenities', { type: 'geojson', data: campusAmenities });
+    }
+    loadAmenityIcons(map).then(() => {
+      // A style swap can land between the two, taking the source with it.
+      if (map.getLayer('campus-amenities') || !map.getSource('campus-amenities')) return;
+      map.addLayer({
+        id: 'campus-amenities',
+        type: 'symbol',
+        source: 'campus-amenities',
+        slot: 'middle',
+        // Below this the campus is a few hundred pixels across and 72 markers
+        // is noise rather than information.
+        minzoom: 16,
+        layout: {
+          'icon-image': ['get', 'kind'],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 16, 0.4, 19, 0.62],
+          'icon-padding': 2,
+        },
+        paint: { 'icon-emissive-strength': 1 },
+      });
+    }).catch((error) => console.error('amenity icons unavailable:', error));
+  }
+
+  function addPlaceLayer() {
+    const colors = palette(currentBasemap, currentTheme);
+
+    if (map.getLayer('campus-places')) {
+      map.setPaintProperty('campus-places', 'text-color', colors.label);
+      map.setPaintProperty('campus-places', 'text-halo-color', colors.labelHalo);
+      return;
+    }
+    if (!campusPlaces) return;
+
+    if (!map.getSource('campus-places')) {
+      map.addSource('campus-places', { type: 'geojson', data: campusPlaces });
+    }
+    map.addLayer({
+      id: 'campus-places',
+      type: 'symbol',
+      source: 'campus-places',
+      slot: 'middle',
+      minzoom: 16,
+      // The file is the whole directory, including the rows my campus lists with no
+      // room of their own; only the ones that resolved to a single building
+      // get a label. See scripts/build-places.mjs.
+      filter: ['==', ['get', 'kind'], 'place'],
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 16, 10, 19, 13],
+        'text-max-width': 9,
+        'text-line-height': 1.1,
+        // my campus's own ordering, so when two labels collide the one their app
+        // considers more important is the one that survives.
+        'symbol-sort-key': ['get', 'sortPriority'],
+      },
+      paint: {
+        'text-color': colors.label,
+        'text-halo-color': colors.labelHalo,
+        'text-halo-width': 1.4,
+        'text-emissive-strength': 1,
+      },
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -463,6 +688,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
 
     addCampusMask();
+    addLandcoverLayer();
+    addBuildingFillLayer();
 
     if (!map.getSource('custom-network')) {
       map.addSource('custom-network', { type: 'geojson', data: customNetwork ?? EMPTY });
@@ -513,6 +740,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     } else {
       map.setPaintProperty('route-line', 'line-color', colors.route);
     }
+
+    // Last, so the symbols and labels sit above the route rather than under it.
+    addAmenityLayer();
+    addPlaceLayer();
 
     if (navActive) addBuildingsLayer();
     map.getCanvas().style.cursor = 'crosshair';
@@ -819,19 +1050,51 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     map.getCanvas().style.cursor = 'crosshair';
 
-    // Both come from the same server, so ask for them together. They are settled
-    // separately because the footprints are decoration: losing them costs the 3D
-    // buildings, while losing the network means nothing can be routed at all.
-    const [networkResult, buildingsResult] = await Promise.allSettled([
-      fetchNetwork(),
-      fetchBuildings(),
-    ]);
+    // All from the same server, so ask together. They are settled separately
+    // because only the network is load-bearing: without it nothing can be
+    // routed, whereas every overlay is decoration and its loss costs one layer.
+    const [networkResult, buildings, landcover, amenities, places] =
+      await Promise.allSettled([
+        fetchNetwork(),
+        fetchOverlay('buildings'),
+        fetchOverlay('landcover'),
+        fetchOverlay('amenities'),
+        fetchOverlay('places'),
+      ]);
 
-    if (buildingsResult.status === 'fulfilled') {
-      campusBuildings = buildingsResult.value;
+    if (buildings.status === 'fulfilled') {
+      campusBuildings = buildings.value;
+      addBuildingFillLayer();
       if (navActive) addBuildingsLayer();
     } else {
-      console.error(buildingsResult.reason);
+      console.error(buildings.reason);
+    }
+
+    if (landcover.status === 'fulfilled') {
+      campusLandcover = landcover.value;
+      addLandcoverLayer();
+    } else {
+      console.error(landcover.reason);
+    }
+
+    if (amenities.status === 'fulfilled') {
+      campusAmenities = amenities.value;
+      addAmenityLayer();
+    } else {
+      console.error(amenities.reason);
+    }
+
+    if (places.status === 'fulfilled') {
+      // The directory keeps the rows my campus lists without a room so a search index
+      // can still be built from the file, but a null geometry is not something
+      // a vector source can tile — drop them on the way in.
+      campusPlaces = {
+        type: 'FeatureCollection',
+        features: places.value.features.filter((feature) => feature.geometry),
+      };
+      addPlaceLayer();
+    } else {
+      console.error(places.reason);
     }
 
     if (networkResult.status === 'rejected') {

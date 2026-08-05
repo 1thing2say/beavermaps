@@ -96,15 +96,48 @@ npm run preview   # serve the production build locally
 
 ```
 mapper/
-├── index.html          # Page shell + the Route Info panel markup
+├── index.html              # Page shell + the Route Info panel markup
+├── server/
+│   └── index.js            # Routing API; also serves the overlay GeoJSON
 ├── src/
-│   ├── main.js         # Map setup, click handling, snapping, and routing
-│   ├── paths.json      # The custom network (GeoJSON LineStrings)
-│   └── input.css       # Tailwind entry stylesheet
+│   ├── main.js             # Map setup, click handling, snapping, routing
+│   ├── paths.json          # The walkable network (GeoJSON LineStrings)
+│   ├── buildings.json      # Footprints, extruded during navigation
+│   ├── landcover.json      # Lawn, trees, paving, parking, track, pool
+│   ├── amenities.json      # Defibrillators, phones, restrooms, bike racks…
+│   ├── places.json         # my campus's destination directory, positioned
+│   ├── campus-boundary.json# OSM campus polygon, used to mask the basemap
+│   ├── path-corrections.json # Per-node fix solved by scripts/build-snap.mjs
+│   ├── amenity-icons.js    # Amenity pictograms, drawn as SVG
+│   └── input.css           # Tailwind entry stylesheet
+├── scripts/                # Data extraction — see below
 ├── vite.config.js
 ├── package.json
-└── TECHNICAL_DOCS.md   # Detailed explanation of the routing logic
+└── TECHNICAL_DOCS.md       # Detailed explanation of the routing logic
 ```
+
+### Campus data
+
+Everything drawn inside the campus boundary is traced out of my campus
+College's own wayfinding basemap rather than taken from Mapbox, whose data for
+this campus is close to empty. The extraction lives in `scripts/`:
+
+| script | output |
+|---|---|
+| `build-paths.mjs` | `paths.json` — 581 nodes, 696 walkable segments |
+| `build-buildings.mjs` | `buildings.json` — 96 footprints, 58 of them named |
+| `build-landcover.mjs` | `landcover.json` — 593 ground polygons |
+| `build-amenities.mjs` | `amenities.json` — 72 amenity points in 10 classes |
+| `build-places.mjs` | `places.json` — my campus's 120 destinations, positioned |
+| `build-boundary.mjs` | `campus-boundary.json` — the OSM campus polygon |
+| `build-snap.mjs` | `path-corrections.json` — per-node alignment fix |
+| `projection.mjs` | the SVG→WGS84 transform every other script uses |
+| `svg-geometry.mjs` | shared SVG path/transform parsing |
+
+Their source is gitignored (it is third-party content), so these are **not
+runnable from a bare clone** — but every output they produce is committed. Each
+script's header carries its own derivation, including the measurements that
+ruled out the approaches that did not work.
 
 ## License
 
