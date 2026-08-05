@@ -49,7 +49,14 @@ function flattenQuad(p0, c1, p2, n = 8) {
 }
 
 /** Flatten a path `d` into closed rings. Covers M l h v c s q Z and absolutes. */
-export function parsePath(d) {
+/**
+ * Every subpath of a `d` attribute, as { pts, closed }.
+ *
+ * `closed` records whether the subpath ended on Z. It is the only thing that
+ * separates an area from a line here: a stroked walkway and a filled lawn are
+ * both just a list of points until you know whether the author closed it.
+ */
+export function parseSubpaths(d) {
   const toks = d.split(/([MmLlHhVvCcSsQqTtAaZz])/).filter((t) => t.trim());
   const rings = [];
   let cur = [];
@@ -64,7 +71,7 @@ export function parsePath(d) {
     const args = /^[MmLlHhVvCcSsQqTtAaZz]$/.test(toks[i + 1] ?? '') ? [] : nums(toks[++i]);
 
     if (c === 'Z') {
-      if (cur.length) { cur.push([sx, sy]); rings.push(cur); cur = []; }
+      if (cur.length) { cur.push([sx, sy]); rings.push({ pts: cur, closed: true }); cur = []; }
       [x, y] = [sx, sy];
       ctrl = null; prev = c;
       continue;
@@ -74,7 +81,7 @@ export function parsePath(d) {
     for (let j = 0; j + k <= args.length; j += k) {
       const a = args.slice(j, j + k);
       if (c === 'M') {
-        if (cur.length) rings.push(cur);
+        if (cur.length) rings.push({ pts: cur, closed: false });
         [x, y] = rel ? [x + a[0], y + a[1]] : [a[0], a[1]];
         [sx, sy] = [x, y];
         cur = [[x, y]];
@@ -122,9 +129,12 @@ export function parsePath(d) {
     }
     if (!'CSQT'.includes(c)) ctrl = null;
   }
-  if (cur.length) rings.push(cur);
+  if (cur.length) rings.push({ pts: cur, closed: false });
   return rings;
 }
+
+/** Subpath point lists only, for callers that treat every subpath as a ring. */
+export const parsePath = (d) => parseSubpaths(d).map((s) => s.pts);
 
 export const matMul = (m, n) => [
   m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1],
@@ -286,6 +296,135 @@ export function readShapes(svg) {
  * floor, so the classification would sit right on a threshold it currently
  * clears comfortably. Callers that want circles ask for them.
  */
+const DRAW_TAGS = ['rect', 'polygon', 'polyline', 'line', 'path', 'circle', 'ellipse'];
+
+/**
+ * The whole drawing, every drawable element, in document order.
+ *
+ * readShapeGroups answers "which shapes are this colour"; this answers "what is
+ * on the sheet, in the order it was painted". A flat vector map is a painter's
+ * algorithm — trees over lawn, stalls over tarmac — so the index each element
+ * comes back with is load-bearing, not bookkeeping.
+ *
+ * Differences from readShapeGroups, all of them deliberate:
+ *   - <line> and <polyline> are included. There are 169 of them and they are the
+ *     campus driveways and walkways, drawn as strokes with no fill at all.
+ *   - Subpaths carry `closed`, so an open stroked figure stops being mistaken
+ *     for a ring.
+ *   - Nothing is dropped for having too few points. A <line> has two.
+ *   - <defs> and <clipPath> contents are skipped. Both clip paths in this file
+ *     are a full-page rect, and readShapeGroups currently reports them as two
+ *     phantom fill:none shapes covering the entire sheet.
+ *   - <g> is tracked, so group opacity and clip-path reach the elements inside.
+ *     Five groups carry opacity here; ignoring them loses the wash on the
+ *     shadowed areas.
+ *
+ * Each element also reports the top-level <g> it belongs to, as `layer` (index)
+ * and `layerId`. Those groups are the artwork's own layer panel — one holds all
+ * 1,004 parking-bay stripes, another all 509 trees, another every label — and
+ * they are a far better classifier than any rule inferred from fill colour.
+ *
+ * Returns { i, layer, layerId, tag, attrs, curvy, opacity, clipped, subpaths }
+ * with all transforms, the element's and its ancestors', already applied.
+ */
+export function readDrawing(svg, { circleSegments = 24 } = {}) {
+  const out = [];
+  const stack = [{ mat: [1, 0, 0, 1, 0, 0], opacity: 1, clipped: false }];
+  const layers = [];
+  let skip = 0;
+
+  const re = new RegExp(
+    `<(defs|clipPath|g|${DRAW_TAGS.join('|')})\\b([^>]*?)(/?)>|</(defs|clipPath|g)>`,
+    'g',
+  );
+
+  for (const m of svg.matchAll(re)) {
+    const [, tag, attrText, selfClose, closeTag] = m;
+
+    if (closeTag) {
+      if (closeTag === 'g') { if (!skip) stack.pop(); }
+      else skip = Math.max(0, skip - 1);
+      continue;
+    }
+    if (tag === 'defs' || tag === 'clipPath') { skip += 1; continue; }
+    if (skip) continue;
+
+    const attrs = {};
+    for (const [, k, v] of attrText.matchAll(/([\w:-]+)="([^"]*)"/g)) attrs[k] = v;
+
+    const parent = stack.at(-1);
+    const mat = matMul(parent.mat, parseTransform(attrs.transform));
+    const opacity = parent.opacity * (attrs.opacity === undefined ? 1 : +attrs.opacity);
+    const clipped = parent.clipped || Boolean(attrs['clip-path']);
+
+    if (tag === 'g') {
+      // A self-closing <g/> opens nothing.
+      if (selfClose) continue;
+      // Depth 1 is a layer; anything deeper is a sub-group inside one and
+      // inherits its layer.
+      let layerId = parent.layerId ?? null;
+      if (stack.length === 1) {
+        layerId = attrs.id ?? `(anon ${layers.length})`;
+        if (!layers.includes(layerId)) layers.push(layerId);
+      }
+      stack.push({ mat, opacity, clipped, layerId });
+      continue;
+    }
+
+    let subpaths;
+    if (tag === 'rect') {
+      const x = +(attrs.x ?? 0), y = +(attrs.y ?? 0);
+      const w = +(attrs.width ?? 0), h = +(attrs.height ?? 0);
+      subpaths = [{ pts: [[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]], closed: true }];
+    } else if (tag === 'polygon' || tag === 'polyline') {
+      const v = nums(attrs.points);
+      const pts = [];
+      for (let i = 0; i + 1 < v.length; i += 2) pts.push([v[i], v[i + 1]]);
+      // A <polygon> is closed by definition; a <polyline> is not, even when its
+      // last point happens to land back on its first.
+      if (tag === 'polygon' && pts.length
+        && (pts[0][0] !== pts.at(-1)[0] || pts[0][1] !== pts.at(-1)[1])) pts.push(pts[0]);
+      subpaths = [{ pts, closed: tag === 'polygon' }];
+    } else if (tag === 'line') {
+      subpaths = [{
+        pts: [[+(attrs.x1 ?? 0), +(attrs.y1 ?? 0)], [+(attrs.x2 ?? 0), +(attrs.y2 ?? 0)]],
+        closed: false,
+      }];
+    } else if (tag === 'circle' || tag === 'ellipse') {
+      const cx = +(attrs.cx ?? 0), cy = +(attrs.cy ?? 0);
+      const rx = +(attrs.r ?? attrs.rx ?? 0), ry = +(attrs.r ?? attrs.ry ?? 0);
+      const pts = [];
+      for (let i = 0; i <= circleSegments; i++) {
+        const t = (i / circleSegments) * 2 * Math.PI;
+        pts.push([cx + rx * Math.cos(t), cy + ry * Math.sin(t)]);
+      }
+      subpaths = [{ pts, closed: true }];
+    } else {
+      subpaths = parseSubpaths(attrs.d ?? '');
+    }
+
+    subpaths = subpaths
+      .filter((s) => s.pts.length >= 2)
+      .map((s) => ({ pts: applyMat(mat, s.pts), closed: s.closed }));
+    if (!subpaths.length) continue;
+
+    out.push({
+      i: out.length,
+      layer: parent.layerId === undefined || parent.layerId === null
+        ? -1
+        : layers.indexOf(parent.layerId),
+      layerId: parent.layerId ?? null,
+      tag,
+      attrs,
+      curvy: tag === 'path' && CURVE_CMD.test(attrs.d ?? ''),
+      opacity,
+      clipped,
+      subpaths,
+    });
+  }
+  return out;
+}
+
 export function readCircles(svg) {
   const out = [];
   for (const [, tag, attrText] of svg.matchAll(/<(circle|ellipse)\b([^>]*)>/g)) {

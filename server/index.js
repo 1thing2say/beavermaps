@@ -27,15 +27,20 @@ const network = JSON.parse(readFileSync(path.join(root, 'src/paths.json'), 'utf8
 
 /**
  * Everything the client draws but never routes over, extracted from my campus's own
- * basemap by the scripts/build-*.mjs pair of passes. None of it goes into the
- * graph; these are served rather than bundled so ~370 kB of geometry stays out
- * of the JS and editing the data does not mean rebuilding the front-end.
+ * basemap by the scripts/build-*.mjs passes. None of it goes into the graph;
+ * these are served rather than bundled so ~2 MB of geometry stays out of the JS
+ * and editing the data does not mean rebuilding the front-end.
+ *
+ * `basemap` is the whole printed sheet translated element for element — it is
+ * what the client draws. `landcover` is the earlier partial extraction it
+ * replaces, still served because it is a smaller file that carries the same
+ * seven ground classes.
  *
  * Read once at boot, like the network — so like the network, changing a file
  * needs a restart.
  */
 const OVERLAYS = Object.fromEntries(
-  ['buildings', 'landcover', 'amenities', 'places', 'labels'].map((name) => [
+  ['buildings', 'basemap', 'landcover', 'amenities', 'places', 'labels'].map((name) => [
     name,
     JSON.parse(readFileSync(path.join(root, `src/${name}.json`), 'utf8')),
   ]),

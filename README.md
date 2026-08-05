@@ -124,15 +124,29 @@ this campus is close to empty. The extraction lives in `scripts/`:
 
 | script | output |
 |---|---|
+| `build-basemap.mjs` | `basemap.json` — the whole printed sheet, 2,284 features |
 | `build-paths.mjs` | `paths.json` — 581 nodes, 696 walkable segments |
 | `build-buildings.mjs` | `buildings.json` — 96 footprints, 58 of them named |
-| `build-landcover.mjs` | `landcover.json` — 593 ground polygons |
+| `build-labels.mjs` | `labels.json` — 44 labels lifted from the PDF's text layer |
 | `build-amenities.mjs` | `amenities.json` — 72 amenity points in 10 classes |
 | `build-places.mjs` | `places.json` — my campus's 120 destinations, positioned |
+| `build-landcover.mjs` | `landcover.json` — 593 ground polygons, superseded |
 | `build-boundary.mjs` | `campus-boundary.json` — the OSM campus polygon |
 | `build-snap.mjs` | `path-corrections.json` — per-node alignment fix |
 | `projection.mjs` | the SVG→WGS84 transform every other script uses |
 | `svg-geometry.mjs` | shared SVG path/transform parsing |
+
+`build-basemap.mjs` is the one that reads the drawing whole. The scripts above it
+each take one class of thing off the same sheet, and between them they keep 24%
+of its 3,220 elements; the rest — 1,004 parking-bay stripes, the walkway and
+driveway linework, 555 trees, the crossings, the icons — is what makes the
+printed map look like a map, and it is what the client now draws. Classification
+comes from the artwork's own 24 Illustrator layers rather than from colour,
+because three fills each carry more than one kind of thing.
+
+`buildings.json` is still separate: it carries heights, and the 3D extrusion
+during navigation needs them. `landcover.json` is kept and still served, but the
+client no longer draws it.
 
 Their source is gitignored (it is third-party content), so these are **not
 runnable from a bare clone** — but every output they produce is committed. Each

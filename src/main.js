@@ -57,12 +57,14 @@ const STANDARD = 'mapbox://styles/mapbox/standard';
 // about a tenth — so it is not a multiply that can be pre-compensated for. The
 // fix belongs in the paint spec, not in these numbers.
 //
-// `land` recolours the ground cover traced out of the same my campus sheet as the
-// buildings. It is keyed by the `kind` written by scripts/build-landcover.mjs,
-// and every key that file emits needs an entry here or that class falls back to
-// lawn. Deliberately desaturated against my campus's own print palette: their sheet is
-// a standalone illustration, whereas these sit inside Mapbox Standard and have
-// to look like they belong to it rather than like a picture pasted on top.
+// `land` recolours the printed my campus sheet. It is keyed by the `kind` written by
+// scripts/build-basemap.mjs, and a kind with no entry here keeps my campus's own print
+// colour, which is the right fallback for the things that have no theme opinion
+// — court markings, sign faces, the HOME BASE badges — and the wrong one for
+// ground, so every ground class needs a key. Deliberately desaturated against
+// my campus's palette: their sheet is a standalone illustration, whereas these sit
+// inside Mapbox Standard and have to look like they belong to it rather than
+// like a picture pasted on top.
 const THEMES = {
   dark: {
     style: STANDARD,
@@ -79,14 +81,25 @@ const THEMES = {
     areaLabel: '#a9c08c',
     plate: '#1e232d',
     plateText: '#eaf0fb',
+    // Pitch and court markings. my campus prints them white, which at
+    // fill-emissive-strength 1 glares against night ground.
+    sportLine: '#66795a',
     land: {
       lawn: '#2b3a2f',
       tree: '#3a5341',
+      shrub: '#33482c',
       paving: '#343a48',
       parking: '#2a2f3c',
+      parking_stripe: '#3d4351',
+      walkway: '#3a4152',
+      driveway: '#333947',
+      offsite_road: '#2b303c',
+      crossing: '#454c5c',
+      sport: '#3a4436',
       track: '#443c32',
       pool: '#1d4a5b',
       closed: '#31353f',
+      building: '#39404f',
     },
   },
   light: {
@@ -104,14 +117,23 @@ const THEMES = {
     areaLabel: '#5d6d49',
     plate: '#4e4e4f',
     plateText: '#ffffff',
+    sportLine: '#ffffff',
     land: {
       lawn: '#d5e2b2',
       tree: '#9cba7c',
+      shrub: '#b3cc90',
       paving: '#e7e2d6',
       parking: '#d8d7cf',
+      parking_stripe: '#f2efe7',
+      walkway: '#efece3',
+      driveway: '#e4e0d5',
+      offsite_road: '#dcd8cd',
+      crossing: '#c9c4b8',
+      sport: '#cfe0aa',
       track: '#ecdcc2',
       pool: '#8ac9db',
       closed: '#c6c2b8',
+      building: '#fbfaf6',
     },
   },
 };
@@ -205,7 +227,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let campusBuildings = null;
   // Ground cover, amenity symbols and the destination directory, all traced out
   // of my campus's own basemap. Every one is decoration: the map works without them.
-  let campusLandcover = null;
+  let campusBasemap = null;
   let campusAmenities = null;
   let campusPlaces = null;
   let campusLabels = null;
@@ -374,7 +396,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return response.json();
   }
 
-  /** One of the draw-only overlays: buildings, landcover, amenities, places. */
+  /** One of the draw-only overlays: buildings, basemap, amenities, places. */
   async function fetchOverlay(name) {
     const response = await fetch(`/api/${name}`);
     if (!response.ok) throw new Error(`${name} request failed (${response.status})`);
@@ -432,47 +454,115 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // theme switch — which no longer reloads the style — updates in place.
   // -------------------------------------------------------------------------
 
-  /** Fill colour keyed on the `kind` written by scripts/build-landcover.mjs. */
-  function landcoverPaint(land) {
-    return [
-      'match',
-      ['get', 'kind'],
-      ...Object.entries(land).flat(),
-      land.lawn, // a class with no entry reads as ground rather than vanishing
-    ];
-  }
+  // Metres of ground per pixel is 156543.03 * cos(latitude) / 2^zoom, and at
+  // my campus's 38.65 degrees that constant is 122275. Dividing a width in metres by
+  // it, against an exponential-base-2 zoom curve, holds a line at its true
+  // ground width instead of a fixed pixel width — so the 26 m entry road stays
+  // visibly wider than the 3.3 m footpaths at every zoom.
+  const M_PER_PIXEL_AT_Z0 = 122275;
 
-  function addLandcoverLayer() {
-    const { land } = palette(currentBasemap, currentTheme);
+  const groundWidth = (floor) => [
+    'interpolate', ['exponential', 2], ['zoom'],
+    // The floor keeps the thinnest paths from disappearing when zoomed out,
+    // where true width would put them below a pixel.
+    14, ['max', floor, ['*', ['coalesce', ['get', 'width'], 1.65], 2 ** 14 / M_PER_PIXEL_AT_Z0]],
+    20, ['max', floor, ['*', ['coalesce', ['get', 'width'], 1.65], 2 ** 20 / M_PER_PIXEL_AT_Z0]],
+  ];
+
+  /**
+   * Colour for one of the printed sheet's classes, falling back to the colour
+   * my campus drew it in. `land` covers ground; anything else — a court marking, a bus
+   * sign, the HOME BASE badges — keeps its own paint, which is what makes the
+   * overlay still read as their map rather than a recolour of it.
+   */
+  const sheetPaint = (land, property, overrides = {}) => [
+    'match',
+    ['get', 'kind'],
+    ...Object.entries({ ...land, ...overrides }).flat(),
+    ['coalesce', ['get', property], 'transparent'],
+  ];
+
+  /**
+   * my campus's printed campus map, drawn element for element.
+   *
+   * Two layers over one source, because the sheet mixes areas with stroked line
+   * work and Mapbox will not do both in one: the fill layer takes everything
+   * with a fill, the line layer everything with a stroke, and a shape with both
+   * appears in each.
+   *
+   * The sort keys are load-bearing. A flat vector map is a painter's algorithm —
+   * bay striping over tarmac, trees over lawn — and `i` is the element's index
+   * in the original document. Without them Mapbox is free to reorder within a
+   * layer and the campus renders inside out.
+   */
+  function addBasemapLayers() {
+    const colors = palette(currentBasemap, currentTheme);
+    const { land } = colors;
 
     // Over imagery there is nothing to add — see SATELLITE.land.
     if (!land) {
-      if (map.getLayer('campus-landcover')) map.removeLayer('campus-landcover');
+      for (const id of ['campus-sheet-line', 'campus-sheet-fill']) {
+        if (map.getLayer(id)) map.removeLayer(id);
+      }
       return;
     }
-    if (map.getLayer('campus-landcover')) {
-      map.setPaintProperty('campus-landcover', 'fill-color', landcoverPaint(land));
-      return;
-    }
-    if (!campusLandcover) return; // still in flight; addNetworkLayers re-runs
 
-    if (!map.getSource('campus-landcover')) {
-      map.addSource('campus-landcover', { type: 'geojson', data: campusLandcover });
+    const fillColour = sheetPaint(land, 'fill');
+    // Strokes that are ground read as ground; the rest keep my campus's ink. Building
+    // outlines follow the theme so they agree with the footprints drawn on top.
+    const lineColour = sheetPaint(
+      { walkway: land.walkway, driveway: land.driveway, offsite_road: land.offsite_road, crossing: land.crossing },
+      'stroke',
+      { building: colors.buildingLine, sport: colors.sportLine },
+    );
+
+    if (map.getLayer('campus-sheet-fill')) {
+      map.setPaintProperty('campus-sheet-fill', 'fill-color', fillColour);
+      map.setPaintProperty('campus-sheet-line', 'line-color', lineColour);
+      return;
     }
+    if (!campusBasemap) return; // still in flight; addNetworkLayers re-runs
+
+    if (!map.getSource('campus-sheet')) {
+      map.addSource('campus-sheet', { type: 'geojson', data: campusBasemap });
+    }
+
+    // `hidden` marks the parts the app supplies itself — the label plates and
+    // the letterform-free label layer — so drawing them would double up on the
+    // real text in src/labels.json.
+    const visible = ['!', ['to-boolean', ['get', 'hidden']]];
+    const anchor = map.getLayer('network-lines') ? 'network-lines' : undefined;
+
     map.addLayer({
-      id: 'campus-landcover',
+      id: 'campus-sheet-fill',
       type: 'fill',
-      source: 'campus-landcover',
+      source: 'campus-sheet',
       slot: 'middle',
+      filter: ['all', visible, ['has', 'fill']],
+      layout: { 'fill-sort-key': ['get', 'i'] },
       paint: {
-        'fill-color': landcoverPaint(land),
+        'fill-color': fillColour,
+        'fill-opacity': ['coalesce', ['get', 'opacity'], 1],
         // Same reasoning as the mask: Standard would otherwise light these
         // through its own model, and the night preset swallows them.
         'fill-emissive-strength': 1,
       },
-      // Above the mask, below the network. Re-added after a basemap swap this
-      // would otherwise land on top of the paths it is meant to sit under.
-    }, map.getLayer('network-lines') ? 'network-lines' : undefined);
+    }, anchor);
+
+    map.addLayer({
+      id: 'campus-sheet-line',
+      type: 'line',
+      source: 'campus-sheet',
+      slot: 'middle',
+      filter: ['all', visible, ['has', 'stroke']],
+      layout: { 'line-sort-key': ['get', 'i'], 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': lineColour,
+        'line-width': groundWidth(0.4),
+        'line-opacity': ['coalesce', ['get', 'opacity'], 1],
+        'line-emissive-strength': 1,
+      },
+    }, anchor);
   }
 
   /**
@@ -763,7 +853,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
 
     addCampusMask();
-    addLandcoverLayer();
+    addBasemapLayers();
     addBuildingFillLayer();
 
     if (!map.getSource('custom-network')) {
@@ -1128,11 +1218,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // All from the same server, so ask together. They are settled separately
     // because only the network is load-bearing: without it nothing can be
     // routed, whereas every overlay is decoration and its loss costs one layer.
-    const [networkResult, buildings, landcover, amenities, places, labels] =
+    const [networkResult, buildings, basemap, amenities, places, labels] =
       await Promise.allSettled([
         fetchNetwork(),
         fetchOverlay('buildings'),
-        fetchOverlay('landcover'),
+        fetchOverlay('basemap'),
         fetchOverlay('amenities'),
         fetchOverlay('places'),
         fetchOverlay('labels'),
@@ -1146,11 +1236,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       console.error(buildings.reason);
     }
 
-    if (landcover.status === 'fulfilled') {
-      campusLandcover = landcover.value;
-      addLandcoverLayer();
+    if (basemap.status === 'fulfilled') {
+      campusBasemap = basemap.value;
+      addBasemapLayers();
     } else {
-      console.error(landcover.reason);
+      console.error(basemap.reason);
     }
 
     if (amenities.status === 'fulfilled') {
