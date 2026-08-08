@@ -5,7 +5,7 @@
  * routing nodes through LocationNodes. Because the binding is to nodes we
  * already project, every row that has one is georeferenced for free — this
  * script introduces no new alignment of its own, and inherits whatever
- * scripts/projection.mjs and src/path-corrections.json give the graph.
+ * scripts/projection.mjs gives the graph.
  *
  * Two shapes of row, separated by how far their nodes are spread:
  *
@@ -37,7 +37,7 @@
  *   node scripts/build-places.mjs
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { project } from './projection.mjs';
@@ -45,24 +45,18 @@ import { project } from './projection.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = path.join(root, 'campus-data/wayfind/api/Batch.json');
 const TARGET = path.join(root, 'src/places.json');
-const CORRECTIONS = path.join(root, 'src/path-corrections.json');
 
 /** Above this spread a row is a class of thing, not a place. See header. */
 const SPREAD_M = 250;
 
 const { value } = JSON.parse(readFileSync(SOURCE, 'utf8'));
-const corrections = existsSync(CORRECTIONS)
-  ? JSON.parse(readFileSync(CORRECTIONS, 'utf8')).corrections
-  : {};
 
-// Same treatment as build-paths: soft-deleted rows are inactive, not absent,
-// and node positions carry the per-node correction where one was solved.
+// Soft-deleted rows are inactive rather than absent, and node positions are
+// the projection and nothing else.
 const nodes = new Map();
 for (const node of value.Nodes) {
   if (!node.Is_Active) continue;
-  const [lon, lat] = project([node.Pos_X, node.Pos_Y]);
-  const delta = corrections[node.ID];
-  nodes.set(node.ID, delta ? [lon + delta[0], lat + delta[1]] : [lon, lat]);
+  nodes.set(node.ID, project([node.Pos_X, node.Pos_Y]));
 }
 
 const metres = ([aLon, aLat], [bLon, bLat]) => Math.hypot(

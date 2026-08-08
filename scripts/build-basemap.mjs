@@ -27,10 +27,18 @@
  * a layer is an amenity pictogram its element count cross-checks against
  * src/amenities.json, which was built independently from my campus's own node lists:
  * 6 defibrillators, 6 all-gender restrooms, 10 permit machines, 14 emergency
- * phones (3 shapes each), 3 bus-stop signs. Two layers are named `marker`
- * because their counts did NOT cross-check and guessing would be worse than
- * admitting it — layer 12 mixes the P badges with permit machines, and layer 23
- * mixes bike racks with motorcycle bays at 30 shapes against 20 known nodes.
+ * phones (3 shapes each), 3 bus-stop signs. Layers 12 and 23 were called
+ * `marker` for a while because their counts did NOT cross-check and guessing
+ * would have been worse than admitting it. They now do, and they are named for
+ * what they hold:
+ *
+ *   - layer 23 is `bike_marker`: 45 shapes, three per sign, 15 bicycle-and-P
+ *     signs. The fifteenth is drawn about 10% smaller than the rest, which is
+ *     why build-amenities.mjs carries two size entries for one kind.
+ *   - layer 12 is `parking_marker`: the eight P badges painted in the car
+ *     parks, the ten permit machines, one motorcycle bay and the two Student
+ *     Drop-Off symbols. Mixed, but every one of them is parking furniture, and
+ *     every one is redrawn by the app.
  *
  * ---------------------------------------------------------------------------
  * Letterforms
@@ -100,7 +108,7 @@ const LAYERS = [
   // at STADIUM and 3 at Main Gym: the seating rows on the grandstands.
   /* 10 */ { kind: 'building', by: { '#37afcb': 'pool', '#8c8c8c': 'closed', none: 'bleachers' } },
   /* 11 */ { kind: 'shrub' },                       // small planting, median 6 m2
-  /* 12 */ { kind: 'marker', text: ['#fff'] },      // P badges and permit machines, mixed
+  /* 12 */ { kind: 'parking_marker', text: ['#fff'] }, // P badges, permit machines, drop-off
   /* 13 */ { kind: 'crossing' },                    // crossing and stair hatching
   /* 14 */ { kind: 'bus_stop' },                    // 3 sign plates and their numerals
   /* 15 */ { kind: 'emergency_phone' },             // 14 phones, 3 shapes each
@@ -111,7 +119,7 @@ const LAYERS = [
   /* 20 */ { kind: 'driveway' },                    // one stray road stroke
   /* 21 */ { kind: 'permit_machine' },              // 10 daily permit machines
   /* 22 */ { kind: 'badge', keep: false },          // the two HOME BASE callouts
-  /* 23 */ { kind: 'marker' },                      // bike racks and motorcycle bays, mixed
+  /* 23 */ { kind: 'bike_marker' },                 // 15 bicycle-and-P signs, 3 shapes each
 ];
 
 /** Word boxes overhang their glyphs slightly; ~1.6 m of slack absorbs it. */

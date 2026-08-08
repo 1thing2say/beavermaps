@@ -34,6 +34,48 @@
     --sign-text-shadow: none;
     --sign-btn: rgba(75, 90, 116, 0.12);
     --sign-btn-hover: rgba(75, 90, 116, 0.22);
+
+    /* --- Google-style chrome ------------------------------------------------
+       The floating UI is one surface colour, one text colour, one hairline and
+       one shadow, reused by every card, chip, rail and control. That single
+       palette is most of why the chrome reads as one system: there is no second
+       card style to drift away from the first. Values follow Google's own
+       (#1a73e8 blue, #5f6368 secondary text, #dadce0 hairline). */
+    --g-surface: #ffffff;
+    --g-surface-2: #f1f3f4;
+    --g-text: #202124;
+    --g-text-dim: #5f6368;
+    --g-line: #dadce0;
+    --g-blue: #1a73e8;
+    --g-on-blue: #ffffff;
+    --g-hover: rgba(60, 64, 67, 0.08);
+    --g-shadow: 0 1px 2px rgba(60, 64, 67, 0.3), 0 2px 6px 2px rgba(60, 64, 67, 0.15);
+    --g-shadow-sm: 0 1px 2px rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
+
+    /* The rail's width, and the gutter the floating column keeps from it.
+       Referenced by the column, the layers switcher and the legend sheet, so
+       widening the rail moves all three together. */
+    --g-rail-w: 56px;
+    --g-gap: 10px;
+    --g-col-w: 400px;
+
+    /* The strip along the bottom of the screen that belongs to the map credits.
+       Only the phone layout claims it back, because only there does the panel
+       span the full width and cover them. */
+    --g-credit-h: 22px;
+}
+
+:root[data-theme="dark"] {
+    --g-surface: #202124;
+    --g-surface-2: #303134;
+    --g-text: #e8eaed;
+    --g-text-dim: #9aa0a6;
+    --g-line: #3c4043;
+    --g-blue: #8ab4f8;
+    --g-on-blue: #202124;
+    --g-hover: rgba(232, 234, 237, 0.1);
+    --g-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 6px 2px rgba(0, 0, 0, 0.35);
+    --g-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6), 0 1px 3px 1px rgba(0, 0, 0, 0.35);
 }
 
 :root[data-theme="dark"] {
@@ -50,39 +92,27 @@
 }
 
 @layer base {
-    /* Navigation takes over the whole viewport — a 600px map inside a padded
-       page is unusable on a phone while you are actually walking. */
-    body.navigating {
-        padding: 0;
-        overflow: hidden;
-    }
 
-    body.navigating .app-chrome {
-        display: none;
-    }
-
-    body.navigating .app-shell {
-        max-width: none;
-    }
-
-    body.navigating .map-frame {
-        border: 0;
-        border-radius: 0;
-        box-shadow: none;
-    }
-
-    body.navigating #map {
-        height: 100dvh !important;
-    }
-
-    /* The "you are here" puck. */
+    /* The "you are here" puck, in Google's blue rather than the old #2d7dfa. */
     .user-dot {
         width: 18px;
         height: 18px;
         border-radius: 9999px;
-        background: #2d7dfa;
+        background: #1a73e8;
         border: 3px solid #ffffff;
-        box-shadow: 0 0 0 6px rgba(45, 125, 250, 0.25), 0 2px 6px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 0 0 6px rgba(26, 115, 232, 0.25), 0 2px 6px rgba(0, 0, 0, 0.4);
+    }
+
+    /*
+     * The route markers, built by googlePin() in map-images.js.
+     *
+     * line-height: 0 because a marker element is inline-level by default and the
+     * strut under the SVG would push the pin's tip a few pixels off the point it
+     * is marking — which no amount of `anchor: 'bottom'` corrects.
+     */
+    .map-pin {
+        line-height: 0;
+        cursor: pointer;
     }
 }
 
@@ -243,4 +273,1055 @@
 [data-theme="dark"] .campus-popup .mapboxgl-popup-tip {
     border-top-color: #262626;
     border-bottom-color: #262626;
+}
+
+/* ===========================================================================
+   Google-style chrome
+   ===========================================================================
+   Written as plain CSS rather than Tailwind utilities in the markup, because
+   the same six shapes (card, chip, rail button, icon button, pill button, list
+   row) appear a dozen times each. Class-per-shape means one edit changes all
+   of them, and the HTML stays readable enough to see the structure.
+   =========================================================================== */
+
+/*
+ * Everything from here down is deliberately OUTSIDE @layer, and both directions
+ * of that matter — cascade layers lose to unlayered rules whatever the
+ * specificity says, and this file sits between two layered stylesheets:
+ *
+ *   - mapbox-gl.css is imported from main.js, so it arrives unlayered. Its
+ *     `.mapboxgl-map { position: relative }` beat an `#map { position:
+ *     absolute }` written inside @layer base — ID selector and all — and the
+ *     map rendered 1440x0. The layout rules below have to be unlayered to win.
+ *   - Tailwind's utilities are layered, so these same rules out-rank `.hidden`
+ *     and a card that declares its own `display` never hides. That is why the
+ *     hidden states are restated immediately below.
+ */
+
+/* The map IS the page. Everything else floats over it, which is what makes a
+   phone-sized viewport still show usable map — the previous layout spent its
+   top third on a heading and a card border before any map was drawn. */
+.g-body {
+    margin: 0;
+    height: 100dvh;
+    overflow: hidden;
+    background: var(--g-surface);
+    color: var(--g-text);
+    font-family: Roboto, "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+.app-shell,
+#map {
+    position: absolute;
+    inset: 0;
+}
+
+/* Navigation hides the chrome rather than relaying the page: the map is already
+   full-bleed, so there is nothing left to expand. Unlayered for the same reason
+   as the rest — the floating cards below set their own `display`. */
+body.navigating .app-chrome {
+    display: none;
+}
+
+/* State beats layout, said once, at 0-2-0 so it wins without !important. */
+.g-panel.hidden,
+.g-legend.hidden,
+.g-layers-menu.hidden,
+.g-chip-arrow.hidden,
+.g-search-clear.hidden,
+.g-results.hidden {
+    display: none;
+}
+
+.g-icon {
+    display: inline-flex;
+    width: 20px;
+    height: 20px;
+    flex: none;
+    color: inherit;
+}
+
+/* Every floating surface. One radius, one shadow, one border. */
+.g-card {
+    background: var(--g-surface);
+    color: var(--g-text);
+    border-radius: 8px;
+    box-shadow: var(--g-shadow);
+}
+
+.g-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: 9999px;
+    color: var(--g-text-dim);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+.g-icon-btn:hover {
+    background: var(--g-hover);
+    color: var(--g-text);
+}
+
+/* --- far-left rail --------------------------------------------------------- */
+
+.g-rail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 20;
+    width: var(--g-rail-w);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 0;
+    background: var(--g-surface);
+    border-right: 1px solid var(--g-line);
+}
+
+.g-rail-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 48px;
+    padding: 8px 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--g-text-dim);
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+.g-rail-btn:hover {
+    background: var(--g-hover);
+    color: var(--g-text);
+}
+
+.g-rail-btn[aria-pressed="true"] {
+    color: var(--g-blue);
+}
+
+.g-rail-icon {
+    display: block;
+    width: 22px;
+    height: 22px;
+}
+
+.g-rail-text {
+    font-size: 10px;
+    line-height: 1.2;
+    letter-spacing: 0.2px;
+}
+
+/* --- the floating column: search, chips, panels ---------------------------- */
+
+.g-topbar {
+    position: absolute;
+    top: var(--g-gap);
+    left: calc(var(--g-rail-w) + var(--g-gap));
+    right: var(--g-gap);
+    /* Above the column below it, so the search suggestions overlap the panels
+       rather than being covered by them. */
+    z-index: 21;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    pointer-events: none;
+}
+
+.g-topleft {
+    position: absolute;
+    /* Clears the top bar: 48px of search field plus both gutters. */
+    top: calc(var(--g-gap) * 2 + 48px);
+    left: calc(var(--g-rail-w) + var(--g-gap));
+    z-index: 20;
+    width: var(--g-col-w);
+    max-width: calc(100vw - var(--g-rail-w) - var(--g-gap) * 2);
+    /* Bounded so a long results list scrolls inside its card instead of running
+       off the bottom of the viewport. */
+    max-height: calc(100dvh - var(--g-gap) * 3 - 48px);
+    display: flex;
+    flex-direction: column;
+    gap: var(--g-gap);
+    /* These columns span the map; only their cards should swallow clicks, or
+       the transparent gaps between them would block panning. */
+    pointer-events: none;
+}
+
+.g-topleft > *,
+.g-topbar > * {
+    pointer-events: auto;
+}
+
+/* --- search ---------------------------------------------------------------- */
+
+.g-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 48px;
+    padding: 0 8px 0 16px;
+    border-radius: 24px;
+    width: var(--g-col-w);
+    flex: none;
+}
+
+.g-search-input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--g-text);
+    font-size: 16px;
+}
+
+.g-search-input::placeholder {
+    color: var(--g-text-dim);
+}
+
+.g-search-input:disabled {
+    cursor: progress;
+}
+
+.g-search-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border: 0;
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--g-text-dim);
+    cursor: pointer;
+}
+
+.g-search-clear:hover {
+    background: var(--g-hover);
+    color: var(--g-text);
+}
+
+.g-search-sep {
+    width: 1px;
+    height: 24px;
+    margin: 0 4px;
+    background: var(--g-line);
+}
+
+.g-search-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border: 0;
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--g-blue);
+    cursor: pointer;
+}
+
+.g-search-icon:hover {
+    background: var(--g-hover);
+}
+
+/* The blue circle Google puts at the end of the field. */
+.g-directions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    margin-left: 4px;
+    border: 0;
+    border-radius: 9999px;
+    background: var(--g-blue);
+    color: var(--g-on-blue);
+    cursor: pointer;
+    transition: filter 120ms ease;
+}
+
+.g-directions:hover {
+    filter: brightness(1.08);
+}
+
+.g-directions[aria-pressed="true"] {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--g-blue) 35%, transparent);
+}
+
+/* Suggestions hang below the field, inside its rounded footprint. */
+.g-results {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 5;
+    margin: 0;
+    padding: 6px 0;
+    list-style: none;
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--g-surface);
+    border-radius: 8px;
+    box-shadow: var(--g-shadow);
+}
+
+.g-results li {
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.g-results li:hover,
+.g-results li[aria-selected="true"] {
+    background: var(--g-hover);
+}
+
+.g-result-name {
+    color: var(--g-text);
+}
+
+.g-result-sub {
+    margin-top: 1px;
+    font-size: 12px;
+    color: var(--g-text-dim);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* --- category chips -------------------------------------------------------- */
+
+.g-chips-wrap {
+    position: relative;
+    /* Takes the rest of the bar. min-width:0 is what actually lets it shrink —
+       a flex item's default min-width:auto would let the chip strip's content
+       push the search field off the screen instead of scrolling. */
+    flex: 1;
+    min-width: 0;
+}
+
+.g-chips {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    /* The chips are the one strip allowed to overflow sideways; the scrollbar
+       is hidden because the arrow buttons are the affordance. */
+    scrollbar-width: none;
+    scroll-behavior: smooth;
+    padding: 2px 0;
+}
+
+.g-chips::-webkit-scrollbar {
+    display: none;
+}
+
+.g-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    flex: none;
+    border: 0;
+    border-radius: 9999px;
+    background: var(--g-surface);
+    color: var(--g-text);
+    box-shadow: var(--g-shadow-sm);
+    font-size: 14px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+/* The pressed state has to be excluded here rather than relying on source
+   order: `:hover:not(:disabled)` is 0-3-0 and `[aria-pressed="true"]` only
+   0-2-0, so hovering a selected chip repainted it white — and since the pressed
+   rule's white text still applied, the chip went blank. */
+.g-chip:hover:not(:disabled):not([aria-pressed="true"]) {
+    background: var(--g-surface-2);
+}
+
+.g-chip:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.g-chip .g-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--g-text-dim);
+}
+
+/* Selected reads as filled blue, the way Google's do — the chip strip is the
+   only place on the map where a control announces a live filter. */
+.g-chip[aria-pressed="true"] {
+    background: var(--g-blue);
+    color: var(--g-on-blue);
+}
+
+.g-chip[aria-pressed="true"]:hover {
+    filter: brightness(1.08);
+}
+
+.g-chip[aria-pressed="true"] .g-icon {
+    color: var(--g-on-blue);
+}
+
+.g-chip-count {
+    font-size: 12px;
+    opacity: 0.75;
+}
+
+.g-chip-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 9999px;
+    background: var(--g-surface);
+    color: var(--g-text-dim);
+    box-shadow: var(--g-shadow-sm);
+    cursor: pointer;
+}
+
+#chips-prev {
+    left: -4px;
+}
+
+#chips-next {
+    right: -4px;
+}
+
+.g-chip-arrow .g-icon {
+    width: 16px;
+    height: 16px;
+}
+
+/* --- panels ---------------------------------------------------------------- */
+
+.g-panel {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.g-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 14px 8px 10px 16px;
+    border-bottom: 1px solid var(--g-line);
+}
+
+.g-panel-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--g-text);
+}
+
+.g-panel-sub {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--g-text-dim);
+}
+
+/*
+ * The results list is the only thing in the column allowed to give up height.
+ * A 14-row category would otherwise push the route panel off the bottom of the
+ * screen — which it did, in both layouts, at two different viewport-unit caps
+ * before this was solved with flex instead of a guess. The column has a
+ * max-height; the route panel refuses to shrink; the list absorbs the rest and
+ * scrolls.
+ */
+.g-panel-list {
+    margin: 0;
+    padding: 4px 0;
+    list-style: none;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+#category-panel {
+    /* Enough to keep a couple of rows visible however tight the column gets. */
+    min-height: 132px;
+    flex: 0 1 auto;
+}
+
+#side-panel {
+    flex: none;
+}
+
+.g-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 10px 16px;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    color: var(--g-text);
+}
+
+.g-row:hover {
+    background: var(--g-hover);
+}
+
+.g-row-disc {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: 9999px;
+    background: var(--g-surface-2);
+    color: var(--g-text-dim);
+}
+
+.g-row-disc .g-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.g-row-text {
+    min-width: 0;
+    flex: 1;
+}
+
+.g-row-name {
+    font-size: 14px;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.g-row-sub {
+    margin-top: 1px;
+    font-size: 12px;
+    color: var(--g-text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.g-row-dist {
+    font-size: 12px;
+    color: var(--g-text-dim);
+    flex: none;
+}
+
+/* --- route panel ----------------------------------------------------------- */
+
+.g-route-head {
+    padding: 14px 16px 10px;
+}
+
+.g-route-endpoints {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.g-endpoint {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.g-endpoint-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.g-endpoint-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--g-text-dim);
+}
+
+.g-endpoint-value {
+    font-size: 14px;
+    color: var(--g-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Google's origin marker is a hollow ring and the destination a filled square;
+   keeping that distinction means the two rows differ by shape, not only by
+   colour, so it survives a colour-blind reading. */
+.g-dot {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    border-radius: 9999px;
+    border: 3px solid var(--g-text-dim);
+}
+
+.g-dot--end {
+    border-radius: 2px;
+    border: 0;
+    background: #ea4335;
+}
+
+/* The dotted leader Google draws between the two endpoint rows. */
+.g-endpoint-rule {
+    width: 2px;
+    height: 14px;
+    margin-left: 5px;
+    background-image: linear-gradient(var(--g-line) 55%, transparent 0);
+    background-size: 2px 5px;
+}
+
+.g-route-summary {
+    padding: 4px 16px 12px;
+}
+
+.g-route-figure {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.g-route-mode {
+    width: 24px;
+    height: 24px;
+    margin-top: 2px;
+    color: var(--g-blue);
+}
+
+.g-route-distance {
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--g-blue);
+    line-height: 1.1;
+}
+
+.g-route-unit {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--g-text-dim);
+}
+
+.g-route-hint {
+    margin: 2px 0 0;
+    font-size: 13px;
+    color: var(--g-text-dim);
+}
+
+/* "The routing server is down" has to look different from "click the map".
+   Both colours live here so neither can out-specify the other. */
+.g-route-hint.is-error {
+    color: #d93025;
+    font-weight: 500;
+}
+
+[data-theme="dark"] .g-route-hint.is-error {
+    color: #f28b82;
+}
+
+.g-route-actions {
+    display: flex;
+    gap: 8px;
+    padding: 0 16px 14px;
+}
+
+.g-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 120ms ease, filter 120ms ease;
+}
+
+.g-btn .g-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.g-btn--primary {
+    background: var(--g-blue);
+    color: var(--g-on-blue);
+}
+
+.g-btn--primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+.g-btn--ghost {
+    background: transparent;
+    color: var(--g-blue);
+    border-color: var(--g-line);
+}
+
+.g-btn--ghost:hover:not(:disabled) {
+    background: var(--g-hover);
+}
+
+.g-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* --- layers switcher, bottom-left ------------------------------------------ */
+
+/* Clear of the floating column, not under it. The column can run the full
+   height of the viewport once a category list is open, and at 900px it was
+   landing on top of this. */
+.g-layers {
+    position: absolute;
+    left: calc(var(--g-rail-w) + var(--g-gap) * 2 + var(--g-col-w));
+    bottom: 24px;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.g-layers-btn {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    padding: 0;
+    border: 2px solid var(--g-surface);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--g-shadow);
+    cursor: pointer;
+    background: var(--g-surface-2);
+}
+
+/* Stands in for Google's live imagery thumbnail. Drawn rather than fetched: a
+   real tile here would be a billed request on every page load, for 64 px of
+   decoration. */
+.g-layers-thumb {
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(115deg, transparent 44%, rgba(255, 255, 255, 0.55) 44% 50%, transparent 50%),
+        radial-gradient(circle at 78% 24%, #4b7f4a 0 22%, transparent 22%),
+        radial-gradient(circle at 22% 74%, #3f6b3e 0 26%, transparent 26%),
+        linear-gradient(160deg, #7d8a6a, #5b6b4a);
+}
+
+.g-layers-caption {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 2px 0;
+    font-size: 11px;
+    font-weight: 500;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.g-layers-caption .g-icon {
+    width: 12px;
+    height: 12px;
+}
+
+.g-layers-menu {
+    padding: 12px;
+}
+
+.g-layers-heading {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--g-text-dim);
+}
+
+/* Second group in the same card, so it gets a rule rather than just space —
+   "Map type" and "Appearance" are different settings, not one list. */
+.g-layers-heading--split {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--g-line);
+}
+
+.g-layers-row {
+    display: flex;
+    gap: 8px;
+}
+
+.g-layer-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 76px;
+    padding: 8px 4px;
+    border: 1px solid var(--g-line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--g-text);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.g-layer-btn:hover {
+    background: var(--g-hover);
+}
+
+/* The chosen appearance. Google marks the selected one in their blue rather
+   than filling it, so the row still reads as three options with one taken.
+   :not(:hover) is the same 0-3-0 trap the chips hit — a hover rule that beats
+   the selected state leaves the pressed button looking unpressed under the
+   mouse that just pressed it. */
+.g-layer-btn[aria-checked="true"] {
+    border-color: var(--g-blue);
+    color: var(--g-blue);
+}
+
+.g-layer-btn[aria-checked="true"]:not(:hover) {
+    background: color-mix(in srgb, var(--g-blue) 12%, transparent);
+}
+
+.g-layer-btn[aria-checked="true"] .g-layer-icon {
+    color: var(--g-blue);
+}
+
+.g-layer-icon {
+    display: block;
+    width: 20px;
+    height: 20px;
+    color: var(--g-text-dim);
+}
+
+/* --- legend sheet ---------------------------------------------------------- */
+
+.g-legend {
+    position: absolute;
+    left: calc(var(--g-rail-w) + var(--g-gap) * 2 + var(--g-col-w));
+    bottom: 100px;
+    z-index: 21;
+    width: 280px;
+    max-height: 60dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.g-legend-list {
+    margin: 0;
+    padding: 6px 0;
+    list-style: none;
+    overflow-y: auto;
+}
+
+.g-legend-list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 16px;
+    font-size: 13px;
+    color: var(--g-text);
+}
+
+.g-legend-list .g-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--g-text-dim);
+}
+
+.g-legend-note {
+    margin: 0;
+    padding: 8px 16px 12px;
+    font-size: 11px;
+    color: var(--g-text-dim);
+    border-top: 1px solid var(--g-line);
+}
+
+/* --- Mapbox's own controls, restyled to match ------------------------------ */
+
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+    background: var(--g-surface);
+    border-radius: 8px;
+    box-shadow: var(--g-shadow-sm);
+}
+
+.mapboxgl-ctrl-group button + button {
+    border-top: 1px solid var(--g-line);
+}
+
+.mapboxgl-ctrl-group button {
+    width: 40px;
+    height: 40px;
+}
+
+.mapboxgl-ctrl-group button .mapboxgl-ctrl-icon {
+    /* Mapbox ships black glyphs; invert them rather than reskin every control. */
+    filter: none;
+}
+
+[data-theme="dark"] .mapboxgl-ctrl-group button .mapboxgl-ctrl-icon {
+    filter: invert(1) brightness(1.4);
+}
+
+/* Mapbox pins its wordmark to the canvas's own bottom-left corner, which is
+   underneath the rail: the rail is opaque and sits at z-index 20, so it covered
+   the first 56 px of the logo and the credit arrived on screen reading "pbox".
+   Attribution is a licence term, not decoration, so it moves clear of the rail
+   rather than being restyled around it.
+
+   Qualified by #map, and that is not decoration either. mapbox-gl.css is
+   imported from JS and lands after this file, so its own
+   `.mapboxgl-ctrl-bottom-left { left: 0 }` is the same 0-1-0 specificity and
+   later in the document — it wins a tie. The id takes it out of the tie. */
+#map .mapboxgl-ctrl-bottom-left {
+    left: var(--g-rail-w);
+}
+
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-scale {
+    background: color-mix(in srgb, var(--g-surface) 82%, transparent) !important;
+    color: var(--g-text-dim) !important;
+    font-size: 11px;
+}
+
+.mapboxgl-ctrl-attrib a {
+    color: var(--g-text-dim) !important;
+}
+
+.mapboxgl-ctrl-scale {
+    border-color: var(--g-text-dim) !important;
+}
+
+/* Turn-by-turn keeps the locate button and drops the rest: zoom and a scale bar
+   are map-reading tools, and while walking they only collide with the remaining
+   distance strip. Identified by what the group contains, since Mapbox gives its
+   control groups no distinguishing class. */
+body.navigating .mapboxgl-ctrl-scale,
+body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
+    display: none;
+}
+
+/* --- narrow screens -------------------------------------------------------- */
+/*
+   Below this the rail costs more than it carries, so it goes and the floating
+   column takes the full width — which is what Google does on a phone, minus
+   the bottom sheet.
+*/
+/* Two chips and a search field is not a bar. Below this the two stack, and the
+   column drops to clear both rows. */
+@media (max-width: 900px) {
+    .g-topbar {
+        flex-wrap: wrap;
+    }
+
+    .g-search {
+        width: 100%;
+    }
+
+    .g-topleft {
+        top: calc(var(--g-gap) * 2 + 90px);
+        max-height: calc(100dvh - var(--g-gap) * 3 - 90px);
+    }
+}
+
+/*
+ * Phone. The rail costs more than it carries, and the panels become a bottom
+ * sheet — Google's own mobile pattern, and the fix for two things at once: the
+ * panel is no longer sitting on top of the campus, and it no longer needs the
+ * rail's collapse button, which is exactly what this breakpoint removes.
+ *
+ * The layers switcher moves to the top-right for the same reason: the corner it
+ * lives in on a desktop is now the sheet.
+ */
+@media (max-width: 640px) {
+    .g-rail {
+        display: none;
+    }
+
+    /* ...so there is nothing left for the wordmark to hide behind. */
+    #map .mapboxgl-ctrl-bottom-left {
+        left: 0;
+    }
+
+    .g-topbar,
+    .g-topleft {
+        left: var(--g-gap);
+    }
+
+    .g-topleft {
+        top: auto;
+        /* Clear of the credit strip. The sheet spans the full width here and was
+           sitting on top of both the Mapbox wordmark and Google's copyright
+           line; attribution is a licence term for each of them, so the sheet
+           stops short of the bottom edge rather than covering them. */
+        bottom: calc(var(--g-gap) + var(--g-credit-h));
+        right: var(--g-gap);
+        width: auto;
+        max-width: none;
+        max-height: 62dvh;
+        justify-content: flex-end;
+    }
+
+    .g-layers,
+    .g-legend {
+        left: auto;
+        right: var(--g-gap);
+    }
+
+    .g-layers {
+        bottom: auto;
+        top: calc(var(--g-gap) * 3 + 48px + 32px);
+    }
+
+    .g-layers-menu {
+        order: 1;
+    }
+
+    .g-legend {
+        bottom: auto;
+        top: calc(var(--g-gap) * 3 + 48px + 32px);
+        width: min(280px, calc(100vw - var(--g-gap) * 2));
+    }
 }

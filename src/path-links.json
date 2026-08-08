@@ -1,0 +1,487 @@
+{
+  "_comment": [
+    "Hand-added connectors: paths that exist on the ground and are absent from",
+    "my campus's sheet. Everything else in paths.json is their printed linework taken",
+    "verbatim, which is why this lives in its own file and its own build stage,",
+    "with the count and metres printed on every build.",
+    "",
+    "There are two kinds here and they are tested differently.",
+    "",
+    "LOCAL LINKS close a gap between two nearby parts of the network. They are",
+    "validated by ablation on the walk between their own endpoints: remove one,",
+    "rebuild, and see whether the detour it was added for comes back.",
+    "",
+    "RESCUES bring a whole stranded fragment into the largest component, and the",
+    "endpoint test is meaningless for them \u2014 pull one and the fragment is pruned,",
+    "so an endpoint stops existing and the measurement compares two snaps onto the",
+    "same surviving node. They are validated on SHIPPED METRES instead. The three",
+    "here carry 571 m, 409 m and 120 m of drawn path respectively: 1,100 m of my campus's",
+    "own linework returned to the routable network for 46 m of connector.",
+    "",
+    "READ THIS BEFORE ADDING ONE. An earlier version of this file had 15 links, and",
+    "eleven of them ran PARALLEL to a path my campus already draws. That was the wrong",
+    "diagnosis: the gap was never a missing path, it was a DRAWN path that failed",
+    "to join the graph, and a straight connector alongside it fixed the number",
+    "while leaving two splintered lines down one corridor on screen. The junction",
+    "stage in build-walk-network.mjs fixes that cause, and seven of those links",
+    "were then shown redundant and deleted.",
+    "",
+    "So: before writing a link, check whether the sheet already draws the path and",
+    "the extraction is simply failing to connect it. Only if it genuinely draws",
+    "nothing does a link belong here. It must be short, visible in aerial imagery,",
+    "and `why` must say what is on the ground and what the sheet does instead.",
+    "A rescue may be longer, but its gap is still bounded: seven stranded fragments",
+    "were refused because reaching them needs 75 to 117 m of invented path, which",
+    "is the automatic bridging step this pipeline deliberately does not have."
+  ],
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "Hutchison Loop bus stop. The sheet draws the zebra crossing over the road and stops at the kerb; on the ground the crossing lands on a concrete pad with a handrail that ramps down to the south footway, which is plainly visible in imagery. Without it the two footways either side of the road only met 65 m west at the car-park entrance, so an 11 m walk across the road routed 523 ft round three sides of a rectangle.",
+        "kind": "crossing",
+        "added": "2026-08-06"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.348316,
+            38.648318
+          ],
+          [
+            -121.3483,
+            38.648219
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "Service yard behind the Child Development Center. The sheet draws driveway either side of the yard and never joins them across it; imagery shows unbroken tarmac, no kerb and no planting. 23 m on foot, 592 m through the graph.",
+        "kind": "walkway",
+        "added": "2026-08-06",
+        "detourSavedFt": 1867
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.344852,
+            38.650307
+          ],
+          [
+            -121.3451134,
+            38.6502641
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "The open plaza between Fine and Applied Arts and the Kaneko Art Gallery. The sheet draws paths round three sides of a paved plaza and none across it.",
+        "kind": "walkway",
+        "added": "2026-08-06",
+        "detourSavedFt": 1002
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.3500316,
+            38.652032
+          ],
+          [
+            -121.35037,
+            38.652015
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "Between the STEM Innovation Center and the Learning Resource Center. The drawn walkway stops 11 m short of the walkway it visibly continues into.",
+        "kind": "walkway",
+        "added": "2026-08-06",
+        "detourSavedFt": 515
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.3480423,
+            38.6499169
+          ],
+          [
+            -121.348014,
+            38.650012
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "Road outside the Administration Building. Both footways are drawn; the carriageway between them is never bridged.",
+        "kind": "walkway",
+        "added": "2026-08-06",
+        "detourSavedFt": 450
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.350008,
+            38.651246
+          ],
+          [
+            -121.350199,
+            38.651331
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "The roundabout arm by Printing Services. The sheet draws crossings on the other approaches and leaves this one unjoined.",
+        "kind": "walkway",
+        "added": "2026-08-06",
+        "detourSavedFt": 434
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.349066,
+            38.647806
+          ],
+          [
+            -121.348892,
+            38.647765
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "Paved apron between the Student Center and CTE. The sheet stops a footway either side of it and draws nothing between.",
+        "kind": "walkway",
+        "added": "2026-08-06",
+        "detourSavedFt": 230
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.346078,
+            38.651362
+          ],
+          [
+            -121.346258,
+            38.651259
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "Paved way between the Library and the Student Center, undrawn on the sheet.",
+        "kind": "walkway",
+        "added": "2026-08-06",
+        "detourSavedFt": 133
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.3474432,
+            38.6511015
+          ],
+          [
+            -121.347351,
+            38.651182
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "RESCUE: the whole perimeter footway around the south car park \u2014 562 m over 8 nodes \u2014 was stranded, because the sheet never joins it to campus. It comes within 9.7 m of the network at the head of the accessible bays, and imagery shows hatched crossing markings and unbroken tarmac across that gap. 9.7 m of connector returns 562 m of drawn path to the routable network.",
+        "kind": "walkway",
+        "added": "2026-08-07",
+        "rescuesM": 562
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.348294,
+            38.645708
+          ],
+          [
+            -121.3483255,
+            38.6457919
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "RESCUE: the service loop past the greenhouses and the construction compound \u2014 393 m over 48 nodes \u2014 was stranded. Its closest approach to the network is 15.7 m across a paved yard (94% parking/driveway on the sheet, 4% vegetation in imagery). The straight line clips a run of bleachers standing on that yard; you walk round them, and 15.7 m is the right length for the connection either way.",
+        "kind": "walkway",
+        "added": "2026-08-07",
+        "rescuesM": 393
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.344861,
+            38.650448
+          ],
+          [
+            -121.344852,
+            38.650307
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "RESCUE: 100 m of footway by the roundabout, stranded 20.6 m from the network. The gap crosses the roundabout apron \u2014 paved in imagery, 0% vegetation \u2014 though the sheet classifies part of it as base plane rather than a drawn surface, so this is the least certain of the three rescues.",
+        "kind": "walkway",
+        "added": "2026-08-07",
+        "rescuesM": 100
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.349268,
+            38.647709
+          ],
+          [
+            -121.349066,
+            38.647806
+          ]
+        ]
+      }
+    }
+  ],
+  "_rejected_note": [
+    "Gaps the same sweep found and this file deliberately does NOT close, with the",
+    "reason each was turned down. Kept so a later audit does not re-propose them:",
+    "they will keep showing up as large detours, and they should. Being near is not",
+    "the same as being connected. `at` is the midpoint of the rejected connection."
+  ],
+  "_rejected": [
+    {
+      "at": [
+        -121.347767,
+        38.645602
+      ],
+      "straightM": 28,
+      "savingFt": 1791,
+      "why": "ends in a planted bed at the edge of the plaza"
+    },
+    {
+      "at": [
+        -121.350163,
+        38.651758
+      ],
+      "straightM": 14.2,
+      "savingFt": 812,
+      "why": "crosses a kerb with no dropped ramp"
+    },
+    {
+      "at": [
+        -121.346525,
+        38.648569
+      ],
+      "straightM": 27.3,
+      "savingFt": 811,
+      "why": "clips a building corner"
+    },
+    {
+      "at": [
+        -121.347918,
+        38.648136
+      ],
+      "straightM": 20.1,
+      "savingFt": 720,
+      "why": "crosses a building"
+    },
+    {
+      "at": [
+        -121.346845,
+        38.648646
+      ],
+      "straightM": 28.7,
+      "savingFt": 615,
+      "why": "crosses a building"
+    },
+    {
+      "at": [
+        -121.342518,
+        38.649755
+      ],
+      "straightM": 26.2,
+      "savingFt": 561,
+      "why": "crosses lawn and trees"
+    },
+    {
+      "at": [
+        -121.346648,
+        38.648322
+      ],
+      "straightM": 26.3,
+      "savingFt": 541,
+      "why": "clips a building"
+    },
+    {
+      "at": [
+        -121.347124,
+        38.648726
+      ],
+      "straightM": 20.6,
+      "savingFt": 526,
+      "why": "crosses a building"
+    },
+    {
+      "at": [
+        -121.347992,
+        38.652462
+      ],
+      "straightM": 18.4,
+      "savingFt": 493,
+      "why": "crosses a building"
+    },
+    {
+      "at": [
+        -121.342543,
+        38.649529
+      ],
+      "straightM": 15.7,
+      "savingFt": 426,
+      "why": "crosses the grassed swale"
+    },
+    {
+      "at": [
+        -121.349422,
+        38.650787
+      ],
+      "straightM": 23.8,
+      "savingFt": 408,
+      "why": "crosses building roofs"
+    },
+    {
+      "at": [
+        -121.34664,
+        38.649609
+      ],
+      "straightM": 27.3,
+      "savingFt": 407,
+      "why": "crosses a roof \u2014 note buildings.json has no footprint here"
+    },
+    {
+      "at": [
+        -121.347801,
+        38.652252
+      ],
+      "straightM": 28.3,
+      "savingFt": 391,
+      "why": "crosses building roofs"
+    },
+    {
+      "at": [
+        -121.344771,
+        38.650195
+      ],
+      "straightM": 28.5,
+      "savingFt": 346,
+      "why": "bare-earth service yard, not pavement"
+    },
+    {
+      "at": [
+        -121.348533,
+        38.65205
+      ],
+      "straightM": 20.1,
+      "savingFt": 312,
+      "why": "crosses a building courtyard"
+    },
+    {
+      "at": [
+        -121.350081,
+        38.651061
+      ],
+      "straightM": 23.6,
+      "savingFt": 267,
+      "why": "crosses a planted courtyard"
+    },
+    {
+      "at": [
+        -121.342614,
+        38.649299
+      ],
+      "straightM": 14,
+      "savingFt": 259,
+      "why": "crosses the grassed swale"
+    },
+    {
+      "at": [
+        -121.34797,
+        38.648443
+      ],
+      "straightM": 13,
+      "savingFt": 228,
+      "why": "dark sunken area with steps \u2014 level change not resolvable from imagery"
+    },
+    {
+      "at": [
+        -121.345065,
+        38.650148
+      ],
+      "straightM": 17,
+      "savingFt": 193,
+      "why": "bare earth between two paths, no made surface"
+    },
+    {
+      "at": [
+        -121.347033,
+        38.650928
+      ],
+      "straightM": 14.8,
+      "savingFt": 192,
+      "why": "ends on a roof"
+    },
+    {
+      "at": [
+        -121.346754,
+        38.6499
+      ],
+      "straightM": 16.8,
+      "savingFt": 168,
+      "why": "duplicates an existing kerbside path"
+    },
+    {
+      "at": [
+        -121.347083,
+        38.650048
+      ],
+      "straightM": 8.5,
+      "savingFt": 91,
+      "why": "ends on a roof"
+    }
+  ]
+}

@@ -36,12 +36,16 @@
  * only where no icon of the same class is already within MERGE_M, so nothing is
  * marked twice. Every feature records which source it came from.
  *
- * One deliberate inconsistency: icon positions are NOT shifted by
- * src/path-corrections.json and node positions ARE. The corrections are a
- * per-node fix for my campus having drawn individual *paths* off; the artwork was
- * already right and build-buildings leaves it alone too. Each source is
- * therefore used in the frame it is correct in. The two agree to 0.9–6.7 m
- * where they overlap, measured against all six defibrillators.
+ * Both sources are in one frame. The drawn icons and the listed nodes come out
+ * of the same SVG coordinate space through scripts/projection.mjs and nothing
+ * is nudged afterwards, so they are directly comparable — which is what lets
+ * MERGE_M mean anything. They agree to 0.9–6.7 m where they overlap, measured
+ * against all six defibrillators; the residual is not error but the difference
+ * between where a device is drawn and where you can walk to it.
+ *
+ * This used to be a deliberate inconsistency — node positions were shifted by
+ * src/path-corrections.json and icons were not. That file is gone, and so is
+ * the graph it corrected; see scripts/build-walk-network.mjs.
  *
  * Source lives under campus-data/, which is gitignored — see
  * campus-data/MANIFEST.md. Output src/amenities.json is committed.
@@ -49,16 +53,15 @@
  *   node scripts/build-amenities.mjs
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { project, M_PER_UNIT_X, M_PER_UNIT_Y } from './projection.mjs';
-import { readShapes, readCircles, bbox, bboxCentre } from './svg-geometry.mjs';
+import { readShapes, readCircles, readDrawing, bbox, bboxCentre } from './svg-geometry.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = path.join(root, 'campus-data/wayfind/api');
 const TARGET = path.join(root, 'src/amenities.json');
-const CORRECTIONS = path.join(root, 'src/path-corrections.json');
 
 /** Bbox tolerance when matching an icon, in SVG units (~1.65 m each). */
 const SIZE_TOL = 0.25;
@@ -84,11 +87,70 @@ const ICONS = [
   { kind: 'emergency_phone', label: 'Emergency telephone', fill: '#0093bd', w: 2.17, h: 6.77, listed: 'Emergency telephones' },
   { kind: 'parking_permit', label: 'Daily parking permit machine', fill: '#f5e7d7', w: 5.34, h: 6.91 },
   { kind: 'bike_rack', label: 'Bike rack', fill: '#231f20', w: 5.39, h: 5.78 },
+  // The same bicycle-and-P sign set about 10% smaller, once, by the Learning
+  // Resource Center. It is a second entry rather than a wider tolerance on the
+  // one above because 0.55 units of slack is twice what any other icon here
+  // needs, and widening it would start matching shapes that are not icons.
+  { kind: 'bike_rack', label: 'Bike rack', fill: '#231f20', w: 4.85, h: 5.27 },
   { kind: 'motorcycle_parking', label: 'Motorcycle parking', fill: '#231f20', w: 4.01, h: 2.60 },
 ];
 
 const CIRCLE_ICONS = [
   { kind: 'restroom', label: 'All-gender restroom', fill: '#231f20', r: 2.57, listed: 'All Gender Restroom' },
+];
+
+/**
+ * Symbols the sheet draws as a cluster of parts rather than as one shape.
+ *
+ * The fill-and-size matching above cannot reach these: no single element *is*
+ * the symbol. A bus stop here is a sign plate plus its route numerals, 19
+ * elements for 3 stops. What identifies them is the artwork's own layer — the
+ * same classifier build-basemap.mjs uses, where layer 14 is commented "3 sign
+ * plates and their numerals" — so the only work left is collapsing each cluster
+ * to a point.
+ *
+ * `expect` is not decoration. This is the one spec whose count is not checked
+ * by a fill signature, so an SVG revision that regroups the layers would
+ * otherwise quietly emit some other number of stops.
+ *
+ * my campus's directory names three bus stops and binds none of them to a node, so
+ * they arrive here geometryless and the names have to be attached by position.
+ * `pick` does that from the direction word each name already carries, and the
+ * assignment is total: the northernmost, westernmost and southernmost clusters
+ * are three different clusters, which the build asserts.
+ */
+const CLUSTERED = [
+  {
+    kind: 'bus_stop',
+    label: 'Bus stop',
+    layer: 14,
+    gap: 30,
+    expect: 3,
+    pick: {
+      'Bus 1 Heading North': (pts) => pts.reduce((a, b) => (b[1] > a[1] ? b : a)),
+      'Bus 1 and 82 Heading West': (pts) => pts.reduce((a, b) => (b[0] < a[0] ? b : a)),
+      'Bus 82 Heading South': (pts) => pts.reduce((a, b) => (b[1] < a[1] ? b : a)),
+    },
+  },
+];
+
+/**
+ * The P badge painted in each car park.
+ *
+ * The ICONS table above cannot reach these: the sheet draws the badge at four
+ * different sizes (10.47, 6.28, 5.33 and 5.26 units) and rotates one of them
+ * 90°, so there is no size to match on. What every one of them *is* is a plate
+ * that is exactly square, which nothing else in the layer is — the ten permit
+ * machine bodies beside them are 5.34 x 6.91, and the Student Drop-Off car is
+ * 7.66 x 5.03.
+ *
+ * `tol` is 2% rather than the 10% the rest of this file uses because three
+ * shapes near the Myrtle lots are 5.95 x 5.39, which squeaks inside 10% and is
+ * not a badge. The real plates are square to the last decimal the flattener
+ * emits, so tightening costs nothing and excludes those cleanly.
+ */
+const SQUARE_PLATES = [
+  { kind: 'parking_badge', label: 'Parking', layer: 12, minSide: 5, tol: 0.02, expect: 8 },
 ];
 
 // Real things that the drawing carries no symbol for, taken from my campus's own
@@ -105,16 +167,11 @@ const LISTED_ONLY = [
 
 const svg = readFileSync(path.join(DATA, 'ActiveMap.svg'), 'utf8');
 const { value } = JSON.parse(readFileSync(path.join(DATA, 'Batch.json'), 'utf8'));
-const corrections = existsSync(CORRECTIONS)
-  ? JSON.parse(readFileSync(CORRECTIONS, 'utf8')).corrections
-  : {};
 
 const nodes = new Map();
 for (const node of value.Nodes) {
   if (!node.Is_Active) continue;
-  const [lon, lat] = project([node.Pos_X, node.Pos_Y]);
-  const delta = corrections[node.ID];
-  nodes.set(node.ID, delta ? [lon + delta[0], lat + delta[1]] : [lon, lat]);
+  nodes.set(node.ID, project([node.Pos_X, node.Pos_Y]));
 }
 const listedByName = new Map(value.Locations.map((l) => [l.Name, l]));
 
@@ -155,9 +212,12 @@ function iconCentres({ fill, w, h }) {
 
 const drawn = new Map(); // kind -> [lon, lat][]
 
+/** Append rather than replace: one kind may be matched by more than one spec. */
+const remember = (kind, pts) => drawn.set(kind, [...(drawn.get(kind) ?? []), ...pts]);
+
 for (const spec of ICONS) {
   const pts = iconCentres(spec).map(project);
-  drawn.set(spec.kind, pts);
+  remember(spec.kind, pts);
   for (const p of pts) emit(spec.kind, spec.label, p, 'artwork');
 }
 
@@ -166,8 +226,73 @@ for (const spec of CIRCLE_ICONS) {
     .filter((c) => c.attrs.fill === spec.fill
       && Math.abs(c.rx - spec.r) < 0.2 && Math.abs(c.ry - spec.r) < 0.2)
     .map((c) => project(c.centre));
-  drawn.set(spec.kind, pts);
+  remember(spec.kind, pts);
   for (const p of pts) emit(spec.kind, spec.label, p, 'artwork');
+}
+
+/** One drawable element's bounding box, in SVG units. */
+function size(el) {
+  const [x0, y0, x1, y1] = bbox(el.subpaths.flatMap((s) => s.pts));
+  return [x1 - x0, y1 - y0];
+}
+
+/** One point per symbol: cluster a layer's parts, then average each cluster. */
+function clusterCentres(elements, { layer, gap }) {
+  const pts = elements
+    .filter((el) => el.layer === layer)
+    .map((el) => project(bboxCentre(el.subpaths.flatMap((s) => s.pts))));
+
+  const groups = [];
+  for (const p of pts) {
+    const group = groups.find((g) => g.some((q) => metres(p, q) <= gap));
+    if (group) group.push(p); else groups.push([p]);
+  }
+  return groups.map((g) => [
+    g.reduce((sum, q) => sum + q[0], 0) / g.length,
+    g.reduce((sum, q) => sum + q[1], 0) / g.length,
+  ]);
+}
+
+const drawing = readDrawing(svg);
+
+for (const spec of SQUARE_PLATES) {
+  const pts = [];
+  for (const el of drawing) {
+    if (el.layer !== spec.layer) continue;
+    const [w, h] = size(el);
+    if (Math.min(w, h) < spec.minSide) continue;
+    if (Math.abs(w - h) > spec.tol * Math.max(w, h)) continue;
+    pts.push(project(bboxCentre(el.subpaths.flatMap((s) => s.pts))));
+  }
+  if (pts.length !== spec.expect) {
+    throw new Error(
+      `[build-amenities] ${spec.kind}: layer ${spec.layer} has ${pts.length} square plates, `
+      + `expected ${spec.expect} — the SVG's artwork has changed`,
+    );
+  }
+  remember(spec.kind, pts);
+  for (const p of pts) emit(spec.kind, spec.label, p, 'artwork');
+}
+
+for (const spec of CLUSTERED) {
+  const pts = clusterCentres(drawing, spec);
+  if (pts.length !== spec.expect) {
+    throw new Error(
+      `[build-amenities] ${spec.kind}: layer ${spec.layer} gave ${pts.length} clusters, `
+      + `expected ${spec.expect} — the SVG's layer grouping has changed`,
+    );
+  }
+  remember(spec.kind, pts);
+
+  const named = new Map();
+  for (const [name, pick] of Object.entries(spec.pick ?? {})) named.set(pick(pts), name);
+  if (spec.pick && named.size !== pts.length) {
+    throw new Error(
+      `[build-amenities] ${spec.kind}: ${named.size} of ${pts.length} named — two directions `
+      + 'picked the same cluster, so the names cannot be assigned by position',
+    );
+  }
+  for (const p of pts) emit(spec.kind, named.get(p) ?? spec.label, p, 'artwork');
 }
 
 // Listed nodes that no drawn icon of the same class already covers.

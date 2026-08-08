@@ -95,19 +95,28 @@
  * against a typical magnitude of 3.5 m, a ratio of 0.24), which is what says
  * there is no shift, scale or rotation left to find.
  *
- * Two corrections to the numbers above, both mine:
+ * One correction to the numbers above, mine: they were measured by matching
+ * each node to the nearest OSM way within 8 m. That discards the nodes that are
+ * worst, so it measures the parts already correct. Matching on bearing instead,
+ * which allows a 25 m search without grabbing unrelated ways, the honest figure
+ * is 3.5 m median with a tail past 20 m — roughly double what is quoted.
  *
- *   - The accuracy figures here were measured by matching each node to the
- *     nearest OSM way within 8 m. That discards the nodes that are worst, so it
- *     measures the parts already correct. Matching on bearing instead, which
- *     allows a 25 m search without grabbing unrelated ways, the honest figure
- *     is 3.5 m median with a tail past 20 m — roughly double what is quoted.
- *   - "No transform removes it" is not the same as "nothing removes it". my campus
- *     drew individual paths several metres off, coherently along their length,
- *     and that is fixed per-node by src/path-corrections.json — see
- *     scripts/build-snap.mjs. Held-out median 2.04 m -> 1.60 m, and it lowers
- *     the count of path nodes stranded inside a building from 112 to 105.
- *     Building footprints are deliberately left alone; they were already right.
+ * THIS TRANSFORM IS THE ONLY THING APPLIED, and every artifact gets it: paths,
+ * places, amenities, buildings, the basemap. That is deliberate. my campus's routing
+ * graph and my campus's artwork live in one SVG coordinate space, so one projection
+ * lands both in the same place and they agree with each other to a median of
+ * 0.23 m — far better than either agrees with the ground. Residual error here
+ * is shared by every layer, so it moves the whole map as a body and is
+ * invisible on screen.
+ *
+ * Per-node corrections fitted onto OSM were tried and are gone; the graph is
+ * the thing they moved, and the drawing they left behind is what the user
+ * actually sees under it. scripts/build-walk-network.mjs carries the
+ * post-mortem, along with why the routing graph is now traced from the drawing
+ * rather than taken from my campus's node table at all.
+ * Anything that only improves one layer's agreement with an outside reference
+ * makes the map disagree with itself, which is worse. Fix the transform, or
+ * retrace the source — do not nudge one layer.
  */
 
 export const LEFT_LON = -121.351255212;

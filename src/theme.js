@@ -1,59 +1,96 @@
+// Light, dark, or whatever the machine is set to.
+//
+// Three states rather than two, and the third one is the reason this is not a
+// toggle. "Auto" is not a colour — it is the *absence* of a choice, the app
+// deferring to `prefers-color-scheme`. A two-state switch can express dark and
+// light but has nowhere to put "go back to following the system", so the moment
+// a visitor touched it they were pinned to whatever they picked, for good. That
+// is also Google's own vocabulary for this control: Light, Dark, System.
+//
+// Stored as the MODE, not the resolved theme. Persisting "dark" when the user
+// picked Auto on a dark machine would silently pin them the first time they
+// opened the app at night.
+
+import { icon } from './g-icons.js';
+
 const STORAGE_KEY = 'mapper-theme';
-
-const ICON_ATTRS =
-  'viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" ' +
-  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
-
-const ICONS = {
-  dark: `<svg ${ICON_ATTRS}><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>`,
-  light:
-    `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="4"/>` +
-    '<path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4' +
-    'M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
-};
+const MODES = ['light', 'dark', 'auto'];
 
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
-/** Saved choice wins; otherwise fall back to whatever the OS is set to. */
-export function preferredTheme() {
+/** What the user chose: 'light', 'dark' or 'auto'. */
+export function preferredThemeMode() {
   const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved === 'dark' || saved === 'light') return saved;
+  return MODES.includes(saved) ? saved : 'auto';
+}
+
+/** The mode, turned into a theme the stylesheet and the palette understand. */
+export function resolveTheme(mode) {
+  if (mode === 'light' || mode === 'dark') return mode;
   return darkQuery.matches ? 'dark' : 'light';
+}
+
+/** The theme to paint right now. */
+export function preferredTheme() {
+  return resolveTheme(preferredThemeMode());
 }
 
 export function applyThemeAttribute(theme) {
   document.documentElement.dataset.theme = theme;
 }
 
+const LABEL = { light: 'Light', dark: 'Dark', auto: 'Auto' };
+
 /**
- * Wire up the toggle. The control advertises the theme it will switch *to*,
- * which is the convention people already read these buttons by.
+ * Wire up the appearance control, in both the places it appears.
+ *
+ * `group` holds one button per mode, marked with `data-theme-mode`. They carry
+ * radio semantics rather than three independent pressed states, because that is
+ * what they are — picking one un-picks the others, and a screen reader should
+ * say so.
+ *
+ * `cycle` is the optional rail button: one glyph, advancing through the three in
+ * order. Two controls for one setting is a synchronisation bug waiting to
+ * happen, so there is only one piece of state here and both are redrawn from it
+ * on every change — neither can drift, because neither holds anything.
  */
-export function createThemeToggle({ button, icon, label, onChange }) {
-  let theme = preferredTheme();
+export function createThemeControl({ group, cycle, onChange }) {
+  const buttons = [...group.querySelectorAll('[data-theme-mode]')];
+  let mode = preferredThemeMode();
 
   function apply(next, { persist }) {
-    theme = next;
+    mode = next;
+    const theme = resolveTheme(mode);
     applyThemeAttribute(theme);
-
-    const target = theme === 'dark' ? 'light' : 'dark';
-    icon.innerHTML = ICONS[target];
-    label.textContent = target === 'dark' ? 'Dark' : 'Light';
-    button.setAttribute('aria-label', `Switch to ${target} mode`);
-
-    if (persist) localStorage.setItem(STORAGE_KEY, theme);
+    for (const button of buttons) {
+      button.setAttribute('aria-checked', String(button.dataset.themeMode === mode));
+    }
+    if (cycle) {
+      cycle.icon.innerHTML = icon(mode);
+      cycle.text.textContent = LABEL[mode];
+      // Says where you are and where the press will take you, because a
+      // one-button cycle is otherwise a guess.
+      cycle.button.setAttribute(
+        'aria-label',
+        `Appearance: ${LABEL[mode]}. Switch to ${LABEL[MODES[(MODES.indexOf(mode) + 1) % MODES.length]]}`,
+      );
+    }
+    if (persist) localStorage.setItem(STORAGE_KEY, mode);
     onChange(theme);
   }
 
-  button.addEventListener('click', () => {
-    apply(theme === 'dark' ? 'light' : 'dark', { persist: true });
+  for (const button of buttons) {
+    button.addEventListener('click', () => apply(button.dataset.themeMode, { persist: true }));
+  }
+
+  cycle?.button.addEventListener('click', () => {
+    apply(MODES[(MODES.indexOf(mode) + 1) % MODES.length], { persist: true });
   });
 
-  // Track the OS only until the user has expressed a preference of their own.
-  darkQuery.addEventListener('change', (event) => {
-    if (localStorage.getItem(STORAGE_KEY)) return;
-    apply(event.matches ? 'dark' : 'light', { persist: false });
+  // Follow the machine, but only while the visitor has actually asked us to.
+  darkQuery.addEventListener('change', () => {
+    if (mode === 'auto') apply('auto', { persist: false });
   });
 
-  apply(theme, { persist: false });
+  apply(mode, { persist: false });
 }

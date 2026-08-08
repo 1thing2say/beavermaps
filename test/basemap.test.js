@@ -23,7 +23,7 @@ const features = basemap.features;
 const KINDS = new Set([
   'lawn', 'tree', 'shrub', 'paving', 'parking', 'parking_stripe', 'sport',
   'track', 'pool', 'closed', 'building', 'walkway', 'driveway', 'offsite_road',
-  'crossing', 'marker', 'label_plate', 'badge', 'north_arrow', 'bus_stop', 'bleachers',
+  'crossing', 'parking_marker', 'bike_marker', 'label_plate', 'badge', 'north_arrow', 'bus_stop', 'bleachers',
   'emergency_phone', 'defibrillator', 'restroom', 'permit_machine',
 ]);
 

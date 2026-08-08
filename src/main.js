@@ -19,12 +19,25 @@ import {
   FEET_PER_KM,
 } from './maneuvers.js';
 import { maneuverIcon } from './nav-icons.js';
-import { loadAmenityIcons, loadLabelPlate } from './map-images.js';
+import { loadAmenityIcons, googlePin } from './map-images.js';
 import { buildingCard } from './building-popup.js';
-import { createThemeToggle, preferredTheme, applyThemeAttribute } from './theme.js';
+import { createThemeControl, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
+import { createProviderToggle, preferredProvider } from './provider.js';
+import { googleGround } from './google-tiles.js';
+import { paintIcons } from './g-icons.js';
+import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
+import { withPoiIcons, POI_LABEL_KINDS } from './poi.js';
+import { ringOf, trimToCampus } from './campus-clip.js';
+
+// The chrome's button glyphs are named in the markup and drawn here, before
+// anything else runs, so no button ever paints as an empty box.
+paintIcons();
 
 const accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
+// Optional. Absent, the provider toggle still renders but says so when pressed
+// rather than silently doing nothing — see addGoogleGround.
+const googleKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
 
 // Mapbox Standard rather than the classic light-v11/dark-v11 pair. Standard is
 // a style *package*: its internal layers are not addressable, so nothing here
@@ -37,13 +50,19 @@ const accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 // sources and layers survive it instead of being rebuilt.
 const STANDARD = 'mapbox://styles/mapbox/standard';
 
-// Per-theme layer colours. #4b5a74 is the slate that ties the map back to the
-// banner grid.
-// The network colours are deliberately off-grey. Both basemaps draw their own
-// roads, parking aisles and label text in mid-grey, and this campus is almost
-// blank on Mapbox's own data, so a grey network is unreadable: it merges with
-// the basemap's linework and there is nothing left to judge it against. Giving
-// it a hue of its own is what makes it legible as *our* data.
+// Per-theme layer colours, tuned to read like Google Maps.
+//
+// The reference is Google's own hierarchy, which is what makes their sheets
+// legible at a glance: pale neutral ground, saturated green for planting, and
+// circulation drawn *lighter* than the ground it crosses. Nothing on a Google
+// map is a bare line — every road is a white ribbon inside a grey casing, and
+// that casing is what separates it from the land without needing a hue of its
+// own.
+//
+// This replaces a palette that gave the network a deliberate blue cast so it
+// read as *our* data rather than Mapbox's. That was right while the campus was
+// bare, and wrong now that my campus's drawn pavement sits underneath it: the ribbon
+// and the pavement are the same paths and have to look like one thing.
 //
 // `mask` is the colour painted over the campus once Mapbox's own data inside it
 // has been taken out. It is deliberately a shade off the surrounding land
@@ -62,81 +81,191 @@ const STANDARD = 'mapbox://styles/mapbox/standard';
 // scripts/build-basemap.mjs, and a kind with no entry here keeps my campus's own print
 // colour, which is the right fallback for the things that have no theme opinion
 // — court markings, sign faces, the HOME BASE badges — and the wrong one for
-// ground, so every ground class needs a key. Deliberately desaturated against
-// my campus's palette: their sheet is a standalone illustration, whereas these sit
-// inside Mapbox Standard and have to look like they belong to it rather than
-// like a picture pasted on top.
+// ground, so every ground class needs a key.
+//
+// `basemapConfig` is the same palette pushed into Mapbox Standard's own
+// configuration, so the city around the campus is drawn in Google's colours
+// too. Without it the mask edge is a visible seam between two different maps.
+//
+// IMPORTANT: those values are NOT emissive, so unlike everything above they go
+// through Standard's lighting. The night set is therefore authored light and
+// lands dark — see the note on the dark palette.
 const THEMES = {
   dark: {
     style: STANDARD,
     lightPreset: 'night',
-    network: '#7f8fa6',
-    casing: '#101c1a',
-    route: '#00ffcc',
-    building: '#3b4a63',
-    buildingLine: '#20252f',
-    mask: '#2f3546',
-    label: '#ccd5e6',
-    labelHalo: '#181d29',
-    areaLabel: '#a9c08c',
-    plate: '#1e232d',
-    plateText: '#eaf0fb',
+    // Google's dark map inverts the light one's contrast: roads are lighter
+    // than the land rather than darker, which is what keeps the network
+    // readable when everything else has gone to near-black.
+    network: '#3c4043',
+    networkCasing: '#191919',
+    casing: '#174ea6',
+    route: '#4285f4',
+    building: '#2f3336',
+    buildingLine: '#3f4448',
+    mask: '#212121',
+    // Same two hues, inverted for a dark ground: the slate lightens and the
+    // greenspace teal is lifted rather than re-hued.
+    label: '#c6d1dc',
+    labelHalo: '#1a1a1a',
+    areaLabel: '#4fbe90',
     // Pitch and court markings. my campus prints them white, which at
     // fill-emissive-strength 1 glares against night ground.
-    sportLine: '#66795a',
-    parkingLabel: '#9aa6bd',
+    sportLine: '#5a6b52',
+    parkingLabel: '#9aa0a6',
     land: {
-      lawn: '#2b3a2f',
-      tree: '#3a5341',
-      shrub: '#33482c',
-      paving: '#343a48',
-      parking: '#2a2f3c',
-      parking_stripe: '#3d4351',
-      walkway: '#3a4152',
-      driveway: '#333947',
-      offsite_road: '#2b303c',
-      crossing: '#454c5c',
-      sport: '#3a4436',
-      track: '#443c32',
-      pool: '#1d4a5b',
-      closed: '#31353f',
-      building: '#39404f',
+      lawn: '#1d2f24',
+      tree: '#274934',
+      shrub: '#223a2b',
+      paving: '#2b2b2b',
+      parking: '#262626',
+      parking_stripe: '#333333',
+      walkway: '#3c4043',
+      driveway: '#35393c',
+      offsite_road: '#2f3234',
+      crossing: '#4a4d50',
+      sport: '#223529',
+      track: '#3a2e26',
+      closed: '#2a2a2a',
+      pool: '#17313f',
+      building: '#2f2f2f',
+    },
+    // Authored ~1.33x lighter than the target, because the night preset lands
+    // these at roughly three quarters of their written value — the same
+    // measurement that forced fill-emissive-strength on the layers above. Our
+    // own fills opt out of the lighting; Standard's config cannot, so it is
+    // pre-compensated here instead.
+    basemapConfig: {
+      colorLand: '#2c2c2c',        // -> ~#212121, Google's dark ground
+      colorGreenspace: '#273f30',
+      colorWater: '#1f4254',
+      colorRoads: '#50555a',       // -> ~#3c4043, lighter than the land
+      colorMotorways: '#5f5340',
+      colorTrunks: '#544c3d',
+      colorBuildings: '#3f3f3f',
+      colorRoadLabels: '#9aa0a6',
+      colorPlaceLabels: '#d0d3d6',
+      colorPointOfInterestLabels: '#9aa0a6',
+      roadsBrightness: 1,
     },
   },
   light: {
     style: STANDARD,
     lightPreset: 'day',
-    network: '#4b5a74',
-    casing: '#0f3d38',
-    route: '#0d9488',
-    building: '#c7cdda',
-    buildingLine: '#9ba4b1',
-    mask: '#ece7db',
-    label: '#3b4757',
-    labelHalo: '#f8f5ee',
-    areaLabel: '#5d6d49',
-    plate: '#4e4e4f',
-    plateText: '#ffffff',
+    // The Google road: white core, grey casing. Both are drawn from the same
+    // source in addNetworkLayers, the casing simply wider and underneath.
+    network: '#ffffff',
+    networkCasing: '#d2d5d9',
+    // Google's navigation blue, and the darker blue they case it with.
+    casing: '#1967d2',
+    route: '#4285f4',
+    // Campus buildings on Google are a warm cream, distinct from the neutral
+    // grey they give ordinary city blocks. That contrast is most of what makes
+    // an institution read as one place rather than a district.
+    building: '#e8e0cd',
+    buildingLine: '#d8cfb8',
+    mask: '#f1f1ef',
+    // Sampled off the screenshot, not assumed. Google's label ink is a cool
+    // blue-grey slate (H 195-212, L~38%), not the neutral charcoal #3c4043 an
+    // earlier pass used; and their greenspace names are the same teal-green as
+    // their park icons, #17a773, not an olive.
+    label: '#42586b',
+    labelHalo: '#ffffff',
+    areaLabel: '#17a773',
     sportLine: '#ffffff',
-    parkingLabel: '#6b7280',
+    parkingLabel: '#67788a',
     land: {
-      lawn: '#d5e2b2',
-      tree: '#9cba7c',
-      shrub: '#b3cc90',
-      paving: '#e7e2d6',
-      parking: '#d8d7cf',
-      parking_stripe: '#f2efe7',
-      walkway: '#efece3',
-      driveway: '#e4e0d5',
-      offsite_road: '#dcd8cd',
-      crossing: '#c9c4b8',
-      sport: '#cfe0aa',
-      track: '#ecdcc2',
-      pool: '#8ac9db',
-      closed: '#c6c2b8',
-      building: '#fbfaf6',
+      // Sampled off a Google Maps screenshot of a comparable campus rather than
+      // picked by eye. Google's greens are not the yellow-olive you get by
+      // reaching for "grass": they sit at hue 143 — a cool mint — at 79-90%
+      // lightness, and they use exactly three tiers by area. An earlier pass
+      // authored these around hue 94-108, which is what made the campus read as
+      // heavily green when 62% of its surface is planting.
+      // Assigned by AREA, not by how dense the thing is in life. my campus's sheet
+      // draws 509 individual tree canopies over the lawn, so putting trees on
+      // Google's darkest tier made that tier 41% of our green where it is 11%
+      // of theirs — the same three colours reading far heavier. Trees take the
+      // middle tier and the rare shrubs take the dark one, which lands our
+      // proportions near Google's while still using their exact values.
+      lawn: '#d3f8e2',   // Google's 67.9% tier: the base park fill
+      tree: '#c3f1d5',   // their 15.6% tier: 509 canopies, one step down only
+      shrub: '#a9eac2',  // their 11.0% tier: 46 features, so it stays rare
+      paving: '#f0f0ee',
+      parking: '#eaeaea',
+      parking_stripe: '#f7f7f7',
+      // Pavement is left white and the grey arrives as the network casing on
+      // top, exactly as Google builds a road. Colouring the pavement grey as
+      // well would double the casing and thicken every path.
+      walkway: '#ffffff',
+      driveway: '#ffffff',
+      offsite_road: '#ffffff',
+      crossing: '#e9e9e9',
+      sport: '#c3f1d5',
+      track: '#e3c9b6',
+      closed: '#e4e4e4',
+      pool: '#a5d8f3',
+      building: '#e8e0cd',
+    },
+    basemapConfig: {
+      colorLand: '#f3f3f1',
+      colorGreenspace: '#d3f8e2',
+      colorWater: '#a5d8f3',
+      colorRoads: '#ffffff',
+      colorMotorways: '#fbd9a0',
+      colorTrunks: '#fce8c2',
+      colorBuildings: '#e9e6df',
+      colorRoadLabels: '#5f6368',
+      colorPlaceLabels: '#3c4043',
+      colorPointOfInterestLabels: '#5f6368',
+      // Default is 0.4, which greys Standard's roads down until they read as
+      // land. Google's do not — they are the brightest thing on the sheet.
+      roadsBrightness: 1,
     },
   },
+};
+
+// Google's road ribbon, in pixels. Not the ground-width curve the printed sheet
+// uses: paths.json carries only `from`/`to`, so there is no per-segment width to
+// scale, and a road drawn at its true 3.3 m would vanish at campus zoom anyway.
+// Google solves this the same way — road width is a function of zoom and class,
+// never of the real carriageway.
+const NETWORK_WIDTH = [
+  'interpolate', ['exponential', 1.6], ['zoom'],
+  14, 1.2,
+  16, 3.5,
+  18, 8,
+  20, 18,
+];
+
+// Wider than the core by roughly a pixel and a half per side at every zoom,
+// which is the proportion Google holds. Drawn underneath, so only the overhang
+// shows.
+const NETWORK_CASING_WIDTH = [
+  'interpolate', ['exponential', 1.6], ['zoom'],
+  14, 2.4,
+  16, 5.6,
+  18, 11,
+  20, 23,
+];
+
+// Google's own pin colours, for the two markers the router plants. Origin green
+// and destination red is their convention as well as the one this app already
+// used; only the values move.
+const GOOGLE_GREEN = '#1e8e3e';
+const GOOGLE_RED = '#ea4335';
+
+/**
+ * Roboto — the face Google Maps actually sets its labels in, and one Mapbox
+ * serves from its own font endpoint (verified: Regular, Medium and Bold all
+ * return 200), so this costs no webfont and no extra request from the page.
+ *
+ * The fallback in each stack is the Arial Unicode face Mapbox ships for glyphs
+ * Roboto has no coverage for; without it a missing codepoint renders as tofu.
+ */
+const FONT = {
+  regular: ['Roboto Regular', 'Arial Unicode MS Regular'],
+  medium: ['Roboto Medium', 'Arial Unicode MS Regular'],
+  bold: ['Roboto Bold', 'Arial Unicode MS Bold'],
 };
 
 // Imagery is dark, busy and its own fixed brightness, so it does not follow the
@@ -147,6 +276,10 @@ const SATELLITE = {
   // Sky blue rather than white: the imagery basemap draws its own roads in
   // cream, and a white network is indistinguishable from them over pale roofs.
   network: '#38bdf8',
+  // Google cases its roads over imagery too, but with near-black instead of
+  // grey — a photograph has no reliable background value to sit a light casing
+  // against, and the dark one reads over pale roofs and dark tarmac alike.
+  networkCasing: '#0b1220',
   casing: '#0b1220',
   route: '#facc15',
   building: '#94a3b8',
@@ -163,13 +296,53 @@ const SATELLITE = {
   labelHalo: '#101828',
   areaLabel: '#ffffff',
   parkingLabel: '#dbeafe',
-  plate: '#151b28',
-  plateText: '#ffffff',
 };
 
-/** Layer colours and basemap style for the current basemap/theme pair. */
-function palette(basemap, theme) {
-  return basemap === 'satellite' ? SATELLITE : THEMES[theme];
+/**
+ * The style loaded when Google is drawing the ground: no sources, no layers,
+ * nothing to see through. Google's raster already carries roads, water, labels
+ * and place names, so leaving Standard underneath would double-draw all of it.
+ *
+ * `glyphs` is the one thing an empty style still owes us. Every campus label is
+ * a symbol layer, and a style with no glyph endpoint renders them as nothing at
+ * all — silently, since a missing font is not a style error.
+ *
+ * Frozen and defined once because `syncBasemapStyle` compares style identity;
+ * an object literal rebuilt per call would never equal itself and would
+ * setStyle on every toggle, forever.
+ */
+const BLANK_STYLE = Object.freeze({
+  version: 8,
+  sources: {},
+  layers: [],
+  glyphs: 'mapbox://fonts/mapbox/{fontstack}/{range}.pbf',
+});
+
+/** Layer colours and basemap style for the current provider/basemap/theme. */
+function palette(provider, basemap, theme) {
+  const base = basemap === 'satellite' ? SATELLITE : THEMES[theme];
+  if (provider !== 'google') return base;
+
+  // Same overlay colours — the campus is drawn identically over either ground —
+  // but the Standard configuration keys are dropped rather than left to fail:
+  // there is no basemap import on a blank style for them to apply to, and
+  // setConfigProperty would throw thirteen times on every style load.
+  return { ...base, style: BLANK_STYLE, lightPreset: null, basemapConfig: null };
+}
+
+/**
+ * Identity of the applied style. A change here means a full reload; anything
+ * else is recoloured in place.
+ *
+ * Not just the style URL, because under Google every combination shares the one
+ * blank style: the map type and the theme are baked into the tile session, not
+ * into the style, so switching to satellite or to dark would otherwise keep
+ * serving the tiles it was already serving.
+ */
+function styleKey(provider, basemap, theme) {
+  return provider === 'google'
+    ? `google:${basemap}:${theme}`
+    : palette(provider, basemap, theme).style;
 }
 
 // Comfortable campus walking pace. Used for the ETA and for the simulator.
@@ -191,14 +364,18 @@ const BANNER_SWAP_MS = 320;
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
 // Bounding box of the walkable network, [[west, south], [east, north]]. Printed
-// by scripts/build-paths.mjs — regenerate paths.json and this may need updating.
+// by scripts/build-walk-network.mjs — regenerate paths.json and update this.
 const CAMPUS_BOUNDS = [
-  [-121.350400, 38.645604],
-  [-121.342272, 38.653111],
+  [-121.350452, 38.644706],
+  [-121.342319, 38.653606],
 ];
 
 // Breathing room around the campus when it is framed, in px.
 const FIT_MARGIN = 40;
+
+// The line everything of ours stops at. Same polygon the mask is cut from, so
+// the ground cover and the linework end together rather than a metre apart.
+const CAMPUS_RING = ringOf(campusBoundary);
 
 if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   console.warn("Please add your Mapbox Access Token to the .env file as VITE_MAPBOX_TOKEN.");
@@ -210,16 +387,23 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let currentTheme = preferredTheme();
   applyThemeAttribute(currentTheme);
   let currentBasemap = preferredBasemap();
-  let appliedStyle = palette(currentBasemap, currentTheme).style;
+  let currentProvider = preferredProvider();
+  let appliedStyleKey = styleKey(currentProvider, currentBasemap, currentTheme);
 
   const map = new mapboxgl.Map({
     container: 'map',
-    style: appliedStyle,
+    style: palette(currentProvider, currentBasemap, currentTheme).style,
     // Fitting the network's own bounds rather than a fixed centre/zoom means the
     // campus fills the frame on a phone and a desktop alike.
     bounds: CAMPUS_BOUNDS,
     fitBoundsOptions: { padding: FIT_MARGIN },
   });
+
+  // Dev-only handle, stripped from the production bundle by the constant fold.
+  // Label placement is decided by Mapbox's collision solver and cannot be
+  // reasoned about from the source — "how many building names actually survive
+  // at the default view" is only answerable by asking the running map.
+  if (import.meta.env.DEV) window.__map = map;
 
   // The path network now arrives from the server rather than the bundle, so
   // these start empty.
@@ -293,6 +477,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const canvas = map.getCanvas().getBoundingClientRect();
     if (!panel.width || !canvas.width) return even;
 
+    // Below 640px the stylesheet turns the column into a bottom sheet spanning
+    // the full width, and there what the panel costs is height, not width.
+    // Reserving its width there would exceed the canvas and fall back to an
+    // even margin, which puts the campus underneath it.
+    if (panel.width >= canvas.width * 0.6) {
+      const bottom = canvas.bottom - panel.top + FIT_MARGIN;
+      return bottom + FIT_MARGIN < canvas.height ? { ...even, bottom } : even;
+    }
+
     const left = panel.right - canvas.left + FIT_MARGIN;
     if (left + FIT_MARGIN >= canvas.width) return even;
     return { ...even, left };
@@ -305,16 +498,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const signTemplate = document.getElementById('nav-sign-template');
   const navRemaining = document.getElementById('nav-remaining');
   const navEta = document.getElementById('nav-eta');
-  const themeToggle = document.getElementById('theme-toggle');
-  const themeIcon = document.getElementById('theme-toggle-icon');
-  const themeLabel = document.getElementById('theme-toggle-label');
+  const themeModes = document.getElementById('theme-modes');
+  const railTheme = document.getElementById('rail-theme');
+  const railThemeIcon = document.getElementById('rail-theme-icon');
+  const railThemeText = document.getElementById('rail-theme-text');
   const basemapToggle = document.getElementById('basemap-toggle');
   const basemapIcon = document.getElementById('basemap-toggle-icon');
   const basemapLabel = document.getElementById('basemap-toggle-label');
+  const providerToggle = document.getElementById('provider-toggle');
+  const providerIcon = document.getElementById('provider-toggle-icon');
+  const providerLabel = document.getElementById('provider-toggle-label');
 
   function setDistanceFeet(feet) {
     distanceText.innerHTML =
-      `${Math.round(feet).toLocaleString()} <span class="text-lg text-gray-500 font-medium">ft</span>`;
+      `${Math.round(feet).toLocaleString()} <span class="g-route-unit">ft</span>`;
   }
 
   function setNavButtonsEnabled(enabled) {
@@ -328,13 +525,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    */
   function setStatus(message, isError = false) {
     instructionText.textContent = message;
-    // The muted classes have to come off entirely on error: `dark:text-gray-400`
-    // out-specifies a plain `text-red-600` and would swallow the warning.
-    instructionText.classList.toggle('text-gray-500', !isError);
-    instructionText.classList.toggle('dark:text-gray-400', !isError);
-    instructionText.classList.toggle('text-red-600', isError);
-    instructionText.classList.toggle('dark:text-red-400', isError);
-    instructionText.classList.toggle('font-semibold', isError);
+    // One class rather than the five Tailwind toggles this used to need. The
+    // hint's normal and error colours are both stated in the stylesheet, so
+    // there is no specificity race between a muted class and a red one.
+    instructionText.classList.toggle('is-error', isError);
   }
 
   function resetMap() {
@@ -403,6 +597,23 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return response.json();
   }
 
+  /**
+   * Every vertex the router will accept — my campus's and the surrounding streets'.
+   *
+   * A separate request from the network above because the two answer different
+   * questions now. /api/network is what gets drawn, and that is my campus's linework
+   * alone: the streets around the campus are already painted by whichever
+   * provider is under us, and drawing ours over theirs is the doubled linework
+   * at the campus edge. This is what gets *snapped to*, and it has to include
+   * those streets or a click on the pavement outside lands on the far side of a
+   * car park.
+   */
+  async function fetchVertices() {
+    const response = await fetch('/api/vertices');
+    if (!response.ok) throw new Error(`vertex request failed (${response.status})`);
+    return response.json();
+  }
+
   /** One of the draw-only overlays: buildings, basemap, amenities, places. */
   async function fetchOverlay(name) {
     const response = await fetch(`/api/${name}`);
@@ -423,7 +634,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * is absent from every feature, so the base coalesces to 0.
    */
   function addBuildingsLayer() {
-    const colors = palette(currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme);
 
     // The theme toggle no longer rebuilds the style, so an existing layer has
     // to be recoloured in place rather than left on the old palette.
@@ -448,8 +659,33 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         'fill-extrusion-height': ['get', 'height'],
         'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0],
         'fill-extrusion-opacity': 0.85,
+        // The same opt-out every other layer here carries, and this was the one
+        // that missed it. Standard lights extrusions through its own model, and
+        // under the night preset that drove an authored #2f3336 to roughly
+        // #0c0d0d — the campus turned into pitch-black blocks the moment
+        // navigation started, and stayed that way.
+        //
+        // Not the flat 1 the other layers use, though. They are ground planes
+        // and want their colour rendered exactly as written; this one is the
+        // only thing on the map that is genuinely three-dimensional, and at 1
+        // every face renders identically and a building reads as a sticker.
+        // 0.75 is where the night preset stops swallowing them while the roof
+        // still sits visibly lighter than the walls.
+        'fill-extrusion-emissive-strength': 0.75,
       },
     }, 'route-casing');
+  }
+
+  /**
+   * Extrusion is for navigation only.
+   *
+   * Everywhere else in this file the layer is guarded by `navActive`, but
+   * nothing ever took it down again — so ending a walk left the footprints
+   * standing, which on the dark theme is a campus full of black blocks over a
+   * map that is supposed to be flat.
+   */
+  function removeBuildingsLayer() {
+    if (map.getLayer('campus-buildings')) map.removeLayer('campus-buildings');
   }
 
   // -------------------------------------------------------------------------
@@ -503,7 +739,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * layer and the campus renders inside out.
    */
   function addBasemapLayers() {
-    const colors = palette(currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme);
     const { land } = colors;
 
     // Over imagery there is nothing to add — see SATELLITE.land.
@@ -537,8 +773,40 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // `hidden` marks the parts the app supplies itself — the label plates and
     // the letterform-free label layer — so drawing them would double up on the
     // real text in src/labels.json.
-    const visible = ['!', ['to-boolean', ['get', 'hidden']]];
-    const anchor = map.getLayer('network-lines') ? 'network-lines' : undefined;
+    //
+    // The kinds below are hidden for the same reason, one layer up: the sheet
+    // draws its own pictogram for each of them and addAmenityLayer draws a
+    // Google-style disc over the top, so 78% of those discs were landing within
+    // 6 m of a printed icon — two icon languages stacked on one point.
+    //
+    // Safe because the coverage is exact. The sheet spends several paths per
+    // symbol (84 elements for 14 phones), and collapsing them to positions gives
+    // 14 phones, 6 defibrillators, 6 restrooms and 5 permit machines against
+    // amenities.json's 14, 6, 6 and 10. Nothing is lost; the permit machines
+    // gain five. `bus_stop` joined them when build-amenities.mjs learned to
+    // collapse the sheet's 19 sign-plate elements into the 3 stops they draw.
+    //
+    // `parking_marker` and `bike_marker` joined last. They were the two layers
+    // build-basemap.mjs could not name, and they were the black pictograms
+    // still competing with our own discs: 15 bicycle-and-P signs and, in the
+    // other, 8 P badges, 10 permit machines, a motorcycle bay and 2 drop-off
+    // symbols. Every one of those is now an amenity point drawn as a disc, so
+    // the printed artwork is redundant rather than complementary.
+    //
+    // One caveat, and it is the only thing lost here: my campus's two Student
+    // Drop-Off symbols are painted on the kerb, while the disc that replaces
+    // them sits on the routing node my campus binds that destination to, 21 m and
+    // 30 m away. The symbol moves; it does not disappear.
+    const REDRAWN = [
+      'emergency_phone', 'defibrillator', 'restroom', 'permit_machine', 'bus_stop',
+      'parking_marker', 'bike_marker',
+    ];
+    const visible = [
+      'all',
+      ['!', ['to-boolean', ['get', 'hidden']]],
+      ['match', ['get', 'kind'], REDRAWN, false, true],
+    ];
+    const anchor = belowNetwork();
 
     map.addLayer({
       id: 'campus-sheet-fill',
@@ -599,13 +867,318 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         minzoom: 16,
         layout: {
           'icon-image': ['get', 'kind'],
-          'icon-size': ['interpolate', ['linear'], ['zoom'], 16, 0.4, 19, 0.62],
+          // The image is a 26x34 balloon now rather than a 24x24 disc, so the
+          // sizes here are re-derived rather than kept: 0.54 to 0.65 puts it at
+          // 14x18 to 17x22 px, which is the range Google's own markers occupy.
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 16, 0.54, 19, 0.65],
+          // The tip is the thing that points, so it goes on the coordinate.
+          // Left centred, every marker would name a spot half a pin north of
+          // the phone or the bike rack it stands for.
+          'icon-anchor': 'bottom',
           'icon-padding': 2,
         },
         paint: { 'icon-emissive-strength': 1 },
       });
     }).catch((error) => console.error('amenity icons unavailable:', error));
   }
+
+  // -------------------------------------------------------------------------
+  // Category chips
+  //
+  // Google's chip strip filters the map to one kind of place and lists what it
+  // found. Ours does the same over my campus's printed legend — see src/categories.js
+  // for why those are the categories and not Restaurants/Hotels/Museums.
+  //
+  // Two data sources, because the legend's symbols and my campus's directory are
+  // separate files — a `kinds` category reads amenities.json and a `match` one
+  // reads places.json — but one mechanism on the map: selecting anything hides
+  // the ambient pictogram layer and draws the category's own pins. See
+  // paintCategory for why filtering the existing layer was not enough.
+  // -------------------------------------------------------------------------
+
+  const chipStrip = document.getElementById('category-chips');
+  const chipScroller = document.getElementById('chip-scroller');
+  const chipsPrev = document.getElementById('chips-prev');
+  const chipsNext = document.getElementById('chips-next');
+  const categoryPanel = document.getElementById('category-panel');
+  const categoryTitle = document.getElementById('category-title');
+  const categoryCount = document.getElementById('category-count');
+  const categoryList = document.getElementById('category-list');
+  const categoryClose = document.getElementById('category-close');
+
+  /** The selected category's id, or null when the map is showing everything. */
+  let activeCategory = null;
+  let categoryHits = [];
+
+  /**
+   * Pins for `match` categories.
+   *
+   * Its own source rather than appending to amenities.json, because these are
+   * directory rows, not legend symbols: they carry a real name ("Myrtle Parking
+   * Lot East") and only exist while their chip is pressed. Keeping them apart
+   * means clearing a category is a setData(EMPTY), not a filter on a mixed set.
+   */
+  function addCategoryLayer() {
+    const colors = palette(currentProvider, currentBasemap, currentTheme);
+
+    if (map.getLayer('category-pins')) {
+      // Same shape as the other builders: a theme change re-runs this to
+      // recolour what is already there rather than rebuilding it.
+      map.setPaintProperty('category-pins', 'text-color', colors.label);
+      map.setPaintProperty('category-pins', 'text-halo-color', colors.labelHalo);
+      return;
+    }
+    if (!map.getSource('category-pins')) {
+      map.addSource('category-pins', { type: 'geojson', data: EMPTY });
+    }
+
+    // Shares the amenity loader: the four discs these need are registered in
+    // map-images.js alongside the legend's own, so there is one icon family and
+    // one place it is rasterised.
+    loadAmenityIcons(map).then(() => {
+      if (map.getLayer('category-pins') || !map.getSource('category-pins')) return;
+      map.addLayer({
+        id: 'category-pins',
+        type: 'symbol',
+        source: 'category-pins',
+        slot: 'middle',
+        layout: {
+          'icon-image': ['get', 'icon'],
+          // Larger than the ambient pictograms. These are what the user just
+          // asked to see, and at the zoom the whole campus fits in, the ambient
+          // size renders them as specks against my campus's own printed symbols.
+          // Google does the same thing: a search result is a bigger pin than
+          // the POIs it lands among.
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.72, 19, 0.92],
+          'icon-anchor': 'bottom',
+          // A category is a deliberate request to see all of them, so the pins
+          // never drop out to a collision the way the ambient pictograms do.
+          // Their names still do: `text-optional` keeps the pin when its label
+          // will not fit, which is the only sane answer for the eight HomeBases
+          // — my campus puts all of them inside the LRC, so with overlap allowed the
+          // eight names print on top of each other.
+          'icon-allow-overlap': true,
+          'text-optional': true,
+          'text-field': ['get', 'name'],
+          'text-font': FONT.medium,
+          'text-size': 12,
+          // Under the tip, which is where Google writes a search result's name.
+          // Small gap: the pin already ends in a point, so the label does not
+          // need to clear a disc's radius the way it did.
+          'text-anchor': 'top',
+          'text-offset': [0, 0.4],
+          'text-max-width': 9,
+        },
+        paint: {
+          'text-color': colors.label,
+          'text-halo-color': colors.labelHalo,
+          'text-halo-width': 1.6,
+          'icon-emissive-strength': 1,
+          'text-emissive-strength': 1,
+        },
+      });
+      // A style swap can land between selecting a category and this resolving.
+      paintCategory();
+    }).catch((error) => console.error('category icons unavailable:', error));
+  }
+
+  /** Push the current selection at the map: the filter and the pins. */
+  function paintCategory() {
+    const active = Boolean(activeCategory);
+
+    // The ambient pictograms go away entirely while a category is up, and the
+    // category draws every one of its own pins instead. Two reasons that beats
+    // narrowing the existing layer's filter: that layer is minzoom 16, so a
+    // filtered selection was invisible at the zoom the campus actually fits at;
+    // and the category's pins overlap-allow and carry names, which the ambient
+    // ones deliberately do not.
+    if (map.getLayer('campus-amenities')) {
+      map.setFilter('campus-amenities', active ? ['boolean', false] : null);
+    }
+
+    const source = map.getSource('category-pins');
+    if (!source) return;
+    source.setData(active ? {
+      type: 'FeatureCollection',
+      features: categoryHits.map((hit) => ({
+        type: 'Feature',
+        properties: { icon: hit.icon, name: hit.labelled ? hit.name : '' },
+        geometry: { type: 'Point', coordinates: hit.coords },
+      })),
+    } : EMPTY);
+  }
+
+  /** Straight-line feet from wherever the user is measuring from. */
+  function feetFrom(coords) {
+    const from = startPoint?.geometry.coordinates ?? map.getCenter().toArray();
+    return distance(point(from), point(coords)) * FEET_PER_KM;
+  }
+
+  function renderCategoryList(category) {
+    categoryTitle.textContent = category.label;
+    categoryCount.textContent = categoryHits.length
+      ? `${categoryHits.length} on campus · ${category.legend}`
+      : `Nothing found · ${category.legend}`;
+
+    categoryList.replaceChildren(...categoryHits.map((hit) => {
+      const li = document.createElement('li');
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'g-row';
+
+      const disc = document.createElement('span');
+      disc.className = 'g-row-disc';
+      disc.dataset.icon = category.glyph;
+      row.append(disc);
+
+      const text = document.createElement('span');
+      text.className = 'g-row-text';
+      const name = document.createElement('span');
+      name.className = 'g-row-name';
+      name.textContent = hit.name;
+      text.append(name);
+      if (hit.sub) {
+        const sub = document.createElement('span');
+        sub.className = 'g-row-sub';
+        sub.textContent = hit.sub;
+        text.append(sub);
+      }
+      row.append(text);
+
+      const dist = document.createElement('span');
+      dist.className = 'g-row-dist';
+      dist.textContent = niceFeet(hit.feet);
+      row.append(dist);
+
+      row.addEventListener('click', () => setDestination(hit.coords, hit.name));
+      li.append(row);
+      return li;
+    }));
+    paintIcons(categoryList);
+    categoryPanel.classList.remove('hidden');
+  }
+
+  /**
+   * Frame the hits, unless they are already in front of you — Google does not
+   * move the map when what you asked for is already on screen, and a gratuitous
+   * flyTo throws away wherever the user had panned to.
+   *
+   * "On screen" is tested in screen pixels against the padded rectangle, not
+   * with map.getBounds().contains(). getBounds() is the whole canvas including
+   * the strip the panel is floating over, so the three bus stops — which sit at
+   * the far west edge, behind the panel — counted as visible and the map never
+   * moved to show them.
+   */
+  function frameCategory() {
+    frame(categoryHits.map((hit) => hit.coords));
+  }
+
+  /**
+   * Bring a set of points into view, leaving the camera alone if they already
+   * are. Shared by the chips and by the route, which want the same behaviour for
+   * the same reason.
+   */
+  function frame(points, { maxZoom = 18 } = {}) {
+    if (points.length < 1) return;
+
+    const pad = campusPadding();
+    const canvas = map.getCanvas();
+    const [w, h] = [canvas.clientWidth, canvas.clientHeight];
+    const onScreen = (coords) => {
+      const p = map.project(coords);
+      return p.x >= pad.left && p.x <= w - pad.right && p.y >= pad.top && p.y <= h - pad.bottom;
+    };
+    if (points.every(onScreen)) return;
+
+    const bounds = points.reduce(
+      (acc, coords) => acc.extend(coords),
+      new mapboxgl.LngLatBounds(points[0], points[0]),
+    );
+    map.fitBounds(bounds, { padding: pad, maxZoom, duration: 700 });
+  }
+
+  function selectCategory(id) {
+    const category = CATEGORY_BY_ID.get(id);
+    if (!category) return;
+
+    // Pressing the pressed chip is how you get back to the whole map.
+    if (activeCategory === id) { clearCategory(); return; }
+
+    activeCategory = id;
+    const found = collect(category, { amenities: campusAmenities, places: campusPlaces });
+
+    // A pin gets its name written on the map only when that name identifies it.
+    // "Myrtle Parking Lot East" does; six pins all reading "All-gender restroom"
+    // are six copies of what the icon already said. Uniqueness within the
+    // category decides it, so no category has to declare which kind it is.
+    const seen = new Map();
+    for (const hit of found) seen.set(hit.name, (seen.get(hit.name) ?? 0) + 1);
+
+    categoryHits = found
+      .map((hit) => ({ ...hit, feet: feetFrom(hit.coords), labelled: seen.get(hit.name) === 1 }))
+      .sort((a, b) => a.feet - b.feet);
+
+    for (const chip of chipStrip.children) {
+      chip.setAttribute('aria-pressed', String(chip.dataset.id === id));
+    }
+    renderCategoryList(category);
+    paintCategory();
+    frameCategory();
+  }
+
+  function clearCategory() {
+    activeCategory = null;
+    categoryHits = [];
+    for (const chip of chipStrip.children) chip.setAttribute('aria-pressed', 'false');
+    categoryPanel.classList.add('hidden');
+    categoryList.replaceChildren();
+    paintCategory();
+  }
+
+  function buildChips() {
+    chipStrip.replaceChildren(...CATEGORIES.map((category) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'g-chip';
+      chip.dataset.id = category.id;
+      chip.setAttribute('aria-pressed', 'false');
+      chip.title = category.legend;
+      // Both data files are still in flight at this point, and a chip that
+      // silently reports "Nothing found" reads as broken rather than as early.
+      chip.disabled = true;
+
+      const glyph = document.createElement('span');
+      glyph.className = 'g-icon';
+      glyph.dataset.icon = category.glyph;
+      chip.append(glyph, document.createTextNode(category.label));
+
+      chip.addEventListener('click', () => selectCategory(category.id));
+      return chip;
+    }));
+    paintIcons(chipStrip);
+    updateChipArrows();
+  }
+
+  /** Show a scroll arrow only on the side there is more strip to reach. */
+  function updateChipArrows() {
+    const max = chipStrip.scrollWidth - chipStrip.clientWidth;
+    chipsPrev.classList.toggle('hidden', chipStrip.scrollLeft <= 4);
+    chipsNext.classList.toggle('hidden', chipStrip.scrollLeft >= max - 4);
+  }
+
+  const scrollChips = (by) => chipStrip.scrollBy({ left: by, behavior: 'smooth' });
+  chipsPrev.addEventListener('click', () => scrollChips(-220));
+  chipsNext.addEventListener('click', () => scrollChips(220));
+  chipStrip.addEventListener('scroll', updateChipArrows);
+  new ResizeObserver(updateChipArrows).observe(chipScroller);
+  categoryClose.addEventListener('click', clearCategory);
+
+  /** Called once the overlays a chip reads from have actually arrived. */
+  function enableChips() {
+    for (const chip of chipStrip.children) chip.disabled = false;
+  }
+
+  buildChips();
 
   /**
    * The printed map's own labels.
@@ -617,25 +1190,66 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * their cartographer actually set instead: "Library", "Main Gym", "STADIUM".
    * places.json is still what search reads; it was only ever wrong for labels.
    *
-   * Three layers rather than one because the sheet sets three kinds of label and
-   * they differ in more than colour: areas are letterspaced capitals, and the
-   * larger building names are reversed out of a dark plate, which needs an icon
-   * behind the text that a single layer cannot apply selectively.
+   * One layer per kind rather than one for all four, because they differ in
+   * weight, tracking and colour — and `text-font` is a layout property that
+   * takes no data expression, so a single layer could not set Medium for area
+   * names and Regular for the rest whatever the paint said.
+   *
+   * `plate` is my campus's name for their larger building labels, kept because it is
+   * the source data's vocabulary. The dark box it refers to is not drawn any
+   * more; see addLabelLayers.
    */
   const LABEL_KINDS = ['area', 'plate', 'building', 'parking'];
 
   /**
-   * Text size from the label's own point size on the sheet, so my campus's hierarchy
-   * survives — Library is 13.1 pt against Oak Cafe's 6.6 and stays bigger here.
-   * Ground-true scaling was tried and grows far too fast, roughly doubling per
-   * zoom level; this is gentler and stays readable across the useful range.
+   * my campus's hierarchy, at Google's sizes.
+   *
+   * Keeping the point size the cartographer set is right — Library is 13.1 pt
+   * against Oak Cafe's 6.6, and that ordering is real information. Using those
+   * numbers AS pixels is not: they were set for a sheet 34 inches wide, and
+   * multiplied straight through they gave a spread of 6.6 to 16 px against the
+   * 11 to 15 Google sets its own labels in. Ours were visibly the smaller map's
+   * type sitting on the bigger map's ground, which is most of what made the two
+   * halves look like two maps.
+   *
+   * So the print range is mapped onto theirs and the ordering survives the
+   * remap. Measured off the raster rather than taken from a spec: a Google road
+   * label is 11-12 px, an ordinary POI 12, a prominent one 14-15.
+   */
+  const GOOGLE_BAND = ['interpolate', ['linear'], ['get', 'pt'], 6, 11, 14.5, 16];
+
+  /**
+   * ...and a much flatter zoom ramp than print scaling implies.
+   *
+   * This is the other half of the mismatch, and the more visible one while
+   * moving: a Google label is very nearly the same size at z15 and at z19,
+   * because their type is chrome for reading the map rather than something
+   * drawn on the ground. Ours scaled 1.1x to 1.9x across that range, so the two
+   * agreed at one zoom and diverged either side of it. 0.86 to 1.1 keeps a
+   * little of the growth — labels are allowed to breathe as you zoom in — with
+   * nothing like the drift.
    */
   const labelSize = (scale) => [
     'interpolate', ['linear'], ['zoom'],
-    15, ['*', ['get', 'pt'], 1.1 * scale],
-    17, ['*', ['get', 'pt'], 1.45 * scale],
-    19, ['*', ['get', 'pt'], 1.9 * scale],
+    15, ['*', GOOGLE_BAND, 0.86 * scale],
+    17, ['*', GOOGLE_BAND, 1.0 * scale],
+    19, ['*', GOOGLE_BAND, 1.1 * scale],
   ];
+
+  /**
+   * Ink for one label kind, so the layer builder and the theme-switch path
+   * cannot drift apart — they used to set these from two separate expressions
+   * and a fourth kind would silently keep the old colour on a theme change.
+   *
+   * Google colours a label by what it names, not by its size: greenspace is
+   * green, everything built is the same cool slate, and parking is that slate
+   * lightened rather than a hue of its own.
+   */
+  const labelInk = (kind, colors) => (
+    kind === 'area' ? colors.areaLabel
+      : kind === 'parking' ? colors.parkingLabel
+        : colors.label
+  );
 
   /**
    * Buildings you can tap.
@@ -658,7 +1272,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const CARD_WIDTH = 288;
 
   function addDirectoryLayers() {
-    const colors = palette(currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme);
 
     if (map.getLayer('campus-directory-fill')) {
       map.setPaintProperty('campus-directory-fill', 'fill-color', colors.route);
@@ -783,19 +1397,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   function addLabelLayers() {
-    const colors = palette(currentBasemap, currentTheme);
-
-    // An image cannot be recoloured in place, so the plate is re-registered.
-    if (campusLabels) loadLabelPlate(map, colors.plate);
+    const colors = palette(currentProvider, currentBasemap, currentTheme);
 
     if (map.getLayer('campus-labels-building')) {
-      map.setPaintProperty('campus-labels-building', 'text-color', colors.label);
-      map.setPaintProperty('campus-labels-building', 'text-halo-color', colors.labelHalo);
-      map.setPaintProperty('campus-labels-area', 'text-color', colors.areaLabel);
-      map.setPaintProperty('campus-labels-area', 'text-halo-color', colors.labelHalo);
-      map.setPaintProperty('campus-labels-plate', 'text-color', colors.plateText);
-      map.setPaintProperty('campus-labels-parking', 'text-color', colors.parkingLabel);
-      map.setPaintProperty('campus-labels-parking', 'text-halo-color', colors.labelHalo);
+      for (const kind of LABEL_KINDS) {
+        map.setPaintProperty(`campus-labels-${kind}`, 'text-color', labelInk(kind, colors));
+        map.setPaintProperty(`campus-labels-${kind}`, 'text-halo-color', colors.labelHalo);
+      }
       return;
     }
     if (!campusLabels) return;
@@ -803,6 +1411,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (!map.getSource('campus-labels')) {
       map.addSource('campus-labels', { type: 'geojson', data: campusLabels });
     }
+
+    // The building names carry a POI disc now, so their images have to be
+    // registered before a layer can reference one — same reason addAmenityLayer
+    // waits, and the same loader, because they are one icon family.
+    loadAmenityIcons(map)
+      .then(() => buildLabelLayers())
+      .catch((error) => console.error('label icons unavailable:', error));
+  }
+
+  function buildLabelLayers() {
+    // A style swap can land between the loader resolving and this running, and
+    // the palette can have changed under it — so both are re-read here.
+    if (map.getLayer('campus-labels-building') || !map.getSource('campus-labels')) return;
+    const colors = palette(currentProvider, currentBasemap, currentTheme);
 
     const common = {
       type: 'symbol',
@@ -815,44 +1437,88 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Bigger type wins a collision, which is my campus's own hierarchy again.
     const sortKey = ['-', 0, ['get', 'pt']];
 
+    /**
+     * A disc at the point with the name set to its right, which is how Google
+     * draws a POI and the reason their map is scannable — colour carries the
+     * category, so you find the gym without reading 39 building names.
+     *
+     * `['get', 'poi']` evaluates to null for a feature that has none, and a
+     * null icon-image simply draws no icon; the `case`s around the text put
+     * that label back to plain centred type rather than leaving it offset into
+     * empty space. Only "Closed" takes that path today — it names a fenced-off
+     * area, not a place.
+     */
+    const poiLayout = {
+      'icon-image': ['get', 'poi'],
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 15, 0.58, 19, 0.72],
+      'icon-anchor': 'bottom',
+      'text-anchor': ['case', ['has', 'poi'], 'left', 'center'],
+      'text-justify': ['case', ['has', 'poi'], 'left', 'center'],
+      // Beside the head, not beside the tip — which is where Google writes a
+      // POI's name, and the reason the label reads as belonging to the marker.
+      //
+      // Ems, because text-offset has no other unit, and that is a compromise
+      // here rather than the right unit: the lift wanted is a fixed ~12.5 px
+      // (the head sits that far above the tip at these sizes) while an em is
+      // whatever type size my campus set for that particular name. One value cannot
+      // be exact for both the 11 px labels and the 16 px ones; 1.0 em splits it
+      // and leaves the extremes about 3 px out, which at this size does not
+      // read. The horizontal gap has the opposite property and genuinely wants
+      // ems — a bigger name should stand further off its pin.
+      'text-offset': ['case', ['has', 'poi'], ['literal', [0.95, -1.0]], ['literal', [0, 0]]],
+      // A disc makes each symbol wider, and width is what the collision solver
+      // charges for: at the default view, adding them dropped 5 of the 21
+      // building names that used to place. Trimming the default 2 px of padding
+      // off both halves is what buys those back — measured, not guessed.
+      'icon-padding': 0,
+      'text-padding': 1,
+    };
+
     for (const kind of LABEL_KINDS) {
       const area = kind === 'area';
-      const plate = kind === 'plate';
+      // `plate` is my campus's kind for their larger building names. The dark box it
+      // is named after is gone — Google sets every label as plain haloed text —
+      // so what survives is the weight and size those names already carried.
+      const major = kind === 'plate';
       map.addLayer({
         ...common,
         id: `campus-labels-${kind}`,
         filter: ['==', ['get', 'kind'], kind],
         layout: {
           'text-field': ['get', 'text'],
-          'text-font': area
-            ? ['DIN Pro Bold', 'Arial Unicode MS Bold']
-            : ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+          // Google's own hierarchy is set in weight, not colour: area names in
+          // Medium, major buildings in Medium, everything else Regular. Bold
+          // appears nowhere on their map at these sizes.
+          'text-font': area || major ? FONT.medium : FONT.regular,
           'text-size': labelSize(area ? 0.95 : 1),
           // 8 ems is where the sheet breaks its own labels, so the printed ones
           // keep their original line breaks. The names added from my campus's database
           // have no printed breaks to reproduce and carry a width fitted to the
           // footprint instead — see build-labels.mjs.
           'text-max-width': ['coalesce', ['get', 'maxWidth'], 8],
-          'text-line-height': 1.05,
-          'text-letter-spacing': area ? 0.14 : 0,
+          // 1.2 rather than 1.05: Google's lines sit further apart than my campus's
+          // print setting, which is most of why their multi-line names read as
+          // labels rather than as blocks of text.
+          'text-line-height': 1.2,
+          // my campus letterspaces its area capitals hard. Google tracks theirs only
+          // slightly, so this is halved rather than dropped — losing it entirely
+          // would make BASEBALL FIELD read as a building name.
+          'text-letter-spacing': area ? 0.07 : 0,
           'symbol-sort-key': sortKey,
-          ...(plate ? {
-            'icon-image': 'label-plate',
-            'icon-text-fit': 'both',
-            'icon-text-fit-padding': [3, 6, 3, 6],
-          } : {}),
+          ...(POI_LABEL_KINDS.has(kind) ? poiLayout : {}),
         },
         paint: {
-          'text-color': area ? colors.areaLabel
-            : plate ? colors.plateText
-            : kind === 'parking' ? colors.parkingLabel
-            : colors.label,
-          // A plate is its own background; a halo on top of it only muddies the
-          // edge of the type.
+          'text-color': labelInk(kind, colors),
           'text-halo-color': colors.labelHalo,
-          'text-halo-width': plate ? 0 : 1.4,
-          'text-emissive-strength': 1,
+          // Standard's night preset would otherwise light the discs through its
+          // own model and swallow them, the way it does the sheet.
           'icon-emissive-strength': 1,
+          // Google's halo is a thin, slightly blurred casing rather than the
+          // hard 1.4px outline a print sheet uses — enough to lift type off
+          // mint lawn without the letters growing a visible white shell.
+          'text-halo-width': 1.1,
+          'text-halo-blur': 0.5,
+          'text-emissive-strength': 1,
         },
       });
     }
@@ -888,13 +1554,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * Mapbox draws the campus from, so the cut lands exactly on their edge.
    */
   function addCampusMask() {
-    const colors = palette(currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme);
 
     if (!map.getSource('campus-boundary')) {
       map.addSource('campus-boundary', { type: 'geojson', data: campusBoundary });
     }
 
-    if (!map.getLayer('campus-clip')) {
+    // Nothing to clip when Google draws the ground: the style under us is
+    // blank, so there is no `basemap` import for `clip-layer-scope` to name and
+    // no Mapbox symbols or models to remove. Skipped rather than left to no-op,
+    // because a clip layer sitting above the Google raster is one scope-matching
+    // change away from punching a hole in the ground it is meant to leave alone.
+    if (currentProvider !== 'google' && !map.getLayer('campus-clip')) {
       try {
         map.addLayer({
           id: 'campus-clip',
@@ -948,19 +1619,56 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       },
       // Re-added after a basemap swap, this would otherwise land on top of the
       // network it is supposed to sit under.
-    }, map.getLayer('network-lines') ? 'network-lines' : undefined);
+    }, belowNetwork());
+  }
+
+  /**
+   * One Standard configuration property, best-effort.
+   *
+   * Standard's schema is Mapbox's to change, and a key it no longer recognises
+   * throws rather than being ignored. A missing colour is a cosmetic loss; an
+   * exception here would take down every layer added after it, so this swallows
+   * and reports instead.
+   */
+  function setConfig(key, value) {
+    try {
+      map.setConfigProperty('basemap', key, value);
+    } catch (error) {
+      console.warn(`basemap config "${key}" unavailable:`, error.message ?? error);
+    }
+  }
+
+  /**
+   * The layer a campus overlay must be inserted below to stay under the road
+   * ribbon. The casing is the lower of the two network layers, so anchoring to
+   * `network-lines` would slip the ground cover between casing and core and
+   * paint out the casing entirely.
+   */
+  function belowNetwork() {
+    for (const id of ['network-casing', 'network-lines']) {
+      if (map.getLayer(id)) return id;
+    }
+    return undefined;
   }
 
   function addNetworkLayers() {
-    const colors = palette(currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme);
 
     // Mapbox Standard exposes configuration instead of addressable layers, and
     // this is where light and dark actually happen now.
-    try {
-      map.setConfigProperty('basemap', 'lightPreset', colors.lightPreset);
-    } catch (error) {
-      // Older styles have no config; the map is still perfectly usable.
-      console.warn('basemap config unavailable', error);
+    //
+    // `basemapConfig` recolours Mapbox's own land, water, greenspace, roads and
+    // labels to the same Google palette the campus uses, so the mask edge stops
+    // being a seam between two maps. Only Standard carries these keys —
+    // standard-satellite has a different schema and no basemapConfig, so it
+    // falls through with nothing set.
+    //
+    // Each key is set individually rather than in one try: an unknown property
+    // throws, and one Mapbox rename should cost that colour, not every colour
+    // after it in the object.
+    setConfig('lightPreset', colors.lightPreset);
+    for (const [key, value] of Object.entries(colors.basemapConfig ?? {})) {
+      setConfig(key, value);
     }
 
     addCampusMask();
@@ -973,6 +1681,34 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       map.addSource('calculated-route', { type: 'geojson', data: routeFeature() });
     }
 
+    // The network is drawn the way Google draws a road: one source, two line
+    // layers, the wider casing underneath. Added casing-first so insertion
+    // order alone puts it below — both live in `middle`, and within a slot
+    // Mapbox honours the order layers were added in.
+    //
+    // Round joins and caps on both. A square cap on the casing leaves a grey
+    // nub sticking past the end of the white core at every dead end, which is
+    // the tell that a network was drawn as two lines rather than as roads.
+    if (!map.getLayer('network-casing')) {
+      map.addLayer({
+        id: 'network-casing',
+        type: 'line',
+        source: 'custom-network',
+        slot: 'middle',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': colors.networkCasing,
+          'line-width': NETWORK_CASING_WIDTH,
+          // Same reasoning as the mask and the sheet: without this the night
+          // preset drags both halves of the ribbon toward the ground colour and
+          // the casing stops separating anything.
+          'line-emissive-strength': 1,
+        },
+      });
+    } else {
+      map.setPaintProperty('network-casing', 'line-color', colors.networkCasing);
+    }
+
     if (!map.getLayer('network-lines')) {
       map.addLayer({
         id: 'network-lines',
@@ -983,7 +1719,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         // campus stay readable over the top of nothing of ours.
         slot: 'middle',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': colors.network, 'line-width': 2, 'line-dasharray': [2, 2] }
+        paint: {
+          'line-color': colors.network,
+          'line-width': NETWORK_WIDTH,
+          'line-emissive-strength': 1,
+        },
       });
     } else {
       map.setPaintProperty('network-lines', 'line-color', colors.network);
@@ -1019,6 +1759,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Last, so the symbols and labels sit above the route rather than under it.
     addDirectoryLayers();
     addAmenityLayer();
+    addCategoryLayer();
     addLabelLayers();
 
     if (navActive) addBuildingsLayer();
@@ -1066,6 +1807,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     navBanner.classList.add('hidden');
     navFooter.classList.add('hidden');
     if (userMarker) userMarker.remove();
+    removeBuildingsLayer();
     map.resize();
 
     // Flatten the pitched navigation camera and frame the whole campus again.
@@ -1258,23 +2000,95 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     map.on('error', (e) => console.error('map error:', e.error?.message ?? e));
   }
 
-  // Fires on first load *and* after every setStyle, which is exactly when the
-  // custom layers need rebuilding.
-  map.on('style.load', addNetworkLayers);
+  // Which provider the layers currently on the map were built for. Compared
+  // against the live value when a session resolves, so a toggle back to Mapbox
+  // during the round trip cannot land Google's tiles on the Mapbox style.
+  let groundGeneration = 0;
+  // Assigned below, once the DOM refs are in hand. Declared here because the
+  // failure path in addGoogleGround has to be able to put the button back.
+  let providerControl = null;
 
   /**
-   * Swap the basemap if the current basemap/theme pair calls for a different
-   * one. Both toggles route through here: on satellite the theme no longer
-   * changes the map, so this becomes a no-op and only the page chrome restyles.
+   * Put Google's raster underneath everything, when Google is the provider.
+   *
+   * Asynchronous because the tiles cannot be requested until a session token
+   * has been minted, which means this resolves well after style.load has
+   * returned and our own layers already exist. Hence the explicit `beforeId`:
+   * the raster has to go to the *bottom* whenever it arrives, not on top of the
+   * campus it is supposed to sit under.
+   */
+  async function addGoogleGround() {
+    if (currentProvider !== 'google') return;
+    const generation = ++groundGeneration;
+
+    try {
+      const source = await googleGround({
+        key: googleKey,
+        basemap: currentBasemap,
+        theme: currentTheme,
+        bounds: CAMPUS_BOUNDS,
+      });
+
+      // The style may have been swapped out from under this request. The
+      // generation counter is the whole check: it is bumped by every setStyle,
+      // and this only ever runs from style.load, so the style is initialised by
+      // definition.
+      //
+      // Explicitly NOT map.isStyleLoaded(). That reports whether the style is
+      // *idle* — it returns false while any source cache is still loading, any
+      // image is in flight, or any pattern is pending. The campus sheet is ~2 MB
+      // of GeoJSON fetched over the network, so by the time a session token has
+      // been minted it is reliably still false, and gating on it meant this
+      // returned silently and the ground was never added. No error, no layer.
+      if (generation !== groundGeneration || currentProvider !== 'google') return;
+      if (map.getLayer('google-basemap')) return;
+
+      if (!map.getSource('google-tiles')) map.addSource('google-tiles', source);
+      // Bottom of the stack, whoever else got there first. Our own layers were
+      // added synchronously back in style.load, so there is normally something
+      // to go under; the optional chain covers the case where there is not.
+      map.addLayer(
+        { id: 'google-basemap', type: 'raster', source: 'google-tiles' },
+        map.getStyle().layers[0]?.id,
+      );
+    } catch (error) {
+      // A refused key is not a bug the user can see the shape of — the map just
+      // stays empty. Google's own message names the cause (API not enabled,
+      // referrer not allowed, key invalid), so it goes straight to the panel,
+      // and the toggle drops back to a provider that works.
+      console.error('Google basemap unavailable:', error);
+      setStatus(`Google basemap unavailable: ${error.message}`, true);
+      if (generation !== groundGeneration) return;
+      currentProvider = 'mapbox';
+      providerControl?.revert();
+      syncBasemapStyle();
+    }
+  }
+
+  // Fires on first load *and* after every setStyle, which is exactly when the
+  // custom layers need rebuilding.
+  map.on('style.load', () => {
+    addNetworkLayers();
+    addGoogleGround();
+  });
+
+  /**
+   * Swap the basemap if the current provider/basemap/theme triple calls for a
+   * different one. All three toggles route through here: on satellite the theme
+   * no longer changes the Mapbox map, so this becomes a no-op and only the page
+   * chrome restyles.
    */
   function syncBasemapStyle() {
-    const nextStyle = palette(currentBasemap, currentTheme).style;
+    const nextKey = styleKey(currentProvider, currentBasemap, currentTheme);
 
-    if (nextStyle !== appliedStyle) {
-      appliedStyle = nextStyle;
+    if (nextKey !== appliedStyleKey) {
+      appliedStyleKey = nextKey;
+      // Invalidate any session request still in flight for the outgoing style.
+      groundGeneration++;
       // diff:false forces a full style reload. The default diffing path can
       // drop custom layers without firing style.load, leaving a bare basemap.
-      map.setStyle(nextStyle, { diff: false }); // style.load re-adds our layers
+      // style.load re-adds our layers and re-requests the ground.
+      map.setStyle(palette(currentProvider, currentBasemap, currentTheme).style, { diff: false });
       return;
     }
 
@@ -1291,10 +2105,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (map.getLayer('campus-buildings')) addBuildingsLayer();
   }
 
-  createThemeToggle({
-    button: themeToggle,
-    icon: themeIcon,
-    label: themeLabel,
+  createThemeControl({
+    group: themeModes,
+    cycle: { button: railTheme, icon: railThemeIcon, text: railThemeText },
     onChange: (theme) => {
       currentTheme = theme;
       syncBasemapStyle();
@@ -1311,6 +2124,87 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     },
   });
 
+  // Last of the three, so that its initial onChange — which can start a session
+  // request — runs after the theme and basemap have published their own state.
+  providerControl = createProviderToggle({
+    button: providerToggle,
+    icon: providerIcon,
+    label: providerLabel,
+    onChange: (provider) => {
+      currentProvider = provider;
+      syncBasemapStyle();
+    },
+  });
+
+  // -------------------------------------------------------------------------
+  // Chrome: the rail, the layers switcher and the legend sheet
+  //
+  // Small, and none of it touches the map — it opens and closes things. Kept
+  // together so the "what does this button do" question has one place to look.
+  // -------------------------------------------------------------------------
+
+  const railMenu = document.getElementById('rail-menu');
+  const railLegend = document.getElementById('rail-legend');
+  const railClear = document.getElementById('rail-clear');
+  const layersBtn = document.getElementById('layers-btn');
+  const layersMenu = document.getElementById('layers-menu');
+  const legendSheet = document.getElementById('legend-sheet');
+  const legendList = document.getElementById('legend-list');
+  const legendClose = document.getElementById('legend-close');
+  const directionsBtn = document.getElementById('directions-btn');
+  const searchGo = document.getElementById('search-go');
+
+  /** Show or hide a floating card, keeping the button that owns it in step. */
+  function toggleSheet(sheet, button, force) {
+    const open = force ?? sheet.classList.contains('hidden');
+    sheet.classList.toggle('hidden', !open);
+    button?.setAttribute('aria-expanded', String(open));
+    return open;
+  }
+
+  railMenu.addEventListener('click', () => {
+    const open = toggleSheet(sidePanel, railMenu);
+    railMenu.setAttribute('aria-label', open ? 'Hide the route panel' : 'Show the route panel');
+    // The panel is what campusPadding reserves room for, so the campus has to
+    // be re-framed when it comes or goes or it ends up visibly off-centre.
+    map.easeTo({ padding: campusPadding(), duration: 300 });
+  });
+
+  railLegend.addEventListener('click', () => {
+    const open = toggleSheet(legendSheet, railLegend);
+    railLegend.setAttribute('aria-pressed', String(open));
+  });
+  legendClose.addEventListener('click', () => toggleSheet(legendSheet, railLegend, false));
+  railClear.addEventListener('click', resetMap);
+
+  layersBtn.addEventListener('click', () => toggleSheet(layersMenu, layersBtn));
+  // Click-away, the way every menu of this shape behaves. Bound on the document
+  // rather than the map so it also fires over the rest of the chrome.
+  document.addEventListener('click', (event) => {
+    if (layersMenu.classList.contains('hidden')) return;
+    if (layersBtn.contains(event.target) || layersMenu.contains(event.target)) return;
+    toggleSheet(layersMenu, layersBtn, false);
+  });
+
+  const focusSearch = () => { searchInput.focus(); searchInput.select(); };
+  searchGo.addEventListener('click', focusSearch);
+  directionsBtn.addEventListener('click', () => {
+    toggleSheet(sidePanel, railMenu, true);
+    focusSearch();
+  });
+
+  // The legend sheet is generated from the same list the chips are, so the two
+  // can never disagree about what this map's symbols mean.
+  legendList.replaceChildren(...CATEGORIES.map((category) => {
+    const li = document.createElement('li');
+    const glyph = document.createElement('span');
+    glyph.className = 'g-icon';
+    glyph.dataset.icon = category.glyph;
+    li.append(glyph, document.createTextNode(category.legend));
+    return li;
+  }));
+  paintIcons(legendList);
+
   map.on('load', async () => {
     // Real GPS. Requires a secure context (https or localhost) or the browser
     // silently refuses to report a position.
@@ -1319,7 +2213,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       trackUserLocation: true,
       showUserHeading: true,
     });
-    map.addControl(geolocate);
+    // Bottom-right, which is where Google keeps locate, zoom and the scale bar.
+    // Order matters: controls stack upward from the corner in the order added,
+    // so locate ends up above the zoom pair, as it is on their map.
+    map.addControl(geolocate, 'bottom-right');
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+    map.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-right');
     geolocate.on('geolocate', (e) => {
       onUserMoved([e.coords.longitude, e.coords.latitude], { duration: 1000 });
     });
@@ -1329,9 +2228,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // All from the same server, so ask together. They are settled separately
     // because only the network is load-bearing: without it nothing can be
     // routed, whereas every overlay is decoration and its loss costs one layer.
-    const [networkResult, buildings, basemap, amenities, places, labels, directory] =
+    const [networkResult, vertexResult, buildings, basemap, amenities, places, labels, directory] =
       await Promise.allSettled([
         fetchNetwork(),
+        fetchVertices(),
         fetchOverlay('buildings'),
         fetchOverlay('basemap'),
         fetchOverlay('amenities'),
@@ -1348,7 +2248,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
 
     if (basemap.status === 'fulfilled') {
-      campusBasemap = basemap.value;
+      // Trimmed to the campus on the way in. my campus's sheet carries the streets
+      // around it, both north arrows and the trees along the verge, and every
+      // one of those lands on a ground that is already drawing them — see
+      // src/campus-clip.js.
+      campusBasemap = trimToCampus(basemap.value, CAMPUS_RING);
       addBasemapLayers();
     } else {
       console.error(basemap.reason);
@@ -1374,6 +2278,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       console.error(places.reason);
     }
 
+    // A chip reads one or both of those two. Live as soon as either arrived —
+    // a category over the surviving file is still a working category.
+    if (campusAmenities || campusPlaces) {
+      addCategoryLayer();
+      enableChips();
+    }
+
     if (directory.status === 'fulfilled') {
       campusDirectory = directory.value;
       addDirectoryLayers();
@@ -1382,7 +2293,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
 
     if (labels.status === 'fulfilled') {
-      campusLabels = labels.value;
+      // Classified on the way in rather than in the build script: which disc a
+      // building name earns is presentation, and labels.json stays exactly what
+      // my campus's cartographer set. See src/poi.js.
+      campusLabels = withPoiIcons(labels.value);
       addLabelLayers();
     } else {
       console.error(labels.reason);
@@ -1393,20 +2307,26 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       setStatus('Routing server unreachable — is `npm run dev` still running?', true);
       return;
     }
-    customNetwork = networkResult.value;
+    const routable = networkResult.value;
 
-    const vertices = [];
-    const seen = new Set();
-    customNetwork.features.forEach(feature => {
-      feature.geometry.coordinates.forEach(coord => {
-        const key = `${coord[0]},${coord[1]}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          vertices.push(coord);
-        }
-      });
-    });
+    // Snapping targets come from /api/vertices, which is the whole routing
+    // graph. Falling back to the drawn network keeps clicks working on campus
+    // if that one request fails — degraded, not broken: a start point outside
+    // the fence would be dragged in to the nearest campus path.
+    const vertices = vertexResult.status === 'fulfilled'
+      ? vertexResult.value.vertices
+      : [...new Map(routable.features
+        .flatMap((f) => f.geometry.coordinates)
+        .map((c) => [`${c[0]},${c[1]}`, c])).values()];
+    if (vertexResult.status === 'rejected') console.error(vertexResult.reason);
     networkPoints = featureCollection(vertices.map(v => point(v)));
+
+    // Drawn only as far as the fence. my campus's driveways are drawn running out to
+    // the public road, and past the boundary that white ribbon lands on top of
+    // a road the basemap is already drawing. Cut rather than dropped, so a
+    // driveway still reaches the gate instead of stopping at the junction
+    // inside it — the route still runs the whole way, over their linework.
+    customNetwork = trimToCampus(routable, CAMPUS_RING);
 
     map.getSource('custom-network').setData(customNetwork);
   });
@@ -1426,7 +2346,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function placeStart(coords, label) {
     startPoint = point(coords);
     startMarker?.remove();
-    startMarker = new mapboxgl.Marker({ color: '#22c55e' }) // Tailwind green-500
+    startMarker = new mapboxgl.Marker({ element: googlePin(GOOGLE_GREEN, { title: 'Start' }), anchor: 'bottom' })
       .setLngLat(coords)
       .addTo(map);
     startCoordText.textContent = label ?? coordLabel(coords);
@@ -1435,7 +2355,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   async function placeEnd(coords, label) {
     endPoint = point(coords);
     endMarker?.remove();
-    endMarker = new mapboxgl.Marker({ color: '#ef4444' }) // Tailwind red-500
+    endMarker = new mapboxgl.Marker({ element: googlePin(GOOGLE_RED, { title: 'Destination' }), anchor: 'bottom' })
       .setLngLat(coords)
       .addTo(map);
     endCoordText.textContent = label ?? coordLabel(coords);
@@ -1480,6 +2400,43 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const turns = maneuvers.length - 2;
     setStatus(`Route calculated — ${turns} turn${turns === 1 ? '' : 's'}.`);
     setNavButtonsEnabled(true);
+
+    // A walk that starts off campus does not fit the campus view it was planned
+    // in, and half a route running off the top of the screen is the same bug as
+    // a category whose pins are behind the panel. Same helper, so it leaves the
+    // camera alone when the whole thing is already in front of you.
+    frame(routeCoords, { maxZoom: 17 });
+  }
+
+  /**
+   * Make a named point the destination, whichever list it was picked from.
+   *
+   * Shared by the search box and the category panel. Both can be used before a
+   * start point exists, which is the case `pendingEnd` covers: the pin and the
+   * label go down now, and the route is calculated the moment the next map
+   * click supplies somewhere to walk from.
+   */
+  async function setDestination(coords, name) {
+    // Both ends already set: start over rather than accumulating markers.
+    if (startPoint && endPoint) resetMap();
+
+    if (!startPoint) {
+      // Nothing to route yet, so the destination is the only thing worth
+      // looking at. With a start point already down the camera belongs to the
+      // route instead, and placeEnd frames it — flying here first would land on
+      // the destination at z17, then test the route against the view it had
+      // *before* the flight, decide it was already visible, and leave half the
+      // walk off the top of the screen. Which is exactly what it did.
+      map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 17), duration: 900 });
+      pendingEnd = { coords, name };
+      endMarker?.remove();
+      endMarker = new mapboxgl.Marker({ element: googlePin(GOOGLE_RED, { title: 'Destination' }), anchor: 'bottom' })
+        .setLngLat(coords).addTo(map);
+      endCoordText.textContent = name;
+      setStatus(`${name} — now click the map to set where you are starting from.`);
+      return;
+    }
+    await placeEnd(coords, name);
   }
 
   map.on('click', async (e) => {
@@ -1607,10 +2564,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function highlight(index) {
     activeHit = index;
     [...searchResults.children].forEach((li, i) => {
-      const on = i === index;
-      li.setAttribute('aria-selected', String(on));
-      li.classList.toggle('bg-cyan-50', on);
-      li.classList.toggle('dark:bg-neutral-700', on);
+      // `aria-selected` alone: the stylesheet draws the highlight off it, so
+      // the accessible state and the visible one cannot disagree.
+      li.setAttribute('aria-selected', String(i === index));
     });
     if (index >= 0) {
       searchInput.setAttribute('aria-activedescendant', `place-result-${index}`);
@@ -1625,9 +2581,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       const li = document.createElement('li');
       li.id = `place-result-${i}`;
       li.setAttribute('role', 'option');
-      li.className = 'px-3 py-2 cursor-pointer hover:bg-cyan-50 dark:hover:bg-neutral-700';
       const name = document.createElement('div');
-      name.className = 'text-gray-800 dark:text-gray-100';
+      name.className = 'g-result-name';
       name.textContent = entry.name;
       li.append(name);
       // Only worth a second line when it says something the name did not.
@@ -1636,7 +2591,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         : entry.description;
       if (hint) {
         const sub = document.createElement('div');
-        sub.className = 'text-xs text-gray-500 dark:text-gray-400 line-clamp-2';
+        sub.className = 'g-result-sub';
         sub.textContent = hint;
         li.append(sub);
       }
@@ -1668,20 +2623,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     searchClear.classList.remove('hidden');
     closeResults();
     searchInput.blur();
-
-    if (startPoint && endPoint) resetMap();
-
-    map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 17), duration: 900 });
-
-    if (!startPoint) {
-      pendingEnd = { coords, name: entry.name };
-      endMarker?.remove();
-      endMarker = new mapboxgl.Marker({ color: '#ef4444' }).setLngLat(coords).addTo(map);
-      endCoordText.textContent = entry.name;
-      setStatus(`${entry.name} — now click the map to set where you are starting from.`);
-      return;
-    }
-    await placeEnd(coords, entry.name);
+    await setDestination(coords, entry.name);
   }
 
   searchInput.addEventListener('input', () => {

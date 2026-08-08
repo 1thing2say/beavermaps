@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n api,web -c magenta,cyan \"node server/index.js\" \"vite\"",
+    "dev:https": "HTTPS=1 concurrently -n api,web -c magenta,cyan \"node server/index.js\" \"vite\"",
     "dev:web": "vite",
     "server": "node server/index.js",
     "tunnel": "cloudflared tunnel --url http://localhost:5173",

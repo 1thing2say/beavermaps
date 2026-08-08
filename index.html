@@ -4,128 +4,244 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Map Project - Custom Routing</title>
+    <title>my campus Map</title>
     <!-- mapbox-gl.css is imported by src/main.js from the installed package, so
          it always matches the library version rather than a pinned CDN copy. -->
     <link href="/src/input.css" rel="stylesheet">
 </head>
 
-<body class="bg-gray-100 dark:bg-neutral-900 min-h-screen p-4 md:p-8 font-sans transition-colors">
-    <div class="app-shell max-w-6xl mx-auto">
-        <div class="app-chrome flex items-center justify-between mb-6 gap-4">
-            <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-100">Custom Map Router</h1>
-            <div class="flex items-center gap-2">
-                <button id="basemap-toggle" type="button"
-                    class="flex items-center gap-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-neutral-700 transition-colors">
-                    <span id="basemap-toggle-icon" class="w-4 h-4 block"></span>
-                    <span id="basemap-toggle-label">Satellite</span>
+<!--
+  The chrome is modelled on Google Maps: the map is the page, and everything
+  else floats over it. That is not decoration — it is the reason a phone-sized
+  screen still shows usable map. The old layout put a 600px map inside a padded
+  card under a heading, which spent the top third of the viewport on furniture.
+
+  Nothing here is a Google asset. The shapes (pill search field, category chips,
+  bottom-right control stack, corner layers switcher) are the conventions; the
+  icons are drawn in src/g-icons.js and the categories come from my campus's own
+  printed legend.
+-->
+
+<body class="g-body">
+    <div class="app-shell">
+        <div id="map"></div>
+
+        <!-- Far-left rail. Google's holds account-level things; ours holds the
+             two that mean something here, plus the panel collapse. -->
+        <nav class="g-rail app-chrome" aria-label="Main">
+            <button id="rail-menu" type="button" class="g-rail-btn" aria-label="Hide the route panel"
+                aria-expanded="true">
+                <span class="g-rail-icon" data-icon="menu"></span>
+            </button>
+            <button id="rail-legend" type="button" class="g-rail-btn" aria-label="Map legend">
+                <span class="g-rail-icon" data-icon="legend"></span>
+                <span class="g-rail-text">Legend</span>
+            </button>
+            <button id="rail-clear" type="button" class="g-rail-btn" aria-label="Clear the route">
+                <span class="g-rail-icon" data-icon="close"></span>
+                <span class="g-rail-text">Clear</span>
+            </button>
+            <!-- The same setting as the Appearance row in the layers menu, and
+                 the same state behind both — this one cycles rather than asking,
+                 because a rail button has room for one glyph. It lives here so
+                 the setting is one click away instead of two; the menu keeps its
+                 explicit three, which is what a phone gets when the rail goes. -->
+            <button id="rail-theme" type="button" class="g-rail-btn">
+                <span id="rail-theme-icon" class="g-rail-icon"></span>
+                <span id="rail-theme-text" class="g-rail-text">Auto</span>
+            </button>
+        </nav>
+
+        <!-- The top bar: search box at a fixed width, chips taking whatever
+             room is left. Google runs its chip strip across the map rather than
+             stacking it under the search field, and the difference is real —
+             in a 400px column only three chips fit before they need scrolling. -->
+        <div class="g-topbar app-chrome">
+            <div class="g-search g-card">
+                <label for="place-search" class="sr-only">Search for a destination</label>
+                <input id="place-search" type="text" role="combobox" autocomplete="off" aria-expanded="false"
+                    aria-controls="place-results" aria-autocomplete="list" placeholder="Search my campus"
+                    disabled class="g-search-input">
+                <button id="place-clear" type="button" aria-label="Clear search" class="g-search-clear hidden">
+                    <span class="g-icon" data-icon="close"></span>
                 </button>
-                <button id="theme-toggle" type="button"
-                    class="flex items-center gap-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-neutral-700 transition-colors">
-                    <span id="theme-toggle-icon" class="w-4 h-4 block"></span>
-                    <span id="theme-toggle-label">Dark</span>
+                <span class="g-search-sep" aria-hidden="true"></span>
+                <button id="search-go" type="button" class="g-search-icon" aria-label="Search">
+                    <span class="g-icon" data-icon="search"></span>
+                </button>
+                <button id="directions-btn" type="button" class="g-directions" aria-label="Directions">
+                    <span class="g-icon" data-icon="directions"></span>
+                </button>
+                <ul id="place-results" role="listbox" aria-label="Matching destinations" class="g-results hidden"></ul>
+            </div>
+
+            <!-- Category chips. Populated from src/categories.js, which is
+                 my campus's printed legend rather than Google's POI verticals. -->
+            <div id="chip-scroller" class="g-chips-wrap">
+                <button id="chips-prev" type="button" class="g-chip-arrow hidden" aria-label="Scroll categories left">
+                    <span class="g-icon" data-icon="chevronLeft"></span>
+                </button>
+                <div id="category-chips" class="g-chips" role="toolbar" aria-label="Map categories"></div>
+                <button id="chips-next" type="button" class="g-chip-arrow hidden" aria-label="Scroll categories right">
+                    <span class="g-icon" data-icon="chevronRight"></span>
                 </button>
             </div>
         </div>
 
-        <div class="map-frame relative rounded-xl shadow-xl overflow-hidden border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-800">
+        <!-- The column that hangs under the search box: results, then route. -->
+        <div id="top-left" class="g-topleft app-chrome">
 
-            <!-- Map Container -->
-            <div id="map" style="height: 600px; width: 100%;"></div>
-
-            <!-- Turn-by-turn banner. Hidden until navigation starts. During a
-                 step change two whole signs exist here at once: the outgoing one
-                 is taken out of flow so both occupy the same box and travel
-                 together like a filmstrip. -->
-            <div id="nav-banner" class="hidden absolute top-0 left-0 right-0 z-30 p-3">
-                <div id="nav-stack" class="relative"></div>
-            </div>
-
-            <template id="nav-sign-template">
-                <div class="nav-sign flex items-center gap-4 px-4 py-3">
-                    <div class="nav-arrow w-16 h-16 flex-shrink-0"></div>
-                    <div class="flex-1 min-w-0">
-                        <div class="nav-distance text-4xl font-bold leading-none">—</div>
-                        <div class="nav-instruction nav-sign-dim text-lg font-medium truncate mt-1">—</div>
+            <!-- The category results list, in the slot Google gives its own. -->
+            <div id="category-panel" class="g-card g-panel hidden">
+                <div class="g-panel-head">
+                    <div>
+                        <h2 id="category-title" class="g-panel-title">Results</h2>
+                        <p id="category-count" class="g-panel-sub"></p>
                     </div>
-                    <button type="button" class="nav-exit nav-end-btn flex-shrink-0 text-sm font-semibold px-4 py-2 rounded-lg">
-                        End
+                    <button id="category-close" type="button" class="g-icon-btn" aria-label="Close results">
+                        <span class="g-icon" data-icon="close"></span>
                     </button>
                 </div>
-            </template>
-
-            <!-- Remaining-distance strip along the bottom, iOS-6 style. -->
-            <div id="nav-footer" class="hidden absolute bottom-0 left-0 right-0 z-30 bg-gray-900/85 dark:bg-black/80 backdrop-blur-sm text-white px-5 py-3 flex items-center justify-between">
-                <div>
-                    <div class="text-xs uppercase tracking-wider text-gray-400">Remaining</div>
-                    <div id="nav-remaining" class="text-xl font-bold">—</div>
-                </div>
-                <div class="text-right">
-                    <div class="text-xs uppercase tracking-wider text-gray-400">Arrive in</div>
-                    <div id="nav-eta" class="text-xl font-bold">—</div>
-                </div>
+                <ul id="category-list" class="g-panel-list"></ul>
             </div>
 
-            <!-- GUI Overlay -->
-            <div id="side-panel" class="absolute top-4 left-4 bg-white/95 dark:bg-neutral-800/95 backdrop-blur-sm p-5 rounded-lg shadow-lg border border-gray-200 dark:border-neutral-700 w-72 z-10">
-                <h2 class="font-bold text-xl mb-1 text-gray-800 dark:text-gray-100">Route Info</h2>
-                <p id="instruction-text" class="text-sm text-gray-500 dark:text-gray-400 mb-4 pb-3 border-b border-gray-200 dark:border-neutral-700">
-                    Click on the map to set a start point.
-                </p>
-
-                <!--
-                  Destination search over my campus's own directory (src/places.json).
-                  Every entry is bound to a routing node, so picking one lands on
-                  a graph vertex exactly rather than being snapped to the nearest.
-                -->
-                <div class="relative mb-4">
-                    <label for="place-search" class="sr-only">Search for a destination</label>
-                    <input id="place-search" type="text" role="combobox" autocomplete="off"
-                        aria-expanded="false" aria-controls="place-results" aria-autocomplete="list"
-                        placeholder="Search buildings and services" disabled
-                        class="w-full text-sm rounded-md border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-900 text-gray-800 dark:text-gray-100 px-3 py-2 pr-8 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:opacity-50">
-                    <button id="place-clear" type="button" aria-label="Clear search"
-                        class="hidden absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-xl leading-none">&times;</button>
-                    <ul id="place-results" role="listbox" aria-label="Matching destinations"
-                        class="hidden absolute z-30 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 shadow-lg text-sm"></ul>
-                </div>
-
-                <div class="space-y-3 mb-4 text-sm font-medium text-gray-700 dark:text-gray-300">
-                    <div class="flex items-start gap-3">
-                        <div class="w-4 h-4 rounded-full bg-green-500 mt-0.5 flex-shrink-0 shadow-sm border border-green-700"></div>
-                        <div class="flex flex-col min-w-0">
-                            <span class="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">Start Point</span>
-                            <span id="start-coord" class="truncate">Not set</span>
+            <!-- Route panel. Same information as before, in Google's card. -->
+            <div id="side-panel" class="g-card g-panel">
+                <div class="g-route-head">
+                    <div class="g-route-endpoints">
+                        <div class="g-endpoint">
+                            <span class="g-dot g-dot--start" aria-hidden="true"></span>
+                            <div class="g-endpoint-text">
+                                <span class="g-endpoint-label">Starting point</span>
+                                <span id="start-coord" class="g-endpoint-value">Not set</span>
+                            </div>
                         </div>
-                    </div>
-
-                    <div class="flex items-start gap-3">
-                        <div class="w-4 h-4 rounded-full bg-red-500 mt-0.5 flex-shrink-0 shadow-sm border border-red-700"></div>
-                        <div class="flex flex-col min-w-0">
-                            <span class="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">End Point</span>
-                            <span id="end-coord" class="truncate">Not set</span>
+                        <span class="g-endpoint-rule" aria-hidden="true"></span>
+                        <div class="g-endpoint">
+                            <span class="g-dot g-dot--end" aria-hidden="true"></span>
+                            <div class="g-endpoint-text">
+                                <span class="g-endpoint-label">Destination</span>
+                                <span id="end-coord" class="g-endpoint-value">Not set</span>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="pt-3 border-t border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-900/60 -mx-5 px-5 py-3 mt-4">
-                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider font-semibold mb-1">Total Distance</div>
-                    <div id="distance-text" class="text-3xl font-bold text-cyan-600 dark:text-cyan-400">0 <span class="text-lg text-gray-500 dark:text-gray-400 font-medium">ft</span></div>
+                <div class="g-route-summary">
+                    <div class="g-route-figure">
+                        <span class="g-icon g-route-mode" data-icon="walk" aria-hidden="true"></span>
+                        <div>
+                            <div id="distance-text" class="g-route-distance">0 <span class="g-route-unit">ft</span>
+                            </div>
+                            <p id="instruction-text" class="g-route-hint">Click on the map to set a start point.</p>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="px-5 pb-5 -mx-5 bg-gray-50 dark:bg-neutral-900/60 rounded-b-lg space-y-2">
-                    <button id="start-nav-btn" disabled class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-md shadow-sm hover:bg-emerald-500 hover:shadow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-600 disabled:hover:shadow-sm">
-                        Start Navigation
+                <div class="g-route-actions">
+                    <button id="start-nav-btn" disabled class="g-btn g-btn--primary">
+                        <span class="g-icon" data-icon="navigate"></span>
+                        Start
                     </button>
-                    <button id="simulate-btn" disabled class="w-full bg-emerald-800 text-white text-sm font-semibold py-2 rounded-md shadow-sm hover:bg-emerald-700 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-800">
-                        Simulate Walk (desktop testing)
+                    <button id="simulate-btn" disabled class="g-btn g-btn--ghost">Simulate</button>
+                    <button id="clear-btn" class="g-btn g-btn--ghost">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom-left layers switcher: an imagery thumbnail that opens the
+             three basemap controls, which is where Google keeps the same idea. -->
+        <div class="g-layers app-chrome">
+            <div id="layers-menu" class="g-card g-layers-menu hidden" role="menu" aria-label="Map layers">
+                <p class="g-layers-heading">Map type</p>
+                <div class="g-layers-row">
+                    <button id="basemap-toggle" type="button" class="g-layer-btn">
+                        <span id="basemap-toggle-icon" class="g-layer-icon"></span>
+                        <span id="basemap-toggle-label">Satellite</span>
                     </button>
-                    <button id="clear-btn" class="w-full bg-gray-800 dark:bg-neutral-700 text-white font-semibold py-2.5 rounded-md shadow-sm hover:bg-gray-700 dark:hover:bg-neutral-600 hover:shadow transition-all duration-200">
-                        Clear Map
+                    <button id="provider-toggle" type="button" class="g-layer-btn">
+                        <span id="provider-toggle-icon" class="g-layer-icon"></span>
+                        <span id="provider-toggle-label">Google</span>
+                    </button>
+                </div>
+
+                <!-- Three states, not a switch: "Auto" is the absence of a
+                     choice, and a two-way toggle has nowhere to put it. Google
+                     keeps the same three under Settings > Appearance. -->
+                <p class="g-layers-heading g-layers-heading--split">Appearance</p>
+                <div id="theme-modes" class="g-layers-row" role="radiogroup" aria-label="Appearance">
+                    <button type="button" class="g-layer-btn" role="radio" aria-checked="false"
+                        data-theme-mode="light">
+                        <span class="g-layer-icon" data-icon="light"></span>
+                        Light
+                    </button>
+                    <button type="button" class="g-layer-btn" role="radio" aria-checked="false"
+                        data-theme-mode="dark">
+                        <span class="g-layer-icon" data-icon="dark"></span>
+                        Dark
+                    </button>
+                    <button type="button" class="g-layer-btn" role="radio" aria-checked="false"
+                        data-theme-mode="auto">
+                        <span class="g-layer-icon" data-icon="auto"></span>
+                        Auto
                     </button>
                 </div>
             </div>
+            <button id="layers-btn" type="button" class="g-layers-btn" aria-haspopup="true" aria-expanded="false">
+                <span class="g-layers-thumb" aria-hidden="true"></span>
+                <span class="g-layers-caption">
+                    <span class="g-icon" data-icon="layers"></span>
+                    Layers
+                </span>
+            </button>
+        </div>
 
+        <!-- Legend sheet, opened from the rail. The printed key, since every
+             chip and pictogram on this map comes out of it. -->
+        <div id="legend-sheet" class="g-card g-legend hidden" role="dialog" aria-label="Map legend"
+            aria-modal="false">
+            <div class="g-panel-head">
+                <h2 class="g-panel-title">Legend</h2>
+                <button id="legend-close" type="button" class="g-icon-btn" aria-label="Close legend">
+                    <span class="g-icon" data-icon="close"></span>
+                </button>
+            </div>
+            <ul id="legend-list" class="g-legend-list"></ul>
+            <p class="g-legend-note">From the printed campus map, Ver. 3/2026.</p>
+        </div>
+
+        <!-- Turn-by-turn banner. Hidden until navigation starts. During a
+             step change two whole signs exist here at once: the outgoing one
+             is taken out of flow so both occupy the same box and travel
+             together like a filmstrip. -->
+        <div id="nav-banner" class="hidden absolute top-0 left-0 right-0 z-30 p-3">
+            <div id="nav-stack" class="relative"></div>
+        </div>
+
+        <template id="nav-sign-template">
+            <div class="nav-sign flex items-center gap-4 px-4 py-3">
+                <div class="nav-arrow w-16 h-16 flex-shrink-0"></div>
+                <div class="flex-1 min-w-0">
+                    <div class="nav-distance text-4xl font-bold leading-none">—</div>
+                    <div class="nav-instruction nav-sign-dim text-lg font-medium truncate mt-1">—</div>
+                </div>
+                <button type="button" class="nav-exit nav-end-btn flex-shrink-0 text-sm font-semibold px-4 py-2 rounded-lg">
+                    End
+                </button>
+            </div>
+        </template>
+
+        <!-- Remaining-distance strip along the bottom, iOS-6 style. -->
+        <div id="nav-footer"
+            class="hidden absolute bottom-0 left-0 right-0 z-30 bg-gray-900/85 dark:bg-black/80 backdrop-blur-sm text-white px-5 py-3 flex items-center justify-between">
+            <div>
+                <div class="text-xs uppercase tracking-wider text-gray-400">Remaining</div>
+                <div id="nav-remaining" class="text-xl font-bold">—</div>
+            </div>
+            <div class="text-right">
+                <div class="text-xs uppercase tracking-wider text-gray-400">Arrive in</div>
+                <div id="nav-eta" class="text-xl font-bold">—</div>
+            </div>
         </div>
     </div>
 
