@@ -5,16 +5,18 @@
 // a sprite sheet so there is no binary asset to keep in step with the data.
 //
 // The set is deliberately one shape so a dozen unrelated icons still read as
-// one family at 20 px on a busy map — and the shape is Google's marker, because
-// on the Google ground ours were sitting next to theirs and losing the
-// comparison. Theirs is a balloon: a round head on a tapered tail, a white ring
-// around the whole silhouette, a white glyph inside, and the tip on the place
-// it names. Ours were flat discs centred on it. Side by side that read as two
-// map's markers on one map, which is what it was.
+// one family at 20 px on a busy map. That shape is APPLE'S now, measured off a
+// capture of their Maps rather than described from memory — see the block of
+// ratios below. It replaces Google's balloon, which this map wore until the
+// selection animation was built and the marker it animated no longer matched
+// the one the animation came from.
 //
-// Measured off the raster rather than guessed: a Google POI marker is about
-// 17 px wide and 21 px tall at 1x, its white ring is 1.7 px of that, and its
-// label sits to the right, vertically centred on the head rather than the tip.
+// The label moved with it, and that is the larger half of the change. Google
+// writes a POI's name BESIDE its pin, vertically centred on the head; Apple
+// writes it BENEATH, centred, and tints it with the marker's own category hue
+// instead of the map's text colour. So every layer that draws one of these
+// anchors centre rather than bottom, and every name that goes with one hangs
+// under it in `pinInk` rather than beside it in slate.
 //
 // Colours are sampled from a Google Maps screenshot rather than picked: their
 // category hues are #ff8126 for food and drink, #0b57d0 for transport, parking
@@ -25,16 +27,44 @@
 // Every icon carries the white ring: these sit on lawn, paving and imagery in
 // turn, and without it the dark ones vanish into the trees.
 
-// The pin is authored on a 26x31 grid, rasterised at 2x. A hair of margin all
-// round so the ring and the ground shadow are never clipped.
+// TWO STATES, both measured off a screen capture of Apple Maps rather than
+// drawn by eye. Their marker is not one shape at two sizes — selecting a place
+// changes what it is:
 //
-// The proportions are measured, and both of them were wrong on the first cut.
-// Google's marker is 50 px wide and 60 tall in a 3x capture — so the tail drops
-// only about four tenths of the head's radius below it, where a pin drawn "by
-// eye" comes out nearly twice that and reads as a balloon on a string. And
-// their white ring is a good eighth of the total width, not the hairline a
-// 2 px stroke gives at this size.
-const PIN = { w: 26, h: 31, cx: 13, cy: 13, r: 10.4, ring: 3.2, tail: 0.42 };
+//   at rest    a flat CIRCLE, category-coloured, with a white ring a good
+//              eighth of its width, centred ON the place. No tail: nothing is
+//              pointing, because the disc is already sitting on the spot.
+//   selected   a teardrop that RISES off the ground — round head, a short nub
+//              rather than a tail, a vertical gradient in the fill — leaving a
+//              separate little dot behind on the place itself. That dot is what
+//              keeps the exact position while the head floats above it.
+//
+// The numbers below are read off the capture at its own scale and divided
+// through, so they are ratios rather than pixels:
+//
+//   at rest    30 px across, ring 3.5 px          -> ring = 0.117 of the width
+//   selected   79 px across, ring ~5 px           -> ring = 0.070 of the width
+//              widest at y=455, tip at y=499      -> the nub drops 0.152 r
+//              anchor dot ~12 px across            -> 0.152 of the head
+//
+// This replaces Google's balloon, which is a rounder head on a much longer
+// tail (0.42 r) and one flat fill. Both are good markers; they are not the same
+// marker, and the ratios above are the difference.
+const PIN = { w: 26, cx: 13, cy: 13, ring: 3.05 };
+/** Radius of the flat disc, inset so its centred ring lands inside the box. */
+PIN.r = PIN.cx - PIN.ring / 2;
+
+/** The lifted marker, on the same 26-unit grid. */
+const LIFT = { ring: 1.82, tail: 0.152, dot: 0.152, gap: 0.10 };
+LIFT.r = PIN.cx - LIFT.ring / 2;
+/** How far the nub's tip falls below the head's centre. */
+LIFT.drop = PIN.cx * (1 + LIFT.tail);
+LIFT.dotR = (PIN.w * LIFT.dot) / 2;
+/** Where the nub comes to a point. */
+LIFT.tipY = PIN.cy + LIFT.drop;
+LIFT.dotY = LIFT.tipY + PIN.w * LIFT.gap + LIFT.dotR;
+/** Total height of the lifted marker, tip of the ring to the base of the dot. */
+LIFT.h = LIFT.dotY + LIFT.dotR + 0.6;
 
 /** kind -> disc colour. Anything absent falls back to Google's service blue. */
 const COLOURS = {
@@ -139,104 +169,244 @@ const GLYPHS = {
 // the same mark; one definition, addressed under both names.
 GLYPHS.parking_badge = GLYPHS.parking;
 
-/** How far the point drops below the centre of the head. */
-const DROP = PIN.r * (1 + PIN.tail);
-/** Where the tip lands, which is what `icon-anchor: bottom` puts on the place. */
-export const PIN_TIP = PIN.cy + DROP;
+const n = (v) => Number(v.toFixed(3));
+
+/** The box the resting disc is drawn in, and where in it the disc sits. */
+export const PIN_BOX = { w: PIN.w, h: PIN.w + 1.6 };
 
 /**
- * The balloon silhouette.
+ * The lifted silhouette: a round head on a short nub.
  *
- * Two mirrored curves leaving the head at its widest point, then a half circle
- * back over the top. Leaving from the WIDEST point matters: the circle's tangent
- * there is vertical, so a control point directly below it continues the curve
- * smoothly. Start the tail anywhere else and the join is a visible corner, which
- * is the difference between a pin and a lollipop.
+ * Same construction as any teardrop — two mirrored curves leaving the head at
+ * its WIDEST point, where the circle's tangent is vertical so a control point
+ * directly below continues the curve smoothly — but with `tail` at 0.152 rather
+ * than Google's 0.42 the head stays very nearly a full circle and the nub reads
+ * as a spike stuck to the bottom of it, which is what Apple's is.
  */
-const n = (v) => Number(v.toFixed(3));
-const PIN_PATH = [
-  `M${n(PIN.cx - PIN.r)} ${n(PIN.cy)}`,
-  `C${n(PIN.cx - PIN.r)} ${n(PIN.cy + DROP * 0.55)}`,
-  `${n(PIN.cx - PIN.r * 0.34)} ${n(PIN.cy + DROP * 0.86)}`,
-  `${n(PIN.cx)} ${n(PIN_TIP)}`,
-  `C${n(PIN.cx + PIN.r * 0.34)} ${n(PIN.cy + DROP * 0.86)}`,
-  `${n(PIN.cx + PIN.r)} ${n(PIN.cy + DROP * 0.55)}`,
-  `${n(PIN.cx + PIN.r)} ${n(PIN.cy)}`,
-  // Sweep 0 takes the short way over the top rather than back down through the
-  // tail we just drew.
-  `A${PIN.r} ${PIN.r} 0 0 0 ${n(PIN.cx - PIN.r)} ${n(PIN.cy)}Z`,
+const LIFT_PATH = [
+  `M${n(PIN.cx - LIFT.r)} ${n(PIN.cy)}`,
+  `C${n(PIN.cx - LIFT.r)} ${n(PIN.cy + LIFT.drop * 0.62)}`,
+  `${n(PIN.cx - LIFT.r * 0.30)} ${n(PIN.cy + LIFT.drop * 0.88)}`,
+  `${n(PIN.cx)} ${n(PIN.cy + LIFT.drop)}`,
+  `C${n(PIN.cx + LIFT.r * 0.30)} ${n(PIN.cy + LIFT.drop * 0.88)}`,
+  `${n(PIN.cx + LIFT.r)} ${n(PIN.cy + LIFT.drop * 0.62)}`,
+  `${n(PIN.cx + LIFT.r)} ${n(PIN.cy)}`,
+  `A${n(LIFT.r)} ${n(LIFT.r)} 0 0 0 ${n(PIN.cx - LIFT.r)} ${n(PIN.cy)}Z`,
 ].join(' ');
 
 // The glyphs are authored on a 24-unit grid centred at (12, 12). This sits them
-// in the head at the largest size that still leaves the ring clear of them —
-// the ring is a centred stroke, so half of its 3.2 eats into the fill and the
-// usable head radius is 8.8, not 10.4.
-const GLYPH_SCALE = 0.72;
-const GLYPH_FIT = `translate(${PIN.cx} ${PIN.cy}) scale(${GLYPH_SCALE}) translate(-12 -12)`;
+// in the disc at the largest size that still leaves the ring clear — the ring is
+// a centred stroke, so half of its 3.05 eats into the fill and the usable radius
+// is 9.95, not 11.475. Apple's own glyph fills a little over half the disc.
+const GLYPH_SCALE = 0.66;
+const glyphFit = (scale) =>
+  `translate(${PIN.cx} ${PIN.cy}) scale(${scale}) translate(-12 -12)`;
 
-function svgFor(kind) {
+function glyphBody(kind, scale) {
   const glyph = GLYPHS[kind] ?? '<circle cx="12" cy="12" r="3.4"/>';
-  const body = typeof glyph === 'string'
+  return typeof glyph === 'string'
     ? `<g fill="#fff">${glyph}</g>`
-    : `<g fill="none" stroke="#fff" stroke-width="${(1.7 / GLYPH_SCALE).toFixed(2)}" `
+    : `<g fill="none" stroke="#fff" stroke-width="${(1.7 / scale).toFixed(2)}" `
       + 'stroke-linecap="round" stroke-linejoin="round">' + glyph.stroke + '</g>';
+}
+
+/**
+ * The resting marker: a flat disc, centred on the place.
+ *
+ * No tail, and that is the substantive change rather than a cosmetic one — the
+ * disc sits ON the coordinate instead of pointing down at it, so every layer
+ * that draws one anchors centre rather than bottom, and every label that goes
+ * with one hangs beneath it rather than beside it.
+ */
+function svgFor(kind) {
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PIN.w} ${PIN.h}" `
-    + `width="${PIN.w * 2}" height="${PIN.h * 2}">`
-    // A flattened ellipse on the ground rather than a blur filter: an SVG filter
-    // inside an <img> is renderer-dependent, and this has to rasterise the same
-    // way in every browser that loads the map.
-    + `<ellipse cx="${PIN.cx}" cy="${n(PIN_TIP + 0.9)}" rx="3.2" ry="1.2" fill="rgba(0,0,0,0.22)"/>`
-    + `<path d="${PIN_PATH}" fill="${COLOURS[kind] ?? FALLBACK}" `
-    + `stroke="#fff" stroke-width="${PIN.ring}" stroke-linejoin="round"/>`
-    + `<g transform="${GLYPH_FIT}">${body}</g>`
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PIN_BOX.w} ${n(PIN_BOX.h)}" `
+    + `width="${PIN.w * 2}" height="${n(PIN_BOX.h * 2)}">`
+    // A flattened ellipse rather than a blur filter: an SVG filter inside an
+    // <img> is renderer-dependent, and this has to rasterise the same way in
+    // every browser that loads the map.
+    + `<ellipse cx="${PIN.cx}" cy="${n(PIN.cy + PIN.r + 0.9)}" rx="${n(PIN.r * 0.62)}" ry="1.1" `
+    + 'fill="rgba(0,0,0,0.20)"/>'
+    + `<circle cx="${PIN.cx}" cy="${PIN.cy}" r="${n(PIN.r)}" fill="${pinColour(kind)}" `
+    + `stroke="#fff" stroke-width="${PIN.ring}"/>`
+    + `<g transform="${glyphFit(GLYPH_SCALE)}">${glyphBody(kind, GLYPH_SCALE)}</g>`
     + '</svg>'
   );
 }
 
-export const AMENITY_KINDS = Object.keys(COLOURS);
-
-// --- map pins ---------------------------------------------------------------
-//
-// The label plate that used to live here is gone. It reproduced my campus's print
-// convention — larger building names reversed out of a dark rounded box — and
-// Google has no equivalent: every label on their map is plain text over a white
-// halo. Those names are still set larger, which was the hierarchy the plate was
-// really carrying.
-
-const PIN_W = 26;
-const PIN_H = 38;
+/**
+ * The lifted marker: head, nub, and the dot it leaves behind.
+ *
+ * The gradient is Apple's and it is what stops a 42 px disc reading as a
+ * sticker — sampled down the left of their head, the fill runs rgb(70,205,86)
+ * at the top to rgb(28,164,60) at the bottom, which is the same hue about 18%
+ * lighter and 12% darker than the flat colour. Reproduced as a multiply on
+ * whatever category colour this kind uses rather than as two hard-coded greens.
+ *
+ * The dot is not decoration either. The head has floated up off the ground, so
+ * without it the marker would be claiming a spot half its own height above the
+ * thing it names — the dot is where the place actually is, and it is the only
+ * part of the drawing that does not move during the animation.
+ */
+export function liftedSvg(kind) {
+  return liftedShape(pinColour(kind), `lg-${kind}`,
+    `<g transform="${glyphFit(GLYPH_SCALE * 1.06)}">${glyphBody(kind, GLYPH_SCALE * 1.06)}</g>`,
+    { dot: false });
+}
 
 /**
- * Google's map pin: a round head tapering to a point, with a hole punched
- * through it.
+ * The silhouette itself, in whatever colour, with whatever is put in the head.
  *
- * Drawn as a DOM element rather than registered as a map image because these
- * are `mapboxgl.Marker`s, not symbol layers — markers are HTML, positioned by
- * the map rather than rendered into the canvas.
- *
- * `anchor: 'bottom'` at the call site is not optional: a marker centres on its
- * coordinate by default, which would bury the tip half a pin above the place it
- * is pointing at.
+ * Shared by the POI markers and the route's two endpoints. They are the same
+ * drawing because on Apple's map they are the same drawing — a dropped pin is
+ * their selected marker with nothing categorical inside it.
  */
-export function googlePin(colour, { title = '' } = {}) {
+function liftedShape(base, id, inner, { dot = true } = {}) {
+  const boxH = dot ? LIFT.h : LIFT.tipY + LIFT.ring;
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PIN.w} ${n(boxH)}" `
+    + 'width="100%" height="100%" aria-hidden="true">'
+    + `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">`
+    + `<stop offset="0" stop-color="${shade(base, 1.18)}"/>`
+    + `<stop offset="1" stop-color="${shade(base, 0.88)}"/>`
+    + '</linearGradient></defs>'
+    + `<path d="${LIFT_PATH}" fill="url(#${id})" stroke="#fff" `
+    + `stroke-width="${LIFT.ring}" stroke-linejoin="round"/>`
+    + inner
+    + (dot
+      ? `<circle cx="${PIN.cx}" cy="${n(LIFT.dotY)}" r="${n(LIFT.dotR)}" `
+        + `fill="${shade(base, 0.7)}" stroke="#fff" stroke-width="0.8"/>`
+      : '')
+    + '</svg>'
+  );
+}
+
+/** Multiply a hex colour toward black or white, keeping its hue. */
+function shade(hex, factor) {
+  const value = parseInt(hex.slice(1), 16);
+  const parts = [(value >> 16) & 255, (value >> 8) & 255, value & 255].map((c) => (
+    factor >= 1
+      ? Math.round(c + (255 - c) * (factor - 1))
+      : Math.round(c * factor)
+  ));
+  return `#${parts.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * The colour a resting marker's label is set in.
+ *
+ * Apple tints POI labels with their own category hue rather than setting them
+ * all in the map's text colour: sampled off the capture, a #2fb342 park disc
+ * carries a #005100 name. That is the same hue at roughly a third of the
+ * lightness, and it is what makes a field of markers scannable by colour before
+ * a single word has been read.
+ *
+ * Inverted on the dark theme, because a third-lightness green on near-black
+ * ground is not a label, it is a smudge.
+ */
+export function pinInk(kind, theme) {
+  return theme === 'dark' ? shade(pinColour(kind), 1.42) : shade(pinColour(kind), 0.42);
+}
+
+export const AMENITY_KINDS = Object.keys(COLOURS);
+
+/** The grids both states are authored on, so a caller can size them in CSS px. */
+export const PIN_ASPECT = PIN_BOX.h / PIN_BOX.w;
+export const LIFT_ASPECT = LIFT.h / PIN.w;
+export const PIN_BASE_W = PIN.w;
+/** The two ring widths, exported so the measured ratios can be asserted. */
+export const PIN_RING = PIN.ring;
+export const LIFT_RING = LIFT.ring;
+/** Where the dot and the head's centre sit, as fractions of the lifted height. */
+export const LIFT_DOT = { y: LIFT.dotY / LIFT.h, r: LIFT.dotR / LIFT.h };
+export const LIFT_HEAD = PIN.cy / LIFT.h;
+/** Where the nub's tip is, so the head can be given a box of its own. */
+export const LIFT_TIP = LIFT.tipY / LIFT.h;
+
+/**
+ * The anchor dot's geometry at a given marker width, in CSS pixels.
+ *
+ * Drawn in the DOM rather than inside the head's SVG, and that separation is
+ * the whole point: the head has to travel — it starts on the place, where the
+ * resting disc was, and rises off it — while the dot marks the place and must
+ * not move by a pixel. Sharing one SVG dragged the dot 13 px down the screen
+ * and back on every selection.
+ */
+export const dotGeometry = (width) => ({
+  size: (LIFT.dotR * 2 * width) / PIN.w,
+  ring: (0.8 * width) / PIN.w,
+  top: (LIFT.dotY - LIFT.dotR) * (width / PIN.w),
+});
+export const dotColour = (kind) => shade(pinColour(kind), 0.7);
+
+/** The colour a kind is drawn in, for anything that has to match it. */
+export const pinColour = (kind) => COLOURS[kind] ?? FALLBACK;
+
+/**
+ * The lifted marker as a DOM element rather than a map image.
+ *
+ * A selected pin is an HTML marker, not a symbol: it has to animate, and a
+ * symbol layer can only be re-sized by pushing a new `icon-size` on every frame
+ * — which restyles the whole layer to move one icon, and rasterises a 2x image
+ * up past its own resolution while it does it. As an element it is an SVG the
+ * browser re-renders crisply at any scale, and the easing is one CSS property.
+ */
+export function pinElement(kind, width) {
+  const el = document.createElement('div');
+  el.style.width = `${width}px`;
+  // The head's own box, which stops at the nub's tip. The dot below it is a
+  // separate element because it must not move while this one does.
+  el.style.height = `${(width * (LIFT.tipY + LIFT.ring)) / PIN.w}px`;
+  el.innerHTML = liftedSvg(kind);
+  return el;
+}
+
+// --- the route's two ends -----------------------------------------------------
+//
+// The same silhouette as a selected POI, in green and red. On Apple's map a
+// dropped pin IS their selected marker with nothing categorical in the head, so
+// this is not a second marker language invented for the route — it is the one
+// measured off the capture, with a plain white hole where a glyph would go.
+//
+// The hole is white rather than a lighter tint of the pin so it stays a hole
+// over imagery, where the surrounding photograph supplies no fixed value.
+//
+// Drawn as a DOM element rather than registered as a map image because these
+// are `mapboxgl.Marker`s, not symbol layers — markers are HTML, positioned by
+// the map rather than rendered into the canvas.
+
+/** Width in CSS pixels. Squatter than the old teardrop, so a touch wider. */
+export const ROUTE_PIN_W = 30;
+
+/**
+ * How far to push a marker of this width DOWN from a `bottom` anchor.
+ *
+ * The silhouette ends in an anchor dot rather than a point, and it is the dot's
+ * CENTRE that marks the place — half of it hangs below the box, so a bottom
+ * anchor alone would sit the whole pin that half-dot high.
+ */
+export const liftedOffset = (width) => [0, (1 - LIFT_DOT.y) * width * LIFT_ASPECT];
+
+export function routePin(colour, { title = '' } = {}) {
   const el = document.createElement('div');
   el.className = 'map-pin';
-  el.style.width = `${PIN_W}px`;
-  el.style.height = `${PIN_H}px`;
+  el.style.width = `${ROUTE_PIN_W}px`;
+  el.style.height = `${ROUTE_PIN_W * LIFT_ASPECT}px`;
   if (title) el.title = title;
-  el.innerHTML =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 38" width="${PIN_W}" `
-    + `height="${PIN_H}" aria-hidden="true">`
-    // A blurred ellipse on the ground rather than a filter on the pin itself,
-    // which would darken the white hole as well.
-    + '<ellipse cx="13" cy="35.4" rx="4.2" ry="1.7" fill="rgba(0,0,0,0.28)"/>'
-    + `<path fill="${colour}" d="M13 1.2A10.4 10.4 0 0 0 2.6 11.6c0 7.6 10.4 24 10.4 24`
-    + 's10.4-16.4 10.4-24A10.4 10.4 0 0 0 13 1.2z"/>'
-    // The hole is white rather than a lighter tint of the pin so it stays a hole
-    // over imagery, where the surrounding photograph supplies no fixed value.
-    + '<circle cx="13" cy="11.6" r="3.9" fill="#ffffff"/>'
-    + '</svg>';
+
+  // The drop goes on an inner element for the same reason the selection's
+  // spring does: Mapbox owns the marker's own `transform` and rewrites it on
+  // every frame of every pan. The origin is the anchor dot, so the pin scales
+  // down onto the place it marks rather than away from it.
+  const drop = document.createElement('div');
+  drop.className = 'map-pin-drop';
+  drop.style.transformOrigin = `50% ${(LIFT_DOT.y * 100).toFixed(2)}%`;
+  drop.innerHTML = liftedShape(
+    colour,
+    `rp-${colour.slice(1)}`,
+    `<circle cx="${PIN.cx}" cy="${PIN.cy}" r="4" fill="#ffffff"/>`,
+  );
+  el.append(drop);
   return el;
 }
 
@@ -254,7 +424,7 @@ export function loadAmenityIcons(map) {
       resolve();
       return;
     }
-    const image = new Image(PIN.w * 2, PIN.h * 2);
+    const image = new Image(PIN.w * 2, PIN_BOX.h * 2);
     image.onload = () => {
       if (!map.hasImage(kind)) map.addImage(kind, image, { pixelRatio: 2 });
       resolve();

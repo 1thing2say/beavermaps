@@ -19,8 +19,14 @@ import {
   FEET_PER_KM,
 } from './maneuvers.js';
 import { maneuverIcon } from './nav-icons.js';
-import { loadAmenityIcons, googlePin } from './map-images.js';
-import { buildingCard } from './building-popup.js';
+import {
+  loadAmenityIcons, routePin, liftedOffset, ROUTE_PIN_W, PIN_BASE_W, AMENITY_KINDS, pinInk,
+} from './map-images.js';
+import { buildingCard, pinCard } from './building-popup.js';
+import {
+  mountSelectedPin, sizeExpr, sizeAt, LABEL_MAX_EM,
+  AMBIENT_SIZE, CATEGORY_SIZE, SELECTED_W,
+} from './pin-select.js';
 import { createThemeControl, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
@@ -29,6 +35,13 @@ import { paintIcons } from './g-icons.js';
 import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
 import { withPoiIcons, POI_LABEL_KINDS } from './poi.js';
 import { ringOf, trimToCampus } from './campus-clip.js';
+import {
+  buildAreas,
+  highlightFor,
+  areaCollection,
+  pointCollection,
+  extentOf,
+} from './highlight.js';
 
 // The chrome's button glyphs are named in the markup and drawn here, before
 // anything else runs, so no button ever paints as an empty box.
@@ -113,6 +126,17 @@ const THEMES = {
     // fill-emissive-strength 1 glares against night ground.
     sportLine: '#5a6b52',
     parkingLabel: '#9aa0a6',
+    // What a legend row paints on the shapes it is asking about.
+    //
+    // Purple because every other meaning on this map is already spoken for:
+    // blue is the route, green the start pin, red the destination, white the
+    // path ribbon, cream the buildings. A hue nothing else uses cannot be
+    // mistaken for a route or a marker, which matters when the thing it is
+    // drawn on top of is a whole car park.
+    //
+    // Lightened for the night ground rather than re-hued, the same way the
+    // label and greenspace colours are.
+    highlight: '#c58af9',
     land: {
       lawn: '#1d2f24',
       tree: '#274934',
@@ -174,6 +198,9 @@ const THEMES = {
     areaLabel: '#17a773',
     sportLine: '#ffffff',
     parkingLabel: '#67788a',
+    // Google's own purple, which is the saturated end of the same hue the dark
+    // theme lifts. See the note there for why this map had a spare colour.
+    highlight: '#a142f4',
     land: {
       // Sampled off a Google Maps screenshot of a comparable campus rather than
       // picked by eye. Google's greens are not the yellow-olive you get by
@@ -296,6 +323,10 @@ const SATELLITE = {
   labelHalo: '#101828',
   areaLabel: '#ffffff',
   parkingLabel: '#dbeafe',
+  // Lighter again than the dark theme's. A photograph has no flat ground value
+  // to sit a mid-tone against — foliage, tarmac and pale roofs are all in one
+  // frame — so the outline goes bright and lets the fill do the tinting.
+  highlight: '#d8b4fe',
 };
 
 /**
@@ -455,38 +486,58 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const startNavBtn = document.getElementById('start-nav-btn');
   const simulateBtn = document.getElementById('simulate-btn');
   const sidePanel = document.getElementById('side-panel');
+  // Up here with the panel rather than down with the rest of the chrome,
+  // because campusPadding measures it and campusPadding runs before that
+  // block is reached — see the fitBounds a few lines below.
+  const legendSheet = document.getElementById('legend-sheet');
   const navBanner = document.getElementById('nav-banner');
   const navFooter = document.getElementById('nav-footer');
   const navStack = document.getElementById('nav-stack');
 
   /**
-   * Padding for framing the campus. The side panel floats over the west edge of
-   * the map, so an even margin centres the campus in the *container* and leaves
-   * it visibly pushed left in the part you can actually see. Reserving the
-   * panel's real width fixes that, and it has to be measured rather than
-   * hard-coded because the panel is hidden during navigation.
+   * Padding for framing the campus. The chrome floats over the west edge of the
+   * map, so an even margin centres the campus in the *container* and leaves it
+   * visibly pushed left in the part you can actually see. Reserving the real
+   * width of whatever is open fixes that, and it has to be measured rather than
+   * hard-coded because both cards come and go.
+   *
+   * Two cards, not one. The legend joined the panel here the moment its rows
+   * started outlining things on the map: it sits directly over the campus, and
+   * framing a highlight underneath the sheet that asked for it is the one place
+   * the camera can put something where it cannot be seen.
    *
    * Mapbox throws if padding exceeds the canvas, so on a screen too narrow to
-   * hold both, fall back to an even margin and let the panel overlap.
+   * hold both, fall back to an even margin and let the chrome overlap.
    */
   function campusPadding() {
     const even = { top: FIT_MARGIN, bottom: FIT_MARGIN, left: FIT_MARGIN, right: FIT_MARGIN };
-    if (sidePanel.classList.contains('hidden')) return even;
-
-    const panel = sidePanel.getBoundingClientRect();
     const canvas = map.getCanvas().getBoundingClientRect();
-    if (!panel.width || !canvas.width) return even;
+    if (!canvas.width) return even;
+
+    const boxes = [sidePanel, legendSheet]
+      .filter((card) => !card.classList.contains('hidden'))
+      .map((card) => card.getBoundingClientRect())
+      .filter((box) => box.width);
+    if (!boxes.length) return even;
 
     // Below 640px the stylesheet turns the column into a bottom sheet spanning
-    // the full width, and there what the panel costs is height, not width.
-    // Reserving its width there would exceed the canvas and fall back to an
-    // even margin, which puts the campus underneath it.
-    if (panel.width >= canvas.width * 0.6) {
-      const bottom = canvas.bottom - panel.top + FIT_MARGIN;
+    // the full width, and there what a card costs is height, not width.
+    // Reserving its width would exceed the canvas and fall back to an even
+    // margin, which puts the campus underneath it. Either card can be the sheet
+    // — on a phone the legend replaces the route panel rather than stacking
+    // under it — so this asks the boxes, not one named element.
+    const sheet = boxes.filter((box) => box.width >= canvas.width * 0.6);
+    if (sheet.length) {
+      const bottom = canvas.bottom - Math.min(...sheet.map((box) => box.top)) + FIT_MARGIN;
       return bottom + FIT_MARGIN < canvas.height ? { ...even, bottom } : even;
     }
 
-    const left = panel.right - canvas.left + FIT_MARGIN;
+    let left = FIT_MARGIN;
+    for (const box of boxes) {
+      // A card in the right half is not something a left margin can clear.
+      if (box.left - canvas.left > canvas.width / 2) continue;
+      left = Math.max(left, box.right - canvas.left + FIT_MARGIN);
+    }
     if (left + FIT_MARGIN >= canvas.width) return even;
     return { ...even, left };
   }
@@ -550,8 +601,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (map.getSource('calculated-route')) {
       map.getSource('calculated-route').setData(EMPTY);
     }
+    map.getSource('route-legs')?.setData(EMPTY);
 
     closeBuildingCard();
+    deselectPin();
 
     // Reset UI. The search box is cleared too: leaving a destination showing
     // next to "Not set" is the kind of stale text people act on.
@@ -806,7 +859,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       ['!', ['to-boolean', ['get', 'hidden']]],
       ['match', ['get', 'kind'], REDRAWN, false, true],
     ];
-    const anchor = belowNetwork();
+    // Under the legend's outlines when they exist, and this is not optional.
+    // The sheet arrives from the server, so on a cold load the highlight layers
+    // are already standing when it lands; anchoring both to the network alone
+    // put the later arrival on top, and my campus's opaque building fills painted out
+    // every outline the legend drew. The sheet is ground and the outline
+    // annotates the ground, so the order is fixed rather than incidental.
+    const anchor = map.getLayer('highlight-fill') ? 'highlight-fill' : belowNetwork();
 
     map.addLayer({
       id: 'campus-sheet-fill',
@@ -840,19 +899,178 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }, anchor);
   }
 
+  // -------------------------------------------------------------------------
+  // Legend highlight
+  //
+  // The shapes one legend row is asking about: an outline over every building
+  // and car park that holds the thing, and a ring on each one that stands in
+  // the open. src/highlight.js does the join; this draws the answer.
+  // -------------------------------------------------------------------------
+
+  /** Everything the legend can outline. Empty until the overlays land. */
+  let legendAreas = [];
+  /** category id -> { indices, points, counts }, computed once per load. */
+  const legendHighlights = new Map();
+  /** The row that was clicked, and the row the pointer is over. */
+  let stickyRow = null;
+  let hoverRow = null;
+
   /**
-   * Amenity pictograms. Nothing here is theme-dependent — the icons carry their
-   * own colour and a white rim so they read on lawn, paving and imagery alike.
+   * A hovered row wins over the selected one, and gives it back on the way out.
+   *
+   * Two variables rather than one because a preview has to be undoable: hover
+   * "Defibrillator" while "Parking" is selected and the car parks come back the
+   * moment the pointer leaves, without the selection ever having been touched.
+   */
+  const shownRow = () => hoverRow ?? stickyRow;
+
+  function paintHighlight() {
+    const shown = shownRow();
+    const highlight = shown ? legendHighlights.get(shown) : null;
+
+    map.getSource('highlight-areas')?.setData(
+      highlight ? areaCollection(legendAreas, highlight.indices) : EMPTY,
+    );
+    map.getSource('highlight-points')?.setData(
+      highlight ? pointCollection(highlight.points) : EMPTY,
+    );
+  }
+
+  /**
+   * Three layers over two sources, added together and taken down never.
+   *
+   * They sit between the printed sheet and the road ribbon, which is where a
+   * ground annotation belongs: over my campus's own tarmac and lawn, under the white
+   * paths and under the route, so lighting up every car park on campus cannot
+   * bury the directions someone is following. Insertion order does it — the
+   * network layers are added after this in addNetworkLayers, and within a slot
+   * Mapbox honours the order it was given.
+   */
+  function addHighlightLayers() {
+    const colors = palette(currentProvider, currentBasemap, currentTheme);
+
+    if (map.getLayer('highlight-fill')) {
+      for (const [id, property] of [
+        ['highlight-fill', 'fill-color'],
+        ['highlight-line', 'line-color'],
+        ['highlight-points', 'circle-color'],
+        ['highlight-points', 'circle-stroke-color'],
+      ]) {
+        map.setPaintProperty(id, property, colors.highlight);
+      }
+      return;
+    }
+
+    if (!map.getSource('highlight-areas')) {
+      map.addSource('highlight-areas', { type: 'geojson', data: EMPTY });
+    }
+    if (!map.getSource('highlight-points')) {
+      map.addSource('highlight-points', { type: 'geojson', data: EMPTY });
+    }
+
+    map.addLayer({
+      id: 'highlight-fill',
+      type: 'fill',
+      source: 'highlight-areas',
+      slot: 'middle',
+      paint: {
+        'fill-color': colors.highlight,
+        // A car park is fifty times the area of a building and the same wash
+        // over both reads as two different strengths of answer. Weaker on the
+        // large shape is what makes them look like one highlight.
+        'fill-opacity': ['match', ['get', 'kind'], 'zone', 0.16, 0.26],
+        'fill-emissive-strength': 1,
+      },
+    });
+    map.addLayer({
+      id: 'highlight-line',
+      type: 'line',
+      source: 'highlight-areas',
+      slot: 'middle',
+      layout: { 'line-join': 'round' },
+      paint: {
+        'line-color': colors.highlight,
+        'line-width': 2.5,
+        'line-emissive-strength': 1,
+      },
+    });
+    // The ones with no shape to outline: the bike racks bolted to a path, the
+    // three bus stops out on the perimeter. A ring on the ground under the pin
+    // that is already there, rather than a second pin competing with it.
+    map.addLayer({
+      id: 'highlight-points',
+      type: 'circle',
+      source: 'highlight-points',
+      slot: 'middle',
+      paint: {
+        'circle-color': colors.highlight,
+        'circle-opacity': 0.3,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 4, 19, 12],
+        'circle-stroke-color': colors.highlight,
+        'circle-stroke-width': 2,
+        'circle-emissive-strength': 1,
+      },
+    });
+
+    // A style swap drops the layers with a row still selected, so what the
+    // legend thinks is showing has to be pushed back at the new ones.
+    paintHighlight();
+  }
+
+  /**
+   * A `match` from a feature's kind to the ink its name is set in.
+   *
+   * Apple tints a POI's label with the marker's own hue rather than the map's
+   * text colour, which is what lets a field of markers be read by colour before
+   * a single word of it has been. Built as an expression rather than one flat
+   * paint value because a symbol layer has one `text-color` and this map draws
+   * eight categories through it.
+   */
+  const amenityHalo = () => palette(currentProvider, currentBasemap, currentTheme).labelHalo;
+
+  const inkFor = (property) => {
+    // Over imagery a tint has nothing fixed to sit against — foliage, tarmac
+    // and pale roofs are all in one frame — so the names go back to the single
+    // high-contrast colour that reads over all of it. Apple's satellite mode
+    // drops the category tint for exactly the same reason.
+    if (currentBasemap === 'satellite') return SATELLITE.label;
+    return [
+      'match',
+      ['get', property],
+      ...AMENITY_KINDS.flatMap((kind) => [kind, pinInk(kind, currentTheme)]),
+      pinInk('campus', currentTheme),
+    ];
+  };
+
+  /**
+   * Amenity pictograms and the names under them.
+   *
+   * The disc itself is not theme-dependent — it carries its own colour and a
+   * white rim so it reads on lawn, paving and imagery alike — but the label is,
+   * because a third-lightness hue on a near-black ground is a smudge.
    *
    * The layer is added inside the promise because setStyle drops registered
    * images along with the layers, so the icons have to be re-registered before
    * anything can reference them.
    */
   function addAmenityLayer() {
-    if (!campusAmenities || map.getLayer('campus-amenities')) return;
+    if (map.getLayer('campus-amenities')) {
+      map.setPaintProperty('campus-amenities', 'text-color', inkFor('kind'));
+      map.setPaintProperty('campus-amenities', 'text-halo-color', amenityHalo());
+      return;
+    }
+    if (!campusAmenities) return;
 
     if (!map.getSource('campus-amenities')) {
-      map.addSource('campus-amenities', { type: 'geojson', data: campusAmenities });
+      // `generateId` is what makes one pin addressable. amenities.json carries
+      // no identifier of its own — six features all say `defibrillator` — so
+      // without this there is no filter that can hide the one that was tapped
+      // and leave the other five standing.
+      map.addSource('campus-amenities', {
+        type: 'geojson',
+        data: campusAmenities,
+        generateId: true,
+      });
     }
     loadAmenityIcons(map).then(() => {
       // A style swap can land between the two, taking the source with it.
@@ -867,18 +1085,50 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         minzoom: 16,
         layout: {
           'icon-image': ['get', 'kind'],
-          // The image is a 26x34 balloon now rather than a 24x24 disc, so the
-          // sizes here are re-derived rather than kept: 0.54 to 0.65 puts it at
-          // 14x18 to 17x22 px, which is the range Google's own markers occupy.
-          'icon-size': ['interpolate', ['linear'], ['zoom'], 16, 0.54, 19, 0.65],
-          // The tip is the thing that points, so it goes on the coordinate.
-          // Left centred, every marker would name a spot half a pin north of
-          // the phone or the bike rack it stands for.
-          'icon-anchor': 'bottom',
+          // 0.54 to 0.65 of a 26-unit disc puts it at 14 to 17 px across, which
+          // is the range Apple's own resting markers occupy. The stops live in
+          // pin-select.js because a selected pin has to start its animation at
+          // whatever size this is drawing right now.
+          'icon-size': sizeExpr(AMBIENT_SIZE),
+          // Centred, not bottom-anchored. The resting marker has no tail — it
+          // is a disc sitting ON the place rather than a balloon pointing down
+          // at one, so its middle is what goes on the coordinate.
+          'icon-anchor': 'center',
           'icon-padding': 2,
+          // The name goes underneath, which is the Apple arrangement and the
+          // reason `text-anchor` is top: the anchor point is the coordinate, so
+          // the offset has to clear the disc's own lower half.
+          //
+          // Only once you are close enough for it to be worth reading. my campus's
+          // amenity names are generic — five "Emergency telephone"s can be on
+          // screen at once — so below this the disc's colour and glyph carry it
+          // alone, which is what they were drawn to do. Apple's own map holds
+          // its POI names back the same way.
+          'text-field': ['step', ['zoom'], '', 17, ['coalesce', ['get', 'label'], '']],
+          'text-font': FONT.medium,
+          'text-size': 11,
+          'text-anchor': 'top',
+          'text-offset': [0, 0.85],
+          // Shared with the lifted marker's DOM label, so a name wraps on the
+          // same words in both states — see LABEL_MAX_EM in pin-select.js.
+          'text-max-width': LABEL_MAX_EM,
+          // Never at the cost of the marker. 84 of these sit on one campus and
+          // a good half of the names would collide at any useful zoom; the disc
+          // is the information and the word is the elaboration.
+          'text-optional': true,
         },
-        paint: { 'icon-emissive-strength': 1 },
+        paint: {
+          'icon-emissive-strength': 1,
+          'text-color': inkFor('kind'),
+          'text-halo-color': amenityHalo(),
+          'text-halo-width': 1.4,
+          'text-emissive-strength': 1,
+        },
       });
+      // A style swap rebuilds this layer unfiltered, and the HTML marker of a
+      // pin that was lifted before the swap survives it — so without this the
+      // selected pin comes back small underneath its own enlarged self.
+      paintCategory();
     }).catch((error) => console.error('amenity icons unavailable:', error));
   }
 
@@ -924,12 +1174,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (map.getLayer('category-pins')) {
       // Same shape as the other builders: a theme change re-runs this to
       // recolour what is already there rather than rebuilding it.
-      map.setPaintProperty('category-pins', 'text-color', colors.label);
+      map.setPaintProperty('category-pins', 'text-color', inkFor('icon'));
       map.setPaintProperty('category-pins', 'text-halo-color', colors.labelHalo);
       return;
     }
     if (!map.getSource('category-pins')) {
-      map.addSource('category-pins', { type: 'geojson', data: EMPTY });
+      map.addSource('category-pins', { type: 'geojson', data: EMPTY, generateId: true });
     }
 
     // Shares the amenity loader: the four discs these need are registered in
@@ -949,8 +1199,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           // size renders them as specks against my campus's own printed symbols.
           // Google does the same thing: a search result is a bigger pin than
           // the POIs it lands among.
-          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.72, 19, 0.92],
-          'icon-anchor': 'bottom',
+          'icon-size': sizeExpr(CATEGORY_SIZE),
+          // Centred like the ambient discs: no tail, so the middle is the mark.
+          'icon-anchor': 'center',
           // A category is a deliberate request to see all of them, so the pins
           // never drop out to a collision the way the ambient pictograms do.
           // Their names still do: `text-optional` keeps the pin when its label
@@ -962,15 +1213,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           'text-field': ['get', 'name'],
           'text-font': FONT.medium,
           'text-size': 12,
-          // Under the tip, which is where Google writes a search result's name.
-          // Small gap: the pin already ends in a point, so the label does not
-          // need to clear a disc's radius the way it did.
+          // Under the disc, and far enough under to clear its lower half —
+          // the anchor point is the coordinate and the disc is centred on it.
           'text-anchor': 'top',
-          'text-offset': [0, 0.4],
-          'text-max-width': 9,
+          'text-offset': [0, 0.95],
+          'text-max-width': LABEL_MAX_EM,
         },
         paint: {
-          'text-color': colors.label,
+          // Tinted with the disc's own hue rather than set in the map's ink.
+          'text-color': inkFor('icon'),
           'text-halo-color': colors.labelHalo,
           'text-halo-width': 1.6,
           'icon-emissive-strength': 1,
@@ -982,7 +1233,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }).catch((error) => console.error('category icons unavailable:', error));
   }
 
-  /** Push the current selection at the map: the filter and the pins. */
+  /**
+   * Push the current selection at the map: the filter and the pins.
+   *
+   * Two things narrow these layers now and they have to be combined rather than
+   * written in turn — a category that set its own filter would put back the pin
+   * a selection had just taken out, and the selected one would be drawn twice,
+   * once small underneath its own animation.
+   */
   function paintCategory() {
     const active = Boolean(activeCategory);
 
@@ -993,7 +1251,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // and the category's pins overlap-allow and carry names, which the ambient
     // ones deliberately do not.
     if (map.getLayer('campus-amenities')) {
-      map.setFilter('campus-amenities', active ? ['boolean', false] : null);
+      map.setFilter('campus-amenities', active ? ['boolean', false] : hiddenPin('campus-amenities'));
+    }
+    if (map.getLayer('category-pins')) {
+      map.setFilter('category-pins', hiddenPin('category-pins'));
     }
 
     const source = map.getSource('category-pins');
@@ -1006,6 +1267,115 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         geometry: { type: 'Point', coordinates: hit.coords },
       })),
     } : EMPTY);
+  }
+
+  // -------------------------------------------------------------------------
+  // Selecting a pin
+  //
+  // Tapping one lifts it: the symbol is taken out of its layer and an HTML
+  // marker takes its place at exactly the size the symbol was being drawn at,
+  // then springs up to the selected size. See src/pin-select.js for where that
+  // curve comes from — it is Apple Maps', measured off a 60 fps capture.
+  //
+  // An HTML marker rather than a bigger symbol because a symbol layer can only
+  // be resized by pushing a new `icon-size` every frame, which restyles the
+  // whole layer to move one icon and scales a 2x raster past its own resolution
+  // while it does it.
+  // -------------------------------------------------------------------------
+
+  /** `{ layer, id, coords, kind, name }` for the pin that is up, or null. */
+  let selectedPin = null;
+  let selectedMarker = null;
+  let pinPopup = null;
+
+  /** The filter that hides the lifted pin from its own layer, or null. */
+  const hiddenPin = (layer) =>
+    (selectedPin?.layer === layer ? ['!=', ['id'], selectedPin.id] : null);
+
+  /** How wide that layer is drawing its icons at this zoom, in CSS pixels. */
+  const ambientWidth = (layer) => PIN_BASE_W * sizeAt(
+    layer === 'category-pins' ? CATEGORY_SIZE : AMBIENT_SIZE,
+    map.getZoom(),
+  );
+
+  /**
+   * The pin under a click, or null.
+   *
+   * Category pins first: while a chip is up they are the layer that is meant to
+   * be answering, and the two can sit on the same coordinate.
+   */
+  function pinAt(pointer) {
+    for (const layer of ['category-pins', 'campus-amenities']) {
+      if (!map.getLayer(layer)) continue;
+      const [hit] = map.queryRenderedFeatures(pointer, { layers: [layer] });
+      if (!hit) continue;
+      return {
+        layer,
+        id: hit.id,
+        coords: hit.geometry.coordinates,
+        kind: hit.properties.kind ?? hit.properties.icon,
+        // Amenities carry the legend's wording; a category pin carries the
+        // directory's, and drops it when the name would not identify anything.
+        name: hit.properties.name || hit.properties.label || null,
+      };
+    }
+    return null;
+  }
+
+  function deselectPin() {
+    if (!selectedPin) return;
+    const width = ambientWidth(selectedPin.layer);
+    selectedPin = null;
+    pinPopup?.remove();
+    pinPopup = null;
+    // The marker shrinks back before it goes, and the symbol underneath only
+    // comes back once it has: unfilter first and there are two pins for a fifth
+    // of a second, the small one sitting inside the shrinking large one.
+    const marker = selectedMarker;
+    selectedMarker = null;
+    marker?.remove(width);
+    setTimeout(paintCategory, 190);
+  }
+
+  function selectPin(hit) {
+    // Tapping the pin that is already up puts it back, the way tapping a
+    // pressed chip clears the category.
+    if (selectedPin?.layer === hit.layer && selectedPin?.id === hit.id) {
+      deselectPin();
+      return;
+    }
+    deselectPin();
+    closeBuildingCard();
+
+    const from = ambientWidth(hit.layer);
+    selectedPin = hit;
+    // Filter first, so the symbol is gone by the time its replacement appears.
+    paintCategory();
+
+    selectedMarker = mountSelectedPin({
+      map,
+      marker: mapboxgl.Marker,
+      kind: hit.kind,
+      coords: hit.coords,
+      label: hit.name,
+      from,
+    });
+
+    pinPopup = new mapboxgl.Popup({
+      closeButton: false,
+      closeOnClick: false,
+      offset: [0, -(SELECTED_W * 1.35)],
+      anchor: 'bottom',
+      className: 'pin-popup',
+      maxWidth: 'none',
+    })
+      .setLngLat(hit.coords)
+      .setDOMContent(pinCard(hit, {
+        onStart: (coords, name) => { deselectPin(); placeStart(coords, name); },
+        onEnd: (coords, name) => { deselectPin(); setDestination(coords, name); },
+        onClose: deselectPin,
+      }))
+      .addTo(map);
   }
 
   /** Straight-line feet from wherever the user is measuring from. */
@@ -1245,6 +1615,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * green, everything built is the same cool slate, and parking is that slate
    * lightened rather than a hue of its own.
    */
+  /**
+   * A building name takes its POI disc's hue, the way an amenity name does.
+   *
+   * Same rule Apple applies and the same reason: a label tinted with its
+   * marker's colour is readable as a category before it is readable as a word.
+   * Only the ones that HAVE a disc, though — an area name or a car park number
+   * has no marker to agree with, so those keep the map's own ink.
+   */
+  const labelPaint = (kind, colors) => (POI_LABEL_KINDS.has(kind)
+    ? ['case', ['has', 'poi'], inkFor('poi'), labelInk(kind, colors)]
+    : labelInk(kind, colors));
+
   const labelInk = (kind, colors) => (
     kind === 'area' ? colors.areaLabel
       : kind === 'parking' ? colors.parkingLabel
@@ -1401,7 +1783,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     if (map.getLayer('campus-labels-building')) {
       for (const kind of LABEL_KINDS) {
-        map.setPaintProperty(`campus-labels-${kind}`, 'text-color', labelInk(kind, colors));
+        map.setPaintProperty(`campus-labels-${kind}`, 'text-color', labelPaint(kind, colors));
         map.setPaintProperty(`campus-labels-${kind}`, 'text-halo-color', colors.labelHalo);
       }
       return;
@@ -1451,21 +1833,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const poiLayout = {
       'icon-image': ['get', 'poi'],
       'icon-size': ['interpolate', ['linear'], ['zoom'], 15, 0.58, 19, 0.72],
-      'icon-anchor': 'bottom',
-      'text-anchor': ['case', ['has', 'poi'], 'left', 'center'],
-      'text-justify': ['case', ['has', 'poi'], 'left', 'center'],
-      // Beside the head, not beside the tip — which is where Google writes a
-      // POI's name, and the reason the label reads as belonging to the marker.
-      //
-      // Ems, because text-offset has no other unit, and that is a compromise
-      // here rather than the right unit: the lift wanted is a fixed ~12.5 px
-      // (the head sits that far above the tip at these sizes) while an em is
-      // whatever type size my campus set for that particular name. One value cannot
-      // be exact for both the 11 px labels and the 16 px ones; 1.0 em splits it
-      // and leaves the extremes about 3 px out, which at this size does not
-      // read. The horizontal gap has the opposite property and genuinely wants
-      // ems — a bigger name should stand further off its pin.
-      'text-offset': ['case', ['has', 'poi'], ['literal', [0.95, -1.0]], ['literal', [0, 0]]],
+      // Centred on the coordinate: the resting marker is a disc, not a balloon,
+      // so nothing about it points downward at a spot below itself.
+      'icon-anchor': 'center',
+      'text-anchor': ['case', ['has', 'poi'], 'top', 'center'],
+      'text-justify': 'center',
+      // BENEATH the disc, which is Apple's arrangement and a straightforwardly
+      // easier one to hit than Google's. Their name sits beside the head, and
+      // the lift that wants is a fixed ~12.5 px while `text-offset` has no unit
+      // but ems — whatever size my campus happened to set that particular name at, so
+      // one value could not be right for both the 11 px labels and the 16 px
+      // ones. Underneath, the offset only has to clear the disc's lower half,
+      // and a bigger name genuinely should stand further off a bigger disc, so
+      // the em is the unit this actually wants.
+      'text-offset': ['case', ['has', 'poi'], ['literal', [0, 0.9]], ['literal', [0, 0]]],
       // A disc makes each symbol wider, and width is what the collision solver
       // charges for: at the default view, adding them dropped 5 of the 21
       // building names that used to place. Trimming the default 2 px of padding
@@ -1508,7 +1889,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           ...(POI_LABEL_KINDS.has(kind) ? poiLayout : {}),
         },
         paint: {
-          'text-color': labelInk(kind, colors),
+          'text-color': labelPaint(kind, colors),
           'text-halo-color': colors.labelHalo,
           // Standard's night preset would otherwise light the discs through its
           // own model and swallow them, the way it does the sheet.
@@ -1535,6 +1916,47 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function routeFeature() {
     if (!routeCoords) return EMPTY;
     return { type: 'Feature', geometry: { type: 'LineString', coordinates: routeCoords } };
+  }
+
+  /** Below this a leg is a nub, not a walk, and is better left undrawn. */
+  const LEG_MIN_FEET = 12;
+
+  /**
+   * The last few metres at each end, which are not on the network.
+   *
+   * A route runs between GRAPH VERTICES, and neither end of a journey is one.
+   * my campus binds its destinations to their own node ids, which sit a metre or two
+   * off ours because this network is traced from the printed sheet rather than
+   * taken from their graph; an amenity is wherever its pictogram is, which for
+   * half of them is inside a building. So the blue line stopped short of the
+   * pin, by up to a few dozen feet, and looked like a routing failure.
+   *
+   * Drawn as a separate dotted layer rather than by extending routeCoords, and
+   * that distinction is the honest one: this is not path, it is the walk from
+   * the path to the door. Every mapping app draws it the same way and for the
+   * same reason. It also keeps the maneuver list and the simulator working off
+   * the network geometry alone, which is the only thing they can follow.
+   */
+  function legsFeature() {
+    if (!routeCoords || routeCoords.length < 2) return EMPTY;
+    const ends = [
+      [startPoint?.geometry.coordinates, routeCoords[0]],
+      [routeCoords[routeCoords.length - 1], endPoint?.geometry.coordinates],
+    ];
+    return {
+      type: 'FeatureCollection',
+      features: ends
+        .filter(([a, b]) => a && b && distance(point(a), point(b)) * FEET_PER_KM >= LEG_MIN_FEET)
+        .map(([a, b]) => ({
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: [a, b] },
+        })),
+    };
+  }
+
+  function paintLegs() {
+    map.getSource('route-legs')?.setData(legsFeature());
   }
 
   /**
@@ -1673,12 +2095,17 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     addCampusMask();
     addBasemapLayers();
+    // Above the sheet it annotates, below the network added further down.
+    addHighlightLayers();
 
     if (!map.getSource('custom-network')) {
       map.addSource('custom-network', { type: 'geojson', data: customNetwork ?? EMPTY });
     }
     if (!map.getSource('calculated-route')) {
       map.addSource('calculated-route', { type: 'geojson', data: routeFeature() });
+    }
+    if (!map.getSource('route-legs')) {
+      map.addSource('route-legs', { type: 'geojson', data: legsFeature() });
     }
 
     // The network is drawn the way Google draws a road: one source, two line
@@ -1730,6 +2157,27 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
 
     // Dark casing under the route so it stays readable against pale buildings.
+    // Dotted, in the route's own blue: a round cap on a zero-length dash draws
+    // a circle, so `[0, 2]` is a row of dots rather than a dashed line. That is
+    // the convention for "walk this bit yourself" on every map that has one.
+    if (!map.getLayer('route-legs')) {
+      map.addLayer({
+        id: 'route-legs',
+        type: 'line',
+        source: 'route-legs',
+        slot: 'middle',
+        layout: { 'line-cap': 'round' },
+        paint: {
+          'line-color': colors.route,
+          'line-width': 5,
+          'line-dasharray': [0, 2],
+          'line-emissive-strength': 1,
+        },
+      });
+    } else {
+      map.setPaintProperty('route-legs', 'line-color', colors.route);
+    }
+
     if (!map.getLayer('route-casing')) {
       map.addLayer({
         id: 'route-casing',
@@ -1777,6 +2225,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     stepIndex = 0;
     resetBannerAnimation();
     addBuildingsLayer();
+    // The legend goes with the rest of the chrome here, and an outline with
+    // nothing left on screen explaining it is just a purple campus. Same for a
+    // lifted pin, whose card would float over the turn banner.
+    clearLegendHighlight();
+    deselectPin();
 
     document.body.classList.add('navigating');
     sidePanel.classList.add('hidden');
@@ -2148,7 +2601,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const railClear = document.getElementById('rail-clear');
   const layersBtn = document.getElementById('layers-btn');
   const layersMenu = document.getElementById('layers-menu');
-  const legendSheet = document.getElementById('legend-sheet');
+  // legendSheet is declared up with the side panel — campusPadding measures it.
   const legendList = document.getElementById('legend-list');
   const legendClose = document.getElementById('legend-close');
   const directionsBtn = document.getElementById('directions-btn');
@@ -2173,8 +2626,33 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   railLegend.addEventListener('click', () => {
     const open = toggleSheet(legendSheet, railLegend);
     railLegend.setAttribute('aria-pressed', String(open));
+    // A highlight with its legend closed is a purple campus and nothing on
+    // screen saying why, so the outline goes when the sheet does.
+    if (!open) clearLegendHighlight();
   });
-  legendClose.addEventListener('click', () => toggleSheet(legendSheet, railLegend, false));
+  // Below this width the stylesheet drops the rail and turns the column into a
+  // bottom sheet. Must match the media query in src/input.css.
+  const phone = window.matchMedia('(max-width: 640px)');
+
+  legendClose.addEventListener('click', () => {
+    toggleSheet(legendSheet, railLegend, false);
+    railLegend.setAttribute('aria-pressed', 'false');
+    if (phone.matches) toggleSheet(sidePanel, railMenu, true);
+    clearLegendHighlight();
+  });
+
+  // The phone's way in, from the layers menu. Drives the same sheet and the
+  // same rail state, so the two doors cannot disagree about whether it is open.
+  document.getElementById('layers-legend').addEventListener('click', () => {
+    toggleSheet(layersMenu, layersBtn, false);
+    toggleSheet(legendSheet, railLegend, true);
+    railLegend.setAttribute('aria-pressed', 'true');
+    // On the phone these two are alternatives, not a stack. Both at once is a
+    // sheet over two thirds of the screen with three legend rows showing, and
+    // a campus squeezed into the strip above it. The directions button in the
+    // top bar is what brings the route panel back.
+    if (phone.matches) toggleSheet(sidePanel, railMenu, false);
+  });
   railClear.addEventListener('click', resetMap);
 
   layersBtn.addEventListener('click', () => toggleSheet(layersMenu, layersBtn));
@@ -2193,17 +2671,138 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     focusSearch();
   });
 
-  // The legend sheet is generated from the same list the chips are, so the two
-  // can never disagree about what this map's symbols mean.
-  legendList.replaceChildren(...CATEGORIES.map((category) => {
-    const li = document.createElement('li');
-    const glyph = document.createElement('span');
-    glyph.className = 'g-icon';
-    glyph.dataset.icon = category.glyph;
-    li.append(glyph, document.createTextNode(category.legend));
-    return li;
-  }));
-  paintIcons(legendList);
+  // -------------------------------------------------------------------------
+  // The legend, which is also a query
+  //
+  // Generated from the same list the chips are, so the two can never disagree
+  // about what this map's symbols mean. Unlike the chips, a row here does not
+  // change what is on the map — it points at what is already there. Hover to
+  // ask, click to keep the answer up.
+  //
+  // Deliberately independent of the chip strip: a chip answers "where are the
+  // defibrillators", a legend row answers "which buildings have one". Both can
+  // be up at once and they do not fight, because one draws pins and the other
+  // outlines ground.
+  // -------------------------------------------------------------------------
+
+  /** "6 buildings", "1 building · 22 zones · 5 outdoors", or nothing at all. */
+  function countText(counts) {
+    const parts = [];
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    if (counts.buildings) parts.push(plural(counts.buildings, 'building'));
+    if (counts.zones) parts.push(plural(counts.zones, 'zone'));
+    // Named rather than counted with the rest: these are the ones the outline
+    // cannot speak for, and rolling them into "15 things" would hide that.
+    if (counts.outside) parts.push(`${counts.outside} outdoors`);
+    return parts.join(' · ');
+  }
+
+  function renderLegend() {
+    const ready = legendAreas.length > 0;
+
+    legendList.replaceChildren(...CATEGORIES.map((category) => {
+      const highlight = legendHighlights.get(category.id);
+      const li = document.createElement('li');
+
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'g-legend-row';
+      row.dataset.id = category.id;
+      // A toggle, not a radio: the pressed row is a thing you turn off again,
+      // and there is no fourth state for "none of them" to occupy.
+      row.setAttribute('aria-pressed', String(stickyRow === category.id));
+      // Until the overlays land there is nothing to outline and a row that
+      // silently did nothing would read as broken rather than as early — the
+      // same reason the chips start disabled.
+      row.disabled = !ready;
+
+      const glyph = document.createElement('span');
+      glyph.className = 'g-icon g-legend-glyph';
+      glyph.dataset.icon = category.glyph;
+
+      const text = document.createElement('span');
+      text.className = 'g-legend-text';
+      const name = document.createElement('span');
+      name.className = 'g-legend-name';
+      name.textContent = category.legend;
+      text.append(name);
+
+      if (highlight) {
+        const count = document.createElement('span');
+        count.className = 'g-legend-count';
+        count.textContent = countText(highlight.counts);
+        text.append(count);
+      }
+
+      row.append(glyph, text);
+      row.addEventListener('click', () => {
+        selectLegendRow(stickyRow === category.id ? null : category.id);
+      });
+      // Focus counts as hover, so the whole thing works from the keyboard.
+      row.addEventListener('mouseenter', () => previewLegendRow(category.id));
+      row.addEventListener('focus', () => previewLegendRow(category.id));
+      row.addEventListener('mouseleave', () => previewLegendRow(null));
+      row.addEventListener('blur', () => previewLegendRow(null));
+
+      li.append(row);
+      return li;
+    }));
+    paintIcons(legendList);
+  }
+
+  function previewLegendRow(id) {
+    if (hoverRow === id) return;
+    hoverRow = id;
+    paintHighlight();
+  }
+
+  /** Both halves of the state, for the places the legend itself goes away. */
+  function clearLegendHighlight() {
+    hoverRow = null;
+    selectLegendRow(null);
+    paintHighlight();
+  }
+
+  function selectLegendRow(id) {
+    if (stickyRow === id) return;
+    stickyRow = id;
+    for (const li of legendList.children) {
+      li.firstElementChild?.setAttribute('aria-pressed', String(li.firstElementChild.dataset.id === id));
+    }
+    paintHighlight();
+
+    // Framed on the click only. A camera that moved on hover would make
+    // running an eye down twelve rows into twelve flights.
+    const highlight = id ? legendHighlights.get(id) : null;
+    if (highlight) frame(extentOf(legendAreas, highlight), { maxZoom: 17 });
+  }
+
+  /**
+   * Do the join, once, when the overlays that feed it have arrived.
+   *
+   * Every row is resolved up front rather than on first hover: the answer is
+   * what the row prints under its caption, so it has to exist before anything
+   * is pointed at, and twelve categories over 90 areas is a few milliseconds.
+   */
+  function buildLegendIndex() {
+    legendAreas = buildAreas({
+      directory: campusDirectory,
+      buildings: campusBuildings,
+      basemap: campusBasemap,
+      zoneKinds: CATEGORIES.map((category) => category.zones).filter(Boolean),
+    });
+    legendHighlights.clear();
+    for (const category of CATEGORIES) {
+      legendHighlights.set(category.id, highlightFor(category, {
+        areas: legendAreas,
+        amenities: campusAmenities,
+        places: campusPlaces,
+      }));
+    }
+    renderLegend();
+  }
+
+  renderLegend();
 
   map.on('load', async () => {
     // Real GPS. Requires a secure context (https or localhost) or the browser
@@ -2292,6 +2891,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       console.error(directory.reason);
     }
 
+    // Last of the five collections it reads, so this is where the legend stops
+    // being a key and starts being a query. Degrades one source at a time: lose
+    // directory.json and the outlines become per-footprint, lose the sheet and
+    // Parking has no ground to paint, and every other row still answers.
+    buildLegendIndex();
+
     if (labels.status === 'fulfilled') {
       // Classified on the way in rather than in the build script: which disc a
       // building name earns is presentation, and labels.json stays exactly what
@@ -2346,7 +2951,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function placeStart(coords, label) {
     startPoint = point(coords);
     startMarker?.remove();
-    startMarker = new mapboxgl.Marker({ element: googlePin(GOOGLE_GREEN, { title: 'Start' }), anchor: 'bottom' })
+    startMarker = new mapboxgl.Marker({
+      element: routePin(GOOGLE_GREEN, { title: 'Start' }),
+      anchor: 'bottom',
+      offset: liftedOffset(ROUTE_PIN_W),
+    })
       .setLngLat(coords)
       .addTo(map);
     startCoordText.textContent = label ?? coordLabel(coords);
@@ -2355,7 +2964,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   async function placeEnd(coords, label) {
     endPoint = point(coords);
     endMarker?.remove();
-    endMarker = new mapboxgl.Marker({ element: googlePin(GOOGLE_RED, { title: 'Destination' }), anchor: 'bottom' })
+    endMarker = new mapboxgl.Marker({
+      element: routePin(GOOGLE_RED, { title: 'Destination' }),
+      anchor: 'bottom',
+      offset: liftedOffset(ROUTE_PIN_W),
+    })
       .setLngLat(coords)
       .addTo(map);
     endCoordText.textContent = label ?? coordLabel(coords);
@@ -2395,6 +3008,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       type: 'Feature',
       geometry: result.geometry,
     });
+    paintLegs();
 
     setDistanceFeet(result.distanceFeet);
     const turns = maneuvers.length - 2;
@@ -2430,7 +3044,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 17), duration: 900 });
       pendingEnd = { coords, name };
       endMarker?.remove();
-      endMarker = new mapboxgl.Marker({ element: googlePin(GOOGLE_RED, { title: 'Destination' }), anchor: 'bottom' })
+      endMarker = new mapboxgl.Marker({
+      element: routePin(GOOGLE_RED, { title: 'Destination' }),
+      anchor: 'bottom',
+      offset: liftedOffset(ROUTE_PIN_W),
+    })
         .setLngLat(coords).addTo(map);
       endCoordText.textContent = name;
       setStatus(`${name} — now click the map to set where you are starting from.`);
@@ -2439,8 +3057,39 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     await placeEnd(coords, name);
   }
 
+  // The cursor says what a click will do. Over a pin or a building that is
+  // "open this", not "drop a point here", and the crosshair says the wrong one.
+  //
+  // One query across all three rather than pinAt() and buildingAt() in turn:
+  // this runs on every mouse move, and three hit tests a frame to decide the
+  // shape of a cursor is three times the work the answer is worth.
+  const POINTER_LAYERS = ['category-pins', 'campus-amenities', 'campus-directory-hit'];
+  map.on('mousemove', (e) => {
+    if (navActive) return;
+    const layers = POINTER_LAYERS.filter((id) => map.getLayer(id));
+    const over = layers.length > 0 && map.queryRenderedFeatures(e.point, { layers }).length > 0;
+    map.getCanvas().style.cursor = over ? 'pointer' : 'crosshair';
+  });
+
+  // Esc puts a selection back, which is the one thing every floating card on
+  // every map agrees on.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') deselectPin();
+  });
+
   map.on('click', async (e) => {
     if (navActive || !networkPoints) return;
+
+    // A tap on a pin lifts it rather than dropping a second one beside it.
+    // Tested before buildings because pins sit on top of them and half of them
+    // are inside one — a defibrillator tapped through the Library's footprint
+    // would otherwise open the Library.
+    const pin = pinAt(e.point);
+    if (pin) {
+      selectPin(pin);
+      return;
+    }
+    deselectPin();
 
     // A tap on a building asks what it is rather than dropping a pin on it.
     // The card's own buttons then set a start or destination, and they do it at

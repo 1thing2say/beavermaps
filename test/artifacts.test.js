@@ -146,6 +146,7 @@ test('every category resolves against the data and the icon sets', () => {
   const amenities = load('amenities');
   const places = load('places');
   const kinds = new Set(amenities.features.map((f) => f.properties.kind));
+  const sheetKinds = new Set(load('basemap').features.map((f) => f.properties.kind));
 
   for (const category of CATEGORIES) {
     assert.ok(ICON_NAMES.includes(category.glyph),
@@ -159,6 +160,13 @@ test('every category resolves against the data and the icon sets', () => {
     if (category.match) {
       assert.ok(AMENITY_KINDS.includes(category.icon),
         `${category.id}: map-images.js has no disc "${category.icon}"`);
+    }
+    // `zones` names a class of the printed sheet for the legend to outline. A
+    // typo here costs nothing visible — the row simply outlines no ground and
+    // reports fewer zones than there are — so the join is asserted instead.
+    if (category.zones) {
+      assert.ok(sheetKinds.has(category.zones),
+        `${category.id}: basemap.json has no "${category.zones}" class`);
     }
 
     const hits = collect(category, { amenities, places });

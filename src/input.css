@@ -48,6 +48,12 @@
     --g-line: #dadce0;
     --g-blue: #1a73e8;
     --g-on-blue: #ffffff;
+    /* The legend's colour, and the map's: a pressed legend row and the shapes
+       it just outlined have to be the same purple or they read as two separate
+       things happening at once. Kept in step with `highlight` in the THEMES
+       palettes in src/main.js. */
+    --g-highlight: #a142f4;
+    --g-highlight-soft: rgba(161, 66, 244, 0.12);
     --g-hover: rgba(60, 64, 67, 0.08);
     --g-shadow: 0 1px 2px rgba(60, 64, 67, 0.3), 0 2px 6px 2px rgba(60, 64, 67, 0.15);
     --g-shadow-sm: 0 1px 2px rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
@@ -73,6 +79,8 @@
     --g-line: #3c4043;
     --g-blue: #8ab4f8;
     --g-on-blue: #202124;
+    --g-highlight: #c58af9;
+    --g-highlight-soft: rgba(197, 138, 249, 0.16);
     --g-hover: rgba(232, 234, 237, 0.1);
     --g-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 6px 2px rgba(0, 0, 0, 0.35);
     --g-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6), 0 1px 3px 1px rgba(0, 0, 0, 0.35);
@@ -104,15 +112,37 @@
     }
 
     /*
-     * The route markers, built by googlePin() in map-images.js.
+     * The route markers, built by routePin() in map-images.js — the same
+     * silhouette a selected POI wears, in green and red.
      *
      * line-height: 0 because a marker element is inline-level by default and the
-     * strut under the SVG would push the pin's tip a few pixels off the point it
-     * is marking — which no amount of `anchor: 'bottom'` corrects.
+     * strut under the SVG would push the pin's anchor dot a few pixels off the
+     * point it is marking, which no amount of `anchor: 'bottom'` corrects.
      */
     .map-pin {
         line-height: 0;
         cursor: pointer;
+    }
+
+    /* Dropped rather than simply appearing, on the same spring the selection
+       uses — the two are one marker family now, and a pin that blinks into
+       existence beside one that springs reads as two different maps. Shorter
+       than a selection: this is a thing arriving, not a thing being picked up. */
+    .map-pin-drop {
+        animation: pin-drop 380ms cubic-bezier(0.5, 1.525, 0.5, 1) both;
+        will-change: transform;
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+    }
+
+    @keyframes pin-drop {
+        from { transform: scale(0.35); }
+        to { transform: scale(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .map-pin-drop {
+            animation: none;
+        }
     }
 }
 
@@ -273,6 +303,111 @@
 [data-theme="dark"] .campus-popup .mapboxgl-popup-tip {
     border-top-color: #262626;
     border-bottom-color: #262626;
+}
+
+/* --- the selected pin ------------------------------------------------------
+   The balloon a tap lifts out of the symbol layer. The curve and the timings
+   live in src/pin-select.js, measured off a capture of Apple Maps; what is here
+   is only the geometry that lets the curve do its work.
+
+   The transform-origin is set inline, per marker, to the anchor dot — the one
+   part of the drawing that claims a position. Everything else may travel while
+   it grows; that must not. See mountSelectedPin. */
+.pin-selected {
+    position: relative;
+    line-height: 0;
+    cursor: pointer;
+    /* Above the ambient symbols in the canvas, below the chrome. */
+    z-index: 5;
+}
+
+.pin-selected-scale {
+    /* Its own layer for the duration, so the browser is not re-rasterising an
+       SVG on every frame of the spring. */
+    will-change: transform;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+/* The anchor dot, out of the head's SVG and out of its transform. It marks the
+   place, so it is the one part of this drawing that must not move — see
+   mountSelectedPin. Fades in rather than appearing, because at the start of the
+   animation the head is sitting on top of it. */
+.pin-selected-dot {
+    position: absolute;
+    left: 50%;
+    /* Its own half-width, set inline — the size comes from dotGeometry(). */
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 200ms ease-out 140ms;
+}
+
+.pin-selected.is-in .pin-selected-dot {
+    opacity: 1;
+}
+
+.pin-selected:not(.is-in) .pin-selected-dot {
+    transition: opacity 120ms ease-in;
+}
+
+/* Out of flow beneath the balloon: `anchor: 'bottom'` puts the element's box on
+   the coordinate, so a label counted into that box would float the tip a
+   caption's height above the thing it names. */
+.pin-selected-label {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 3px;
+    padding: 0 2px;
+    font-weight: 500;
+    line-height: 1.25;
+    /* Wraps at the same width the symbol layer wraps at — see LABEL_MAX_PX in
+       pin-select.js. A `nowrap` here is what made selecting a pin look like the
+       pin had slid sideways: the name went from two centred lines to one long
+       one and grew forty pixels in each direction. */
+    text-align: center;
+    text-wrap: balance;
+    color: var(--g-text);
+    /* The same halo every other label on this map is drawn with, rather than a
+       plate — it has to read over lawn, tarmac and imagery alike. */
+    text-shadow:
+        0 0 3px var(--g-surface), 0 0 3px var(--g-surface),
+        0 0 3px var(--g-surface), 0 0 3px var(--g-surface);
+    /* Fades with the growth rather than snapping in at the end, which is what
+       Apple's does — the caption is part of the same gesture as the lift. */
+    opacity: 0;
+    transition: opacity 200ms ease-out 160ms;
+}
+
+.pin-selected.is-in .pin-selected-label {
+    opacity: 1;
+}
+
+/* No delay on the way out: the label goes first, then the pin follows it down. */
+.pin-selected:not(.is-in) .pin-selected-label {
+    transition: opacity 120ms ease-in;
+}
+
+/* The pin's own card. Same surface as the building card, narrower, and with no
+   tip — the balloon underneath is already pointing at the place. */
+.pin-popup .mapboxgl-popup-content {
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.pin-popup .mapboxgl-popup-tip {
+    display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    /* The spring is the feature, so what is left when it is refused is the
+       selection itself: same sizes, no travel between them. */
+    .pin-selected-scale,
+    .pin-selected-label {
+        transition: none !important;
+    }
 }
 
 /* ===========================================================================
@@ -1091,6 +1226,21 @@ body.navigating .app-chrome {
     gap: 8px;
 }
 
+/* Things the rail already carries at this width, and only it carries below it.
+   Hidden by default rather than shown, so the desktop never has two doors onto
+   one sheet. */
+.g-phone-only {
+    display: none;
+}
+
+.g-layer-btn--wide {
+    width: auto;
+    flex: 1;
+    flex-direction: row;
+    justify-content: center;
+    gap: 8px;
+}
+
 .g-layer-btn {
     display: flex;
     flex-direction: column;
@@ -1137,42 +1287,102 @@ body.navigating .app-chrome {
 
 /* --- legend sheet ---------------------------------------------------------- */
 
+/* A card in the floating column, like the results panel above it. It used to
+   float beside the column, 280px of sheet sitting over the middle of the
+   campus, which was harmless while it was only a key and became the whole
+   problem once its rows started outlining buildings — half the answers landed
+   underneath the thing that asked the question.
+
+   Shrinks rather than pushing: the route panel refuses to give up height, so
+   when the column runs out the list inside here scrolls. Two rows' worth is
+   kept whatever happens, for the same reason the results panel keeps a couple. */
 .g-legend {
-    position: absolute;
-    left: calc(var(--g-rail-w) + var(--g-gap) * 2 + var(--g-col-w));
-    bottom: 100px;
-    z-index: 21;
-    width: 280px;
-    max-height: 60dvh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    flex: 0 1 auto;
+    min-height: 128px;
 }
 
 .g-legend-list {
     margin: 0;
     padding: 6px 0;
     list-style: none;
+    /* The part that absorbs whatever height the column has left, exactly as
+       the results list does — head and provenance note keep theirs. */
     overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
-.g-legend-list li {
+/* Each row is a button now: hovering it outlines the buildings and car parks
+   that hold the thing, clicking it keeps that outline up. The pressed colour is
+   the purple the map paints with, so the row and the shapes it lit are visibly
+   the same answer. */
+.g-legend-row {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 5px 16px;
+    width: 100%;
+    padding: 6px 16px;
+    border: 0;
+    background: transparent;
+    text-align: left;
     font-size: 13px;
     color: var(--g-text);
+    cursor: pointer;
 }
 
-.g-legend-list .g-icon {
+.g-legend-row:hover:not(:disabled),
+.g-legend-row:focus-visible {
+    background: var(--g-hover);
+}
+
+.g-legend-row:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+/* Ahead of the :hover rule above, which it would otherwise lose to on equal
+   specificity — the same tie the layer buttons hit. */
+.g-legend-row[aria-pressed="true"],
+.g-legend-row[aria-pressed="true"]:hover {
+    background: var(--g-highlight-soft);
+    color: var(--g-highlight);
+}
+
+.g-legend-row[aria-pressed="true"] .g-legend-glyph,
+.g-legend-row[aria-pressed="true"] .g-legend-count {
+    color: var(--g-highlight);
+}
+
+.g-legend-glyph {
     width: 16px;
     height: 16px;
+    flex: none;
+    color: var(--g-text-dim);
+}
+
+.g-legend-text {
+    min-width: 0;
+    flex: 1;
+}
+
+.g-legend-name {
+    display: block;
+    line-height: 1.3;
+}
+
+/* What the outline will actually do, printed before you ask for it: "6
+   buildings", or "1 building · 22 zones". A row whose things are all out in the
+   open says "15 outdoors" rather than pretending it has shapes to outline. */
+.g-legend-count {
+    display: block;
+    margin-top: 1px;
+    font-size: 11px;
     color: var(--g-text-dim);
 }
 
 .g-legend-note {
     margin: 0;
+    flex: none;
     padding: 8px 16px 12px;
     font-size: 11px;
     color: var(--g-text-dim);
@@ -1280,6 +1490,15 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
         display: none;
     }
 
+    /* ...so whatever only the rail could reach needs somewhere else to be. */
+    .g-phone-only {
+        display: block;
+    }
+
+    .g-layers-row.g-phone-only {
+        display: flex;
+    }
+
     /* ...so there is nothing left for the wordmark to hide behind. */
     #map .mapboxgl-ctrl-bottom-left {
         left: 0;
@@ -1304,13 +1523,9 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
         justify-content: flex-end;
     }
 
-    .g-layers,
-    .g-legend {
+    .g-layers {
         left: auto;
         right: var(--g-gap);
-    }
-
-    .g-layers {
         bottom: auto;
         top: calc(var(--g-gap) * 3 + 48px + 32px);
     }
@@ -1319,9 +1534,10 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
         order: 1;
     }
 
+    /* The legend rides the column here, which on this width is the bottom
+       sheet — so it needs no rule of its own beyond giving up more height than
+       it does on a desktop, where there is room for all twelve rows. */
     .g-legend {
-        bottom: auto;
-        top: calc(var(--g-gap) * 3 + 48px + 32px);
-        width: min(280px, calc(100vw - var(--g-gap) * 2));
+        min-height: 96px;
     }
 }

@@ -430,32 +430,196 @@ so this was measured against the running map before and after: **27 of the 39
 building names place at the default view, against 28 before.** One name, for
 labels that stop announcing which half of the map you are reading.
 
-### Pins that look like Google's
+### Pins that look like Apple's
 
-Ours were flat discs centred on the place. Google's are balloons — a round head
-on a short tail, a thick white ring around the whole silhouette, a white glyph
-inside, and the **tip** on the place rather than the centre. Side by side on the
-same map that read as two maps' markers, which is what it was.
+Two states, both measured off a screen capture of Apple Maps rather than
+described from memory. Their marker is not one shape at two sizes — selecting a
+place changes **what it is**:
 
-Both proportions were wrong on the first cut, and both are measured off a 3x
-capture of their raster: their marker is 50 px wide and 60 tall, so the tail
-drops only about **four tenths of the head's radius** below it — draw it by eye
-and it comes out nearly twice that and reads as a balloon on a string. And their
-white ring is a good **eighth of the total width**, not the hairline a 2 px
-stroke gives at this size.
+| | at rest | selected |
+|---|---|---|
+| shape | a flat **circle** | a teardrop that rises off the ground |
+| sits | **on** the place | above it, leaving a **dot** behind on the spot |
+| ring | 0.117 of the width | 0.070 of the width |
+| fill | flat category colour | a vertical gradient, +18% top, −12% bottom |
+| label | category hue, darkened | near-black |
 
-The tail is drawn as two curves leaving the head at its widest point, where the
-circle's tangent is vertical, so a control point directly below continues the
-curve smoothly. Start it anywhere else and the join is a visible corner — the
-difference between a pin and a lollipop.
+The ratios come out of the capture divided through by its own scale: 30 px
+across with a 3.5 px ring at rest; 79 px across with a ~5 px ring selected,
+widest at y=455 with the tip at y=499, so the nub drops only **0.152 r** below
+the head — against Google's 0.42, which is why theirs reads as a balloon on a
+string and Apple's as a spike stuck to the bottom of a circle.
 
-One compromise is worth naming. With the tip on the place, a label set beside the
-head needs a fixed ~12.5 px lift, but `text-offset` has no unit except ems — and
-an em here is whatever size my campus set for that particular name. One value cannot be
-exact for both the 11 px labels and the 16 px ones; 1.0 em splits it and leaves
-the extremes about 3 px out, which at this size does not read. The horizontal gap
-has the opposite property and genuinely wants ems, because a bigger name should
-stand further off its pin.
+This replaced Google's balloon, which the map wore until the selection animation
+was built and the marker it animated no longer matched the one the animation had
+been measured from.
+
+#### The label moved with it, and that is the larger half
+
+Google writes a POI's name **beside** its pin, vertically centred on the head.
+Apple writes it **beneath**, centred, and tints it with the marker's own category
+hue rather than the map's text colour — a #2fb342 park disc carries a #005100
+name. That is the same hue at roughly a third of the lightness, and it is what
+makes a field of markers scannable by colour before a single word has been read.
+
+So every layer that draws one of these anchors `center` rather than `bottom`,
+and every name that goes with one hangs under it in `pinInk` rather than beside
+it in slate. Three consequences worth naming:
+
+- The **em problem went away**. With the tip on the place, a label set beside the
+  head needed a fixed ~12.5 px lift, and `text-offset` has no unit but ems —
+  whatever size my campus happened to set that particular name at, so no one value was
+  right for both the 11 px labels and the 16 px ones. Underneath, the offset only
+  has to clear the disc's own lower half, and a bigger name genuinely *should*
+  stand further off a bigger disc. The em is the unit this arrangement wants.
+- **Amenity names appear from z17.** my campus's are generic — five "Emergency
+  telephone"s can be on screen at once — so below that the disc's colour and
+  glyph carry it alone, which is what they were drawn to do. Apple holds its own
+  POI names back the same way.
+- **The tint is dropped over imagery.** A photograph has no fixed ground value
+  for a third-lightness hue to sit against, so satellite goes back to one
+  high-contrast white. On the dark theme the tint inverts — lightened rather than
+  darkened — because a dark green on near-black is a smudge, not a label.
+
+#### The last few metres
+
+A route runs between **graph vertices**, and neither end of a journey is one.
+my campus binds its destinations to their own node ids, which sit a metre or two off
+ours because this network is traced from the printed sheet rather than taken
+from their graph; an amenity is wherever its pictogram is, which for half of
+them is inside a building. So the blue line stopped short of the pin — measured,
+10.9 m on a Library route — and read as a routing failure.
+
+It is drawn now, as a row of dots in the route's own blue, in its own layer
+rather than by extending the route geometry. That distinction is the honest one:
+this is not path, it is the walk from the path to the door, and every mapping
+app draws it differently for that reason. It also keeps the maneuver list and
+the simulator working off the network geometry alone, which is the only thing
+either of them can follow. Legs under 12 ft are left undrawn — below that it is
+a nub, not a walk.
+
+#### The route's two ends
+
+They wear the same silhouette, in green and red, with a plain white hole where a
+glyph would go. Not a shape invented for them: on Apple's map a dropped pin *is*
+their selected marker with nothing categorical in the head, so `routePin` and
+`liftedSvg` are one drawing with different contents. The capture shows no route,
+so nothing here is guessed — it is the geometry already measured, reused.
+
+Two consequences:
+
+- The anchor is the **dot**, not the box's bottom edge. Half the dot hangs below
+  the element, so a `bottom` anchor alone would sit the whole pin that half-dot
+  high; `liftedOffset` pushes it back down. Measured in a running browser, the
+  dot's centre lands on the marker's own translate to the pixel.
+- They **drop in** on the same spring, 380 ms rather than the selection's 540 —
+  this is a thing arriving, not a thing being picked up. The animation goes on
+  an inner element for the same reason the selection's does: Mapbox owns the
+  marker's own `transform` and rewrites it on every frame of every pan.
+
+### Selecting a pin (`src/pin-select.js`)
+
+Tapping a pin lifts it: the symbol comes out of its layer, an HTML marker takes
+its place at exactly the size the symbol was being drawn at, and it **springs**
+up to the selected size with its name underneath and a card above.
+
+The motion is Apple Maps', measured rather than imitated. A 60 fps capture of
+their macOS Maps selecting a park was taken apart frame by frame and the
+marker's width read off each one:
+
+```
+ms      0   17   33   50   83  117  150  183  217  250  283  317  350  450
+width  15   21   27   31   35   42   47   51   56   55   59   58   57   56
+```
+
+It grows, **overshoots by about 7%**, and settles back. That overshoot is the
+whole character of the thing: the same move without it reads as a resize, and
+with it reads as something being picked up.
+
+#### Fitting it took two goes
+
+A cubic-bezier interpolates between the size you start at and the size you end
+at, so the overshoot you *see* is the curve's overshoot scaled by that gap — and
+our gap is not Apple's. Their ambient icon is 27% of their selected one; ours is
+37% of ours, because a 26-unit disc at the sizes this map draws it is
+proportionally a bigger thing than their POI dot.
+
+Fit the curve to their **normalised progress** and you reproduce their timing
+exactly while the pin visibly bounces two thirds as far, which is the half of it
+anyone actually watches. So the fit is against **apparent size** — width as a
+fraction of the settled width — with the overshoot constrained to land where
+theirs lands:
+
+| | fit (SSE) | visible peak |
+|---|---|---|
+| `cubic-bezier(0.5, 1.525, 0.5, 1)` / 540 ms | **0.019** | **1.055×** at 308 ms |
+| `cubic-bezier(0.4, 1.45, 0.85, 1)` / 460 ms — fits normalised progress | 0.037 | 1.042× at 329 ms |
+| `cubic-bezier(0.34, 1.56, 0.64, 1)` — the stock spring | 0.174 | 1.062× at 263 ms |
+| Apple, measured | — | 1.063× at 283 ms |
+
+The first is what ships. Measured back out of a running browser off the computed
+transform matrix, it peaks at **1.0549× at 317 ms** — the stock spring gets the
+peak height about right by luck and fits the rest of the curve nine times worse,
+arriving early and then hanging.
+
+Going the other way is deliberately not the same curve reversed: nothing is
+being picked up on the way out, so it is 190 ms with no bounce at all. A pin
+that sprang on the way down would look dropped rather than put back.
+
+#### How it is built
+
+**An HTML marker, not a bigger symbol.** A symbol layer can only be resized by
+pushing a new `icon-size` on every frame, which restyles the whole layer to move
+one icon and rasterises a 2× image past its own resolution while it does it. As
+an element it is an SVG the browser re-renders crisply at any scale and the
+easing is one CSS property.
+
+**Two things animate, not one**, and the reason is the shape change underneath.
+The resting marker is a disc sitting *on* the place; the lifted one is a head
+floating *above* it with a dot left behind on the spot. They do not agree about
+where the head goes, so simply scaling one into the other pops it upward by
+three quarters of its own width the instant it is tapped. So:
+
+- `transform-origin` is the **anchor dot** — the one part of the drawing that
+  claims a position never moves, at any scale, at any point in the animation.
+- a `translateY` alongside the scale starts the head exactly where the disc was,
+  on the place, and carries it up to where a lifted head belongs. Both sit in one
+  transform, so one timing function drives them and the rise springs with the
+  growth instead of racing it. Measured back: the dot's centre lands within a
+  pixel of the coordinate, and the label sits 3 px under it.
+
+Two more details are load-bearing:
+
+- The scale goes on an **inner** element. Mapbox owns the marker's own
+  `transform` and rewrites it on every frame of every pan.
+- `generateId: true` on both pin sources. `amenities.json` carries no identifier
+  — six features all say `defibrillator` — so without it there is no filter that
+  can hide the one that was tapped and leave the other five standing. Miss this
+  and the ambient pin sits inside its own enlarged self.
+
+The starting size is not a guess either. Both layers interpolate `icon-size`
+between two zooms, and those stops live in `pin-select.js` as **data** — handed
+to Mapbox as an expression and evaluated in JS for the animation's start scale,
+one table with no way for the two to drift. Measured live at z17.4 the marker
+mounts at 15.4 px, which is what the symbol was drawing.
+
+**One number wraps both labels.** The resting name is a Mapbox symbol and the
+lifted one is a DOM node, and left to themselves the symbol wrapped "Drink
+vending machine" onto two centred lines while the DOM node ran it out on one —
+so selecting a pin fanned its name out sideways by about forty pixels in each
+direction. The pin never moved; the label did, and that reads as the whole
+marker sliding. `LABEL_MAX_EM` is shared by both. In **ems**, not pixels,
+because the lifted label is set larger — Apple's is, measurably, 25 px against
+the resting 21 — so one pixel width still rewrapped it, just onto three lines
+instead of two.
+
+**The anchor dot is its own element** and never transforms at all. It marks the
+place; the place does not move. Drawing it inside the head's SVG — which the
+first cut did — meant the head's travel dragged it 13 px down the screen and
+back on every selection. Measured after the split: 0.00 px of travel in either
+axis, sitting within a hundredth of a pixel of the coordinate.
+
+`prefers-reduced-motion` keeps the selection and drops the travel.
 
 ### Building POIs
 
@@ -548,8 +712,86 @@ destination. Two details that took a second pass:
   six copies of what the icon already said. Uniqueness within the category
   decides it, so no category has to declare which sort it is.
 
+### The legend answers back (`src/highlight.js`)
+
 The **Legend** button on the rail opens the printed key itself, generated from
-the same list, so the chips and the legend cannot drift apart.
+the same list as the chips so the two cannot drift apart. It is not only a key,
+though. **Point at a row and every shape holding that thing is outlined.**
+
+That is the question a printed key cannot answer. "Defibrillator ⚡" tells you
+what the symbol means; it does not tell you that there are six of them and which
+buildings they are in. Hovering the row does — and clicking it keeps the outline
+up while you pan around.
+
+|  | what it outlines |
+| --- | --- |
+| Defibrillator | 6 buildings |
+| All Gender Restrooms | 5 buildings |
+| Parking lots and garage | 1 building · 22 zones |
+| Bike Rack | 2 zones · 13 outdoors |
+| Emergency telephone | 2 buildings · 1 zone · 8 outdoors |
+
+Each row prints that line under its caption **before** you point at it, which is
+the honest part. Thirteen of the fifteen bike racks are bolted to a path, not
+inside anything, and a row that only outlined the two car parks with a rack in
+them would look like a map that had lost the other thirteen. They get a ring on
+the ground instead, and the count says so.
+
+Three kinds of shape can light up, searched in this order:
+
+1. **Named buildings**, from `directory.json`. my campus draws the Health Education
+   Complex as nine footprints; outlining one ninth of it because that is the
+   shard the defibrillator landed in would be worse than outlining nothing.
+2. **The 38 footprints the directory did not claim** — the ones with no name to
+   group by. Worth including for exactly what it buys: one of the six
+   defibrillators, two bike shelters and four motorcycle bays are inside an
+   unnamed building, and without these each would report as standing outdoors.
+3. **Car parks**, from the printed sheet's own `parking` polygons. Only one row
+   is about ground rather than objects, and it is the only one that names a
+   sheet class (`zones: 'parking'` in `categories.js`). Hovering it paints all
+   22 car parks — not the nine points my campus happens to list as destinations.
+
+Buildings are searched before car parks, so the Parking Garage — which stands
+inside a parking surface — wins the point that is inside both.
+
+#### Two ways a point finds its shape, and why they differ
+
+- An **amenity** from `amenities.json` is where the object physically is, traced
+  off my campus's artwork. Containment, and nothing else. The thirteen loose bike
+  racks stand between 1.8 m and 24.7 m from the nearest shape — a continuous
+  spread with no gap to cut at — so any "near enough" rule wide enough to catch
+  the closest would drag most of the rest indoors. A rack outside a building is
+  outside it.
+- A **directory row** from `places.json` is a routing node: my campus binds each
+  destination to a vertex of the walk network, which sits at the door or the
+  kerb rather than in the middle of the thing it names. All nine car parks and
+  both Para Transit stands land within 1.3 m of their shape, three of them just
+  outside it. Hence a 5 m reach, small enough that it can only ever pick the
+  shape the node was set against — it is what puts the Parking Garage's outline
+  on the garage instead of on the tarmac.
+
+Purple, because every other meaning on this map was taken: blue is the route,
+green the start pin, red the destination, white the path ribbon, cream the
+buildings. The car parks are washed more weakly than the buildings (0.16 against
+0.26) — a lot is fifty times the area of a building and the same wash over both
+reads as two different strengths of answer.
+
+Two things that had to be got right, and were not at first:
+
+- The outline layers sit **above the printed sheet and below the road ribbon**.
+  The sheet arrives from the server, so on a cold load the highlight layers are
+  already standing when it lands; anchoring both to the network alone put the
+  later arrival on top and my campus's opaque building fills painted out every outline
+  the legend drew.
+- The sheet **moved into the floating column**. It used to float beside it, 280
+  px of card sitting over the middle of the campus, which was harmless while it
+  was only a key and became the whole problem once its rows started outlining
+  buildings — half the answers landed underneath the thing that asked the
+  question. In the column, the space it costs is space `campusPadding` was
+  already reserving.
+
+Below 640px the rail is hidden, and it was the only way in; the layers menu
+grows a **Map legend** button there, opening the same sheet and the same state.
 
 ## Setup
 
@@ -635,6 +877,8 @@ mapper/
 │   ├── places.json         # my campus's destination directory, positioned
 │   ├── campus-boundary.json# OSM campus polygon, used to mask the basemap
 │   ├── categories.js       # The chip strip — my campus's printed legend
+│   ├── highlight.js        # Which buildings and car parks a legend row outlines
+│   ├── pin-select.js       # The spring a tapped pin grows with, measured off Apple Maps
 │   ├── poi.js              # Which disc each building name earns
 │   ├── g-icons.js          # Button and chip glyphs, drawn as SVG
 │   ├── map-images.js       # Amenity pictograms and the route pin, drawn as SVG
@@ -745,6 +989,19 @@ themselves:
   legitimately small things.
 - **every building's entrance is a real graph node** and its card anchor lies
   inside its own walls — the two things a pole of inaccessibility exists for.
+- **the pin animation's two size sources**, which are read once as a Mapbox
+  expression and once in JS and have to agree at every zoom — they disagree
+  quietly, as a pin that jumps the instant it is tapped and then animates
+  smoothly from the wrong place. The easing is checked too, because it is a
+  string: a typo in it is not an error, it is `ease` and a pin that no longer
+  springs.
+- **the legend's join**, every way it can be quietly wrong: claim a footprint
+  twice and one building is painted at double strength; widen the reach that
+  lets a directory row attach to its shape and bike racks start reporting as
+  indoors; return nothing at all and a row simply looks like it does not work.
+  The counts are asserted rather than described — six defibrillator buildings,
+  22 car parks, thirteen loose racks — so a change to any of the five files it
+  reads has to come past them.
 - `maneuvers.js` directly, including that collinear vertices never become a turn.
 
 Each of those was confirmed to fail when the thing it guards is deliberately

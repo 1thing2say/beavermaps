@@ -147,6 +147,33 @@
                     <button id="clear-btn" class="g-btn g-btn--ghost">Clear</button>
                 </div>
             </div>
+
+            <!-- Legend sheet, opened from the rail. The printed key, since every
+                 chip and pictogram on this map comes out of it — but a live one:
+                 each row is a button that outlines the buildings and car parks
+                 holding that thing. The rows are built in src/main.js from the
+                 same list the chips come from, so the key cannot drift.
+
+                 In the column rather than floating beside it, which is where it
+                 used to be. A card that outlines things on the map must not be
+                 sitting on top of the map: the old position put 280px of sheet
+                 over the middle of the campus, so the shapes a row lit up were
+                 as likely to be under it as beside it. Here the space it costs
+                 is space campusPadding was already reserving. -->
+            <div id="legend-sheet" class="g-card g-panel g-legend hidden" role="dialog"
+                aria-label="Map legend" aria-modal="false">
+                <div class="g-panel-head">
+                    <div>
+                        <h2 class="g-panel-title">Legend</h2>
+                        <p class="g-panel-sub">Point at a row to outline it on the map</p>
+                    </div>
+                    <button id="legend-close" type="button" class="g-icon-btn" aria-label="Close legend">
+                        <span class="g-icon" data-icon="close"></span>
+                    </button>
+                </div>
+                <ul id="legend-list" class="g-legend-list"></ul>
+                <p class="g-legend-note">From the printed campus map, Ver. 3/2026.</p>
+            </div>
         </div>
 
         <!-- Bottom-left layers switcher: an imagery thumbnail that opens the
@@ -186,6 +213,19 @@
                         Auto
                     </button>
                 </div>
+
+                <!-- The rail is hidden below 640px and it was the only way to
+                     open the legend — which matters more now that its rows
+                     outline things, and matters most on the device someone is
+                     actually holding on the campus. A second door onto the same
+                     sheet and the same state, not a second control. -->
+                <p class="g-layers-heading g-layers-heading--split g-phone-only">Legend</p>
+                <div class="g-layers-row g-phone-only">
+                    <button id="layers-legend" type="button" class="g-layer-btn g-layer-btn--wide">
+                        <span class="g-layer-icon" data-icon="legend"></span>
+                        Map legend
+                    </button>
+                </div>
             </div>
             <button id="layers-btn" type="button" class="g-layers-btn" aria-haspopup="true" aria-expanded="false">
                 <span class="g-layers-thumb" aria-hidden="true"></span>
@@ -194,20 +234,6 @@
                     Layers
                 </span>
             </button>
-        </div>
-
-        <!-- Legend sheet, opened from the rail. The printed key, since every
-             chip and pictogram on this map comes out of it. -->
-        <div id="legend-sheet" class="g-card g-legend hidden" role="dialog" aria-label="Map legend"
-            aria-modal="false">
-            <div class="g-panel-head">
-                <h2 class="g-panel-title">Legend</h2>
-                <button id="legend-close" type="button" class="g-icon-btn" aria-label="Close legend">
-                    <span class="g-icon" data-icon="close"></span>
-                </button>
-            </div>
-            <ul id="legend-list" class="g-legend-list"></ul>
-            <p class="g-legend-note">From the printed campus map, Ver. 3/2026.</p>
         </div>
 
         <!-- Turn-by-turn banner. Hidden until navigation starts. During a

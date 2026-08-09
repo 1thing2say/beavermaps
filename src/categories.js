@@ -41,6 +41,11 @@ export const CATEGORIES = [
     // Their lot names all end in "Parking Lot", "Parking Garage" or name the
     // metered lot; the permit machines are a separate legend entry below.
     match: (name) => /parking (lot|garage)|metered parking/i.test(name),
+    // The only row on this key that is about ground rather than about objects,
+    // so it is the only one that names a class of the printed sheet: hovering it
+    // outlines all 22 car parks, not the nine points my campus lists as destinations.
+    // See src/highlight.js.
+    zones: 'parking',
     legend: 'Parking lots and garage',
   },
   {
