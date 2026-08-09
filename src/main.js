@@ -2096,6 +2096,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       setConfig(key, value);
     }
 
+    // The same rule Google's session applies, on the provider that can express
+    // it in one property: nobody else's business on a campus map. Mapbox names
+    // the neighbours too — the mortgage broker, the dog trainer, the Islamic
+    // centre — and on a map that is otherwise entirely my campus's they read as part
+    // of it. Place names stay: a neighbourhood is context, an establishment is
+    // an advertisement.
+    setConfig('showPointOfInterestLabels', false);
+
     addCampusMask();
     addBasemapLayers();
     // Above the sheet it annotates, below the network added further down.

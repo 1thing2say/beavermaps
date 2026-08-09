@@ -77,6 +77,39 @@ const DARK_STYLE = [
 ];
 
 /**
+ * Nobody else's business on a campus map.
+ *
+ * Google's roadmap labels every organisation it knows about, and around my campus that
+ * is a mortgage broker, an HVAC firm, a dog trainer, an adult school and the
+ * SALAM Islamic Center — none of which have anything to do with the college, and
+ * all of which read, on a map that is otherwise entirely my campus's, as though they
+ * were part of it. A wayfinder for one campus should not be quietly advertising
+ * its neighbours.
+ *
+ * It has to be done HERE and not by clipping. Everywhere else this app removes
+ * the basemap's own data with a `clip` layer over the campus polygon, but that
+ * only works on vector features: Google's are painted into the raster before it
+ * reaches us, and a tile is a picture. The session request is the only place a
+ * label can still be talked out of existing — which is also why this costs a new
+ * session token rather than a style change, and why the cache below is keyed on
+ * everything that goes into the body.
+ *
+ * `labels` rather than the whole feature, so parkland keeps its green: the fill
+ * is geography and only the name is an establishment. Compare the two renders
+ * and that is the entire difference — the green shapes are identical, the words
+ * on top of them are gone.
+ *
+ * Park names were an exception here for one draft, on the reasoning that a park
+ * is a place rather than an organisation. Rendering it settled it: what Google
+ * prints over the green west of campus is "Arcade Creek Recreation & Park
+ * District", which is a public agency with a board and a budget. There is no
+ * line to draw between the kinds of organisation, so none is drawn.
+ */
+const NO_ORGANISATIONS = [
+  { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+];
+
+/**
  * A session per distinct request, held for as long as Google says it is good
  * for. Sessions last about two weeks, so re-minting one on every provider
  * toggle would be a wasted round trip before the first tile could be asked for.
@@ -96,7 +129,13 @@ function sessionBody(mapType, theme) {
     // makes labels on Google's raster hold up next to our vector ones.
     ...(window.devicePixelRatio > 1 ? { scale: 'scaleFactor2x', highDpi: true } : {}),
   };
-  if (mapType === 'roadmap' && theme === 'dark') body.styles = DARK_STYLE;
+  // Only the roadmap carries styling; satellite imagery has no geometry or
+  // labels of its own to restyle. The dark palette goes first so the POI rules
+  // land after it and win — a `poi` colour set above must not put back a label
+  // this has just switched off.
+  if (mapType === 'roadmap') {
+    body.styles = [...(theme === 'dark' ? DARK_STYLE : []), ...NO_ORGANISATIONS];
+  }
   return body;
 }
 

@@ -370,6 +370,43 @@ on screen — "Satellite" when you are on the road map, "Google" when Mapbox is
 drawing. The appearance button is the exception, and has to be: it cycles three
 ways, so it names where you are and puts where you are going in its label.
 
+#### Nobody else's business
+
+Google's roadmap labels every organisation it knows about, and around my campus that
+is a mortgage broker, an HVAC firm, a dog trainer, an adult school and the SALAM
+Islamic Center. On a map that is otherwise entirely my campus's they read as though
+they were part of it, and a wayfinder for one campus should not be quietly
+advertising its neighbours. Both grounds now drop them.
+
+It has to be done **in the session request**, not by clipping. Everywhere else
+this app removes the basemap's own data with a `clip` layer over the campus
+polygon — but that only works on vector features. Google's are painted into the
+raster before it arrives, and a tile is a picture. `createSession` takes the same
+style array the Maps JS API uses, and that is the only place a label can still be
+talked out of existing:
+
+```js
+{ featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }
+```
+
+`labels`, not the whole feature, so parkland keeps its green — the fill is
+geography and only the name is an establishment. Rendering both variants
+side by side, that is the entire difference: identical green shapes, no words on
+top of them.
+
+Park names were an exception for one draft, on the reasoning that a park is a
+place rather than an organisation. Rendering it settled that too: what Google
+prints over the green west of campus is *"Arcade Creek Recreation & Park
+District"*, which is a public agency with a board and a budget. There is no line
+to draw between the kinds of organisation, so none is drawn.
+
+Mapbox needs no style array — Standard exposes it as a configuration property,
+`showPointOfInterestLabels: false`. Verified the way the difference actually
+matters: `queryRenderedFeatures` over its POI layers returns **0**.
+
+Place names stay on both. A neighbourhood is context; an establishment is an
+advertisement.
+
 ### Appearance: light, dark, auto
 
 Three states, and the third one is why it is not a switch. **Auto is not a
