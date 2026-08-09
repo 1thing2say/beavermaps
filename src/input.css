@@ -506,7 +506,6 @@
     position: absolute;
     top: 100%;
     left: 50%;
-    transform: translateX(-50%);
     margin-top: 3px;
     padding: 0 2px;
     font-weight: 500;
@@ -523,19 +522,28 @@
     text-shadow:
         0 0 3px var(--g-label-halo), 0 0 3px var(--g-label-halo),
         0 0 3px var(--g-label-halo), 0 0 3px var(--g-label-halo);
-    /* Fades with the growth rather than snapping in at the end, which is what
-       Apple's does — the caption is part of the same gesture as the lift. */
+    /* It does not fade. Tracking Apple's caption frame by frame through a
+       selection, it is on screen the whole way: it scales 1.15x, rises 9px on a
+       66px head, and only crosses from the category hue to black in the last
+       fifth of the movement. So it starts small, low and in the marker's colour
+       — all three set inline by mountSelectedPin — and rides the same spring.
+
+       An earlier pass faded it in from nothing over the middle of the run,
+       which reads as a second label arriving rather than as the same one being
+       picked up. */
+    transform: translateX(-50%) translateY(var(--pin-label-rise, 0px))
+        scale(var(--pin-label-scale, 1));
+    transform-origin: 50% 0;
+    will-change: transform;
+    /* Crossed against the symbol it replaces, which Mapbox fades out rather
+       than removing — see SYMBOL_FADE_MS. No delay: the two have to overlap,
+       or there is a moment with no name under the pin at all. */
     opacity: 0;
-    transition: opacity 200ms ease-out 160ms;
 }
 
 .pin-selected.is-in .pin-selected-label {
+    transform: translateX(-50%) translateY(0) scale(1);
     opacity: 1;
-}
-
-/* No delay on the way out: the label goes first, then the pin follows it down. */
-.pin-selected:not(.is-in) .pin-selected-label {
-    transition: opacity 120ms ease-in;
 }
 
 /* The pin's own card. Same surface as the building card, narrower, and with no

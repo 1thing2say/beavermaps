@@ -10,8 +10,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  sizeExpr, sizeAt, AMBIENT_SIZE, CATEGORY_SIZE, SELECTED_W,
+  sizeExpr, sizeAt, AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE, SELECTED_W,
   GROW_MS, GROW_EASE, SHRINK_MS, SHRINK_EASE,
+  LABEL_START_SCALE, LABEL_RISE, LABEL_INK_DELAY, LABEL_INK_SPAN, SYMBOL_FADE_MS,
 } from '../src/pin-select.js';
 import {
   PIN_BASE_W, PIN_BOX, PIN_RING, PIN_ASPECT, LIFT_RING, LIFT_ASPECT, LIFT_DOT, LIFT_HEAD,
@@ -20,7 +21,9 @@ import {
 } from '../src/map-images.js';
 import { KIND_NAMES } from '../src/building-popup.js';
 import { CATEGORIES } from '../src/categories.js';
-import { deltaE, contrast, relLuminance } from './helpers.js';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { root, deltaE, contrast, relLuminance } from './helpers.js';
 
 /** The interpolation Mapbox will run, done by hand from the expression itself. */
 function evaluate(expr, zoom) {
@@ -185,4 +188,49 @@ test('a marker does not change colour when it is picked up', () => {
     assert.ok(top / bottom > 1.15, `${kind}'s gradient is too faint to see`);
   }
   assert.ok(FILL_TOP > 1 && FILL_BOTTOM < 1, 'the gradient no longer straddles the flat colour');
+});
+
+test('the caption is lifted with the pin, not faded in beside it', () => {
+  // Measured off a frame-by-frame trace of Apple's selection: their caption is
+  // on screen the whole way, scaling 87px -> 100px and rising 9px on a 66px
+  // head, and only crossing from the category hue to black in the last fifth of
+  // the movement. Ours faded in from nothing over the middle of the run, which
+  // reads as a second label arriving rather than the same one being picked up.
+  assert.ok(
+    Math.abs(1 / LABEL_START_SCALE - 100 / 87) < 0.02,
+    `the caption scales by ${(1 / LABEL_START_SCALE).toFixed(3)}, measured 1.149`,
+  );
+  assert.ok(Math.abs(LABEL_RISE - 9 / 66) < 0.01, `rise is ${LABEL_RISE}, measured 0.136`);
+  // Late, and inside the movement: an ink change that finishes early makes the
+  // pin arrive already selected, and one that finishes after it is a separate
+  // event.
+  assert.ok(LABEL_INK_DELAY > 0.55 && LABEL_INK_DELAY < 0.75);
+  assert.ok(LABEL_INK_DELAY + LABEL_INK_SPAN <= 1, 'the ink is still crossing after the pin lands');
+
+  // The caption does fade, and has to: the symbol it replaces is rasterised
+  // into the GL canvas and Mapbox fades it out rather than removing it, so an
+  // opaque replacement draws the name twice. What matters is that the fade is a
+  // CROSS-fade — same length as the symbol's, and starting at once. The fade
+  // this replaced began 160 ms late, which left a gap with no name at all.
+  assert.equal(SYMBOL_FADE_MS, 300, "Mapbox's text-fade-duration default");
+  const css = readFileSync(path.join(root, 'src', 'input.css'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = /\.pin-selected-label\s*\{([^}]*)\}/.exec(css);
+  assert.ok(rule, '.pin-selected-label has no rule at all');
+  assert.match(rule[1], /--pin-label-rise/, 'the caption no longer reads its rise');
+  assert.doesNotMatch(rule[1], /transition/, 'the timing belongs to mountSelectedPin');
+});
+
+test('every layer that draws a pin has a size table', () => {
+  // Three layers draw the same disc — the amenities, a category's own pins, and
+  // the 38 printed labels that carry a pictogram — and `ambientWidth` has to
+  // know which size each is at to start an animation from it. The third was
+  // missing for a long time, which is why tapping a building name did nothing
+  // at all: it was not a pin as far as the click handler was concerned.
+  for (const stops of [AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE]) {
+    const zooms = Object.keys(stops).map(Number);
+    assert.ok(zooms.length >= 2, 'a size table needs two stops to interpolate');
+    for (const z of zooms) assert.ok(z >= 10 && z <= 22, `stop at zoom ${z}`);
+    for (const v of Object.values(stops)) assert.ok(v > 0 && v < 1.5);
+  }
 });

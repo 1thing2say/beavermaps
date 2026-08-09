@@ -25,7 +25,7 @@ import {
 import { buildingCard, pinCard } from './building-popup.js';
 import {
   mountSelectedPin, sizeExpr, sizeAt, LABEL_MAX_EM,
-  AMBIENT_SIZE, CATEGORY_SIZE, SELECTED_W,
+  AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE, SELECTED_W,
 } from './pin-select.js';
 import { createThemeControl, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
@@ -1045,11 +1045,40 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return hidden ? ['all', ranked, hidden] : ranked;
   }
 
+  /** Which size table a layer draws its discs from. */
+  const SIZE_TABLE = { 'category-pins': CATEGORY_SIZE, 'campus-amenities': AMBIENT_SIZE };
+
   /** How wide that layer is drawing its icons at this zoom, in CSS pixels. */
   const ambientWidth = (layer) => PIN_BASE_W * sizeAt(
-    layer === 'category-pins' ? CATEGORY_SIZE : AMBIENT_SIZE,
+    SIZE_TABLE[layer] ?? LABEL_SIZE,
     map.getZoom(),
   );
+
+  /**
+   * The label layers that draw a pictogram, and are therefore pins.
+   *
+   * POI_LABEL_KINDS is the set poi.js gives a disc to; 38 of the 49 printed
+   * labels get one. They looked like every other marker on this map and behaved
+   * like nothing at all — `pinAt` did not know about them, so a tap fell through
+   * to the building underneath and the lift never played. At the zoom the campus
+   * fits the screen at they are most of the markers on it.
+   */
+  const POI_LABEL_LAYERS = [...POI_LABEL_KINDS].map((kind) => `campus-labels-${kind}`);
+
+  /** A label layer draws its own kind, minus whichever one has been lifted. */
+  const labelFilter = (kind) => {
+    const mine = ['==', ['get', 'kind'], kind];
+    const hidden = hiddenPin(`campus-labels-${kind}`);
+    return hidden ? ['all', mine, hidden] : mine;
+  };
+
+  /** Re-apply those filters, which is what hides and restores a lifted label. */
+  function paintLabels() {
+    for (const kind of POI_LABEL_KINDS) {
+      const id = `campus-labels-${kind}`;
+      if (map.getLayer(id)) map.setFilter(id, labelFilter(kind));
+    }
+  }
 
   /**
    * The pin under a click, or null.
@@ -1058,7 +1087,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * be answering, and the two can sit on the same coordinate.
    */
   function pinAt(pointer) {
-    for (const layer of ['category-pins', 'campus-amenities']) {
+    for (const layer of ['category-pins', 'campus-amenities', ...POI_LABEL_LAYERS]) {
       if (!map.getLayer(layer)) continue;
       const [hit] = map.queryRenderedFeatures(pointer, { layers: [layer] });
       if (!hit) continue;
@@ -1066,10 +1095,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         layer,
         id: hit.id,
         coords: hit.geometry.coordinates,
-        kind: hit.properties.kind ?? hit.properties.icon,
+        // A label's pictogram is in `poi`; an amenity's is its own `kind`.
+        kind: hit.properties.poi ?? hit.properties.kind ?? hit.properties.icon,
+        // A building's name is the label itself, which is what a lifted marker
+        // should be captioned with.
+        text: hit.properties.text ?? null,
         // Amenities carry the legend's wording; a category pin carries the
         // directory's, and drops it when the name would not identify anything.
-        name: hit.properties.name || hit.properties.label || null,
+        name: hit.properties.name || hit.properties.label || hit.properties.text || null,
       };
     }
     return null;
@@ -1077,6 +1110,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
   function deselectPin() {
     if (!selectedPin) return;
+    closeBuildingCard();
     const width = ambientWidth(selectedPin.layer);
     selectedPin = null;
     pinPopup?.remove();
@@ -1087,10 +1121,19 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const marker = selectedMarker;
     selectedMarker = null;
     marker?.remove(width);
-    setTimeout(paintCategory, 190);
+    setTimeout(() => { paintCategory(); paintLabels(); }, 190);
   }
 
-  function selectPin(hit) {
+  /**
+   * Lift a pin out of its layer.
+   *
+   * `card` is false when the caller has a better one to show. A building's
+   * pictogram is a pin like any other and lifts like one, but what belongs
+   * beside it is the building card — the floor area, what is inside it, the
+   * entrance its Start and Destination buttons actually route from — not the
+   * two-line card a defibrillator gets.
+   */
+  function selectPin(hit, { card = true } = {}) {
     // Tapping the pin that is already up puts it back, the way tapping a
     // pressed chip clears the category.
     if (selectedPin?.layer === hit.layer && selectedPin?.id === hit.id) {
@@ -1104,6 +1147,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     selectedPin = hit;
     // Filter first, so the symbol is gone by the time its replacement appears.
     paintCategory();
+    paintLabels();
 
     selectedMarker = mountSelectedPin({
       map,
@@ -1111,8 +1155,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       kind: hit.kind,
       coords: hit.coords,
       label: hit.name,
+      // The hue the resting label was set in, so the caption crosses from it to
+      // the map's ink rather than appearing already black.
+      ink: currentBasemap === 'satellite' ? SATELLITE.label : pinInk(hit.kind, currentTheme),
       from,
     });
+
+    if (!card) return;
 
     pinPopup = new mapboxgl.Popup({
       closeButton: false,
@@ -1544,7 +1593,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (!campusLabels) return;
 
     if (!map.getSource('campus-labels')) {
-      map.addSource('campus-labels', { type: 'geojson', data: campusLabels });
+      // `generateId` for the same reason the amenity source has it: a lifted pin
+      // has to hide the symbol it came out of, and `['!=', ['id'], n]` is the
+      // only way to name one feature of a layer. labels.json carries no ids.
+      map.addSource('campus-labels', { type: 'geojson', data: campusLabels, generateId: true });
     }
 
     // The building names carry a POI disc now, so their images have to be
@@ -1585,7 +1637,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
      */
     const poiLayout = {
       'icon-image': ['get', 'poi'],
-      'icon-size': ['interpolate', ['linear'], ['zoom'], 15, 0.58, 19, 0.72],
+      'icon-size': sizeExpr(LABEL_SIZE),
       // Centred on the coordinate: the resting marker is a disc, not a balloon,
       // so nothing about it points downward at a spot below itself.
       'icon-anchor': 'center',
@@ -1617,7 +1669,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       map.addLayer({
         ...common,
         id: `campus-labels-${kind}`,
-        filter: ['==', ['get', 'kind'], kind],
+        filter: labelFilter(kind),
         layout: {
           'text-field': ['get', 'text'],
           // Google's own hierarchy is set in weight, not colour: area names in
@@ -2874,9 +2926,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Tested before buildings because pins sit on top of them and half of them
     // are inside one — a defibrillator tapped through the Library's footprint
     // would otherwise open the Library.
+    // A tap on a pin lifts it. If that pin is a building's own name, the
+    // building card is the better thing to put beside it, so the lift happens
+    // without the small one and the existing card path runs underneath.
     const pin = pinAt(e.point);
     if (pin) {
-      selectPin(pin);
+      const named = pin.text ? buildingAt(e.point) : null;
+      selectPin(pin, { card: !named });
+      if (named) showBuildingCard(e.lngLat, named);
       return;
     }
     deselectPin();

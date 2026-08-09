@@ -85,6 +85,49 @@ export const labelMaxPx = (fontPx) => LABEL_MAX_EM * fontPx;
 export const LABEL_PX = 12;
 
 /**
+ * What the caption does while the pin is being picked up.
+ *
+ * Apple's does not fade. Tracking its bounding box frame by frame through a
+ * selection, it is on screen the whole way and does three things at once:
+ *
+ *     width   87 px -> 100 px      it scales up by 1.15
+ *     top     226   -> 217         it rises 9 px, on a 66 px head
+ *     ink     #005800 -> #000000   the category green crosses to black
+ *
+ * The first two run on the same fifteen frames as the head, so the caption is
+ * on the pin's spring rather than on a schedule of its own. The colour is not:
+ * it holds the category green until frame 88 of 93 and lands black by 91, which
+ * is the last fifth of the movement — the name is green while the thing is a
+ * marker and black once it is a selection.
+ *
+ * Ours used to fade in from nothing over the middle of the run, which reads as
+ * a second label arriving rather than the same one being lifted.
+ */
+export const LABEL_START_SCALE = 0.87;
+/** How far the caption rises, as a fraction of the selected pin's width. */
+export const LABEL_RISE = 0.136;
+/** When the ink crosses, as fractions of GROW_MS. */
+export const LABEL_INK_DELAY = 0.67;
+export const LABEL_INK_SPAN = 0.20;
+
+/**
+ * Mapbox's own `text-fade-duration` default, which the caption is cross-faded
+ * against.
+ *
+ * Apple's caption is continuous because it is one object. Ours is two — a
+ * symbol rasterised into the GL canvas, and a DOM element that replaces it —
+ * and the symbol does not vanish when its filter changes: it fades over this
+ * long. Mounting the replacement opaque therefore draws the name twice, very
+ * slightly offset, and it reads as "RaRaef Hall" for a fifth of a second.
+ *
+ * So the caption fades IN over exactly the window the symbol fades OUT, with no
+ * delay, which keeps the total ink roughly constant and reads as one label
+ * being lifted. That is a different thing from the fade this replaced, which
+ * started 160 ms late and left a gap where neither was fully drawn.
+ */
+export const SYMBOL_FADE_MS = 300;
+
+/**
  * `icon-size` stops, as data rather than as an expression.
  *
  * Both layers interpolate their icon between two zooms, and the selected pin has
@@ -95,6 +138,18 @@ export const LABEL_PX = 12;
  */
 export const AMBIENT_SIZE = { 16: 0.54, 19: 0.65 };
 export const CATEGORY_SIZE = { 14: 0.72, 19: 0.92 };
+
+/**
+ * ...and the disc a building's own name carries.
+ *
+ * A third table because it is a third layer: 38 of the 49 printed labels get a
+ * pictogram, and they are the markers most of the campus is covered in at the
+ * zoom it fits the screen at. It is here rather than inline in the layer for
+ * the same reason the other two are — `ambientWidth` has to know what size a
+ * marker is being drawn at to start its animation from, and a table read in one
+ * place and duplicated in the other is how the two silently disagree.
+ */
+export const LABEL_SIZE = { 15: 0.58, 19: 0.72 };
 
 /** The stops as a Mapbox `interpolate` expression. */
 export function sizeExpr(stops) {
@@ -146,7 +201,7 @@ export function sizeAt(stops, zoom) {
  *   sit in one transform, so one timing function drives them and the rise
  *   springs with the growth instead of racing it.
  */
-export function mountSelectedPin({ map, marker: Marker, kind, coords, label, from }) {
+export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink, from }) {
   const el = document.createElement('div');
   el.className = 'pin-selected';
 
@@ -182,13 +237,19 @@ export function mountSelectedPin({ map, marker: Marker, kind, coords, label, fro
   dot.style.boxShadow = `0 0 0 ${g.ring.toFixed(2)}px #fff`;
   el.append(dot);
 
-  if (label) {
-    const text = document.createElement('div');
-    text.className = 'pin-selected-label';
-    text.style.fontSize = `${LABEL_PX}px`;
-    text.style.maxWidth = `${labelMaxPx(LABEL_PX)}px`;
-    text.textContent = label;
-    el.append(text);
+  const caption = label ? document.createElement('div') : null;
+  if (caption) {
+    caption.className = 'pin-selected-label';
+    caption.style.fontSize = `${LABEL_PX}px`;
+    caption.style.maxWidth = `${labelMaxPx(LABEL_PX)}px`;
+    caption.textContent = label;
+    // Starts where the resting label was - smaller, lower, and in the marker's
+    // own hue - and is carried to its place by the same transition as the pin.
+    // The custom properties are read by the rule in input.css.
+    caption.style.setProperty('--pin-label-scale', String(LABEL_START_SCALE));
+    caption.style.setProperty('--pin-label-rise', `${(LABEL_RISE * SELECTED_W).toFixed(2)}px`);
+    if (ink) caption.style.color = ink;
+    el.append(caption);
   }
 
   // The element's own box is the marker alone. The label hangs out of flow
@@ -215,6 +276,14 @@ export function mountSelectedPin({ map, marker: Marker, kind, coords, label, fro
   void scaler.offsetWidth;
   scaler.style.transition = `transform ${GROW_MS}ms ${GROW_EASE}`;
   scaler.style.transform = LIFTED;
+  if (caption) {
+    caption.style.transition = `transform ${GROW_MS}ms ${GROW_EASE}, `
+      + `opacity ${SYMBOL_FADE_MS}ms linear, `
+      + `color ${Math.round(GROW_MS * LABEL_INK_SPAN)}ms linear `
+      + `${Math.round(GROW_MS * LABEL_INK_DELAY)}ms`;
+    // Back to the stylesheet's colour, which is what it transitions toward.
+    caption.style.color = '';
+  }
   el.classList.add('is-in');
 
   return {
