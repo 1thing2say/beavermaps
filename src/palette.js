@@ -157,7 +157,13 @@ export const THEMES = {
     // their park icons, #17a773, not an olive.
     label: '#42586b',
     labelHalo: '#ffffff',
-    areaLabel: '#17a773',
+    // Google's greenspace teal, at the lightness it needs rather than the one
+    // they publish. Sampled off their map at #17a773, it measures 2.48:1 on the
+    // pitches these names are printed over — every one of the five sits on
+    // `sport` above `lawn` — where a 9-17px label needs 4.5. The HUE is theirs
+    // and is held to within half a degree (160.4 -> 160.1); only L moves,
+    // 61 -> 43, and chroma eases 51 -> 41 to stay in gamut there.
+    areaLabel: '#00744d',
     sportLine: '#ffffff',
     parkingLabel: '#67788a',
     // Google's own purple, which is the saturated end of the same hue the dark
@@ -327,10 +333,11 @@ export const APPLE = {
     // off-white halo, where Google uses a blue-grey slate on pure white.
     label: '#000000',
     labelHalo: '#fefdf6',       // measured
-    // L 41.0 C 42.0 h 127 — the park green, deepened. Placed by contrast
-    // rather than by the band: at L 45 it measured 2.95:1 on the shrub tier
-    // it is printed over, which is under the 3 a large label is held to.
-    areaLabel: '#476a26',
+    // The park green deepened, placed by contrast rather than by the lightness
+    // band. L 38 C 42 h 127, holding the measured hue exactly. An earlier pass
+    // put it at L 41 against a 3:1 target; the target was wrong — these labels
+    // are 9-17px and are scaled to 0.95, so they are body text and owe 4.5.
+    areaLabel: '#40631f',
     sportLine: '#f7f7f1',
     // L 46.0 C 5.0 h 100. Placed by contrast rather than by the lightness band:
     // at the band's own L 52 it measured 3.07:1 on the car park it names, where
@@ -392,7 +399,7 @@ export const APPLE = {
     mask: '#2f2e2a',            // L 19.0 C 3.0 h 100
     label: '#ddddd9',           // L 88.0 C 2.0 h 105
     labelHalo: '#1e1e1b',
-    areaLabel: '#95ae7a',       // L 68.0 C 30.0 h 127, and 3.43:1 on the shrub tier
+    areaLabel: '#98b17d',       // L 69 C 30 h 127, and 4.58:1 on the pitch it names
     sportLine: '#5b6054',
     parkingLabel: '#a2a09b',    // L 66.0 C 3.0 h 100
     highlight: '#bf5af2',       // systemPurple, dark

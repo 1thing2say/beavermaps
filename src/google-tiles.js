@@ -105,7 +105,7 @@ const APPLE_LIGHT_STYLE = [
   { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#d9d5c8' }] },
   { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#e3ecd2' }] },
   { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#bee298' }] },
-  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#476a26' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#40631f' }] },
   { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#ffffff' }] },
   { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#dfdfda' }] },
   { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#6f6d65' }] },
@@ -123,7 +123,7 @@ const APPLE_DARK_STYLE = [
   { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#494741' }] },
   { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#333429' }] },
   { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#36412a' }] },
-  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#95ae7a' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#98b17d' }] },
   // The same inversion the campus network uses at night: the ways go lighter
   // than the ground rather than darker, with a near-black edge under them.
   { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#4e4e4b' }] },

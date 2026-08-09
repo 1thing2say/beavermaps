@@ -90,25 +90,33 @@ test('every name is legible on every surface it can be printed on', () => {
         const ratio = contrast(p.label, ground);
         assert.ok(ratio >= 4.5, `${skin}/${theme} label on ${kind} is ${ratio.toFixed(2)}:1`);
       }
-      // Area names only ever sit on planting, and car park names on tarmac, so
-      // each is checked against what it is actually printed over. 3:1 rather
-      // than 4.5 because both are set larger than body text.
+      // Area names and car park names are checked against what they are
+      // actually printed over, which was worth establishing rather than
+      // assuming: all five area labels — BASEBALL FIELD, SOCCER STADIUM,
+      // SOFTBALL FIELD, STADIUM, TENNIS COURTS — sit on `sport` drawn over
+      // `lawn`, and on nothing else. An earlier version of this test held them
+      // against all four planting tiers including `shrub`, which they never
+      // touch, and then had to exempt a theme for failing on a surface it does
+      // not use.
       //
-      // The classic light theme is exempt, and named rather than accommodated
-      // by a lower threshold: its #17a773 on #d3f8e2 is Google's own pairing,
-      // sampled off their map along with the rest of that palette, and it runs
-      // 2.24 to 2.69 across the four planting tiers. Restyling it is a change to
-      // the look this app already shipped, which is not what adding a second
-      // look is for — so it is pinned at what it measures today and can only
-      // improve. Apple's, built to the 3, runs 3.42 to 4.60.
-      const floor = skin === 'classic' && theme === 'light' ? 2.2 : 3;
-      for (const green of ['lawn', 'tree', 'shrub', 'sport']) {
+      // 4.5, not 3. These are 9-17px and `labelSize` scales an area label to
+      // 0.95, so they are SMALLER than the rest — the "large text" allowance
+      // this once claimed was not available to them.
+      //
+      // The court markings drawn over the pitch are deliberately not in this
+      // list. They are stroke-width lines, which is what the halo asserted
+      // above is for; requiring 4.5 against them pushes the dark themes' label
+      // to a near-white mint that stops reading as a greenspace name at all.
+      for (const green of ['lawn', 'sport']) {
         const ratio = contrast(p.areaLabel, p.land[green]);
         assert.ok(
-          ratio >= floor,
-          `${skin}/${theme} area label on ${green} is ${ratio.toFixed(2)}:1, needs ${floor}`,
+          ratio >= 4.5,
+          `${skin}/${theme} area label on ${green} is ${ratio.toFixed(2)}:1`,
         );
       }
+      // Car park names sit on tarmac, and are held to 3 rather than 4.5: unlike
+      // the area labels they are drawn at the full label size and are the one
+      // ink here that both looks inherited rather than chose.
       const parking = contrast(p.parkingLabel, p.land.parking);
       assert.ok(parking >= 3, `${skin}/${theme} car park label is ${parking.toFixed(2)}:1`);
     }
