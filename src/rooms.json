@@ -1,0 +1,2807 @@
+{
+ "term": {
+  "strm": "1269",
+  "name": "Fall 2026",
+  "retrieved": "2026-08-09"
+ },
+ "source": "the district's class-search endpoint",
+ "note": "Room -> building is a LIST: 21 of 149 room numbers are used by more than one building.",
+ "buildings": {
+  "STEM": {
+   "name": "STEM",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 279,
+   "mapName": "Diane Bryant STEM Innovation Center",
+   "mapKind": "building",
+   "coords": [
+    -121.3483233,
+    38.6500984
+   ],
+   "rooms": [
+    "105",
+    "106",
+    "107",
+    "108",
+    "121",
+    "201",
+    "205",
+    "208",
+    "210",
+    "211",
+    "212",
+    "213",
+    "223",
+    "224",
+    "304",
+    "305",
+    "306",
+    "307",
+    "308",
+    "309",
+    "310",
+    "320",
+    "321"
+   ]
+  },
+  "Fine Arts": {
+   "name": "Fine Arts",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 198,
+   "mapName": "Fine & Applied Arts",
+   "mapKind": "building",
+   "coords": [
+    -121.3497202,
+    38.6524177
+   ],
+   "rooms": [
+    "501",
+    "502",
+    "504",
+    "505",
+    "507",
+    "508",
+    "510",
+    "512",
+    "513",
+    "514",
+    "515",
+    "526",
+    "536A",
+    "537A",
+    "547",
+    "548",
+    "550",
+    "554",
+    "580",
+    "583",
+    "584",
+    "592",
+    "594"
+   ]
+  },
+  "CTE": {
+   "name": "CTE",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 184,
+   "mapName": "Career Technical Education (CTE)",
+   "mapKind": "building",
+   "coords": [
+    -121.3454482,
+    38.6511642
+   ],
+   "rooms": [
+    "101A",
+    "101B",
+    "102",
+    "103-1",
+    "103-2",
+    "104",
+    "107",
+    "117",
+    "125-1",
+    "126",
+    "127",
+    "204",
+    "205",
+    "206",
+    "207",
+    "208",
+    "210",
+    "213",
+    "216",
+    "217",
+    "246",
+    "247"
+   ]
+  },
+  "Science": {
+   "name": "Science",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 180,
+   "mapName": "Science & Engineering",
+   "mapKind": "building",
+   "coords": [
+    -121.3476218,
+    38.6520174
+   ],
+   "rooms": [
+    "400",
+    "401",
+    "402",
+    "403",
+    "405",
+    "406",
+    "407",
+    "408",
+    "411",
+    "412",
+    "414",
+    "415",
+    "416",
+    "418",
+    "420",
+    "422",
+    "424",
+    "425",
+    "426"
+   ]
+  },
+  "Tech Ed West": {
+   "name": "Tech Ed West",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 123,
+   "mapName": "Technical Education West (TEW)",
+   "mapKind": "label",
+   "coords": [
+    -121.3464336,
+    38.6520039
+   ],
+   "rooms": [
+    "400",
+    "401",
+    "402",
+    "403",
+    "405",
+    "406",
+    "407",
+    "408",
+    "409",
+    "410",
+    "411",
+    "412"
+   ]
+  },
+  "Portable Village": {
+   "name": "Portable Village",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 96,
+   "mapName": "Portable Village",
+   "mapKind": "building",
+   "coords": [
+    -121.3478394,
+    38.6488636
+   ],
+   "rooms": [
+    "600",
+    "601",
+    "602A",
+    "602B",
+    "603A",
+    "604B",
+    "606",
+    "610B",
+    "611",
+    "612",
+    "613A"
+   ]
+  },
+  "Arts and Science": {
+   "name": "Arts and Science",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 79,
+   "mapName": "Arts & Sci",
+   "mapKind": "building",
+   "coords": [
+    -121.3478787,
+    38.6526521
+   ],
+   "rooms": [
+    "101",
+    "102",
+    "103",
+    "104",
+    "105",
+    "111",
+    "112"
+   ]
+  },
+  "Physical Education": {
+   "name": "Physical Education",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 57,
+   "mapName": "Kinesiology & Athletics (Physical Education)",
+   "mapKind": "building",
+   "coords": [
+    -121.3460594,
+    38.6499116
+   ],
+   "rooms": [
+    "200E",
+    "205",
+    "206",
+    "231A",
+    "235",
+    "236",
+    "MAIN GYM",
+    "PRACT GYM"
+   ]
+  },
+  "Natomas Center Building 1": {
+   "name": "Natomas Center Building 1",
+   "offCampus": true,
+   "campus": "Natomas Outreach Center",
+   "sections": 56,
+   "rooms": [
+    "LRC",
+    "N101",
+    "N102",
+    "N103",
+    "N201",
+    "N202",
+    "N203"
+   ]
+  },
+  "Learning Resource": {
+   "name": "Learning Resource",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 56,
+   "mapName": "Learning Resource Center (LRC)",
+   "mapKind": "building",
+   "coords": [
+    -121.3476531,
+    38.6498794
+   ],
+   "rooms": [
+    "125",
+    "RAD"
+   ]
+  },
+  "Natomas Center STEAM": {
+   "name": "Natomas Center STEAM",
+   "offCampus": true,
+   "campus": "Natomas Outreach Center",
+   "sections": 54,
+   "rooms": [
+    "N1001",
+    "N1007",
+    "N1039",
+    "N1040",
+    "N1041",
+    "N1043",
+    "N1046",
+    "N2025",
+    "N2027",
+    "N2029",
+    "N2031",
+    "N2033"
+   ]
+  },
+  "Health and Ed": {
+   "name": "Health and Ed",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 31,
+   "mapName": "Health Education Complex",
+   "mapKind": "building",
+   "coords": [
+    -121.3473435,
+    38.6487687
+   ],
+   "rooms": [
+    "710",
+    "716"
+   ]
+  },
+  "Science Portable": {
+   "name": "Science Portable",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 23,
+   "mapName": "Science & Engineering",
+   "mapKind": "building",
+   "coords": [
+    -121.3476218,
+    38.6520174
+   ],
+   "rooms": [
+    "490",
+    "492",
+    "493"
+   ]
+  },
+  "Environmental Resources": {
+   "name": "Environmental Resources",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 23,
+   "mapName": "Environmental Resources (ER)",
+   "mapKind": "building",
+   "coords": [
+    -121.3442794,
+    38.650655
+   ],
+   "rooms": [
+    "001",
+    "002"
+   ]
+  },
+  "Raef Hall": {
+   "name": "Raef Hall",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 21,
+   "mapName": "Raef Hall",
+   "mapKind": "building",
+   "coords": [
+    -121.3491584,
+    38.6505118
+   ],
+   "rooms": [
+    "160",
+    "161",
+    "162"
+   ]
+  },
+  "Library": {
+   "name": "Library",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 17,
+   "mapName": "Library",
+   "mapKind": "building",
+   "coords": [
+    -121.347745,
+    38.6509703
+   ],
+   "rooms": [
+    "001",
+    "L108"
+   ]
+  },
+  "Theatre": {
+   "name": "Theatre",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 16,
+   "mapName": "Theatre",
+   "mapKind": "label",
+   "coords": [
+    -121.3494609,
+    38.6520909
+   ],
+   "rooms": [
+    "THEATRE"
+   ]
+  },
+  "Swimming Pool": {
+   "name": "Swimming Pool",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 13,
+   "mapName": "Pool",
+   "mapKind": "label",
+   "coords": [
+    -121.3461123,
+    38.6495059
+   ],
+   "rooms": [
+    "POOL"
+   ]
+  },
+  "Child Development Ctr.": {
+   "name": "Child Development Ctr.",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 13,
+   "mapName": "Child Development Center (CDC)",
+   "mapKind": "building",
+   "coords": [
+    -121.3455854,
+    38.6504042
+   ],
+   "rooms": [
+    "350"
+   ]
+  },
+  "Mather": {
+   "name": "Mather",
+   "offCampus": true,
+   "campus": "Mather Center",
+   "sections": 11,
+   "rooms": [
+    "002",
+    "003"
+   ]
+  },
+  "CARPT Pleasanton": {
+   "name": "CARPT Pleasanton",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 10,
+   "rooms": [
+    "PLEASANTON"
+   ]
+  },
+  "CARPT Fairfiled": {
+   "name": "CARPT Fairfiled",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 9,
+   "rooms": [
+    "FAIRFIELD"
+   ]
+  },
+  "Finishing Trades Institute": {
+   "name": "Finishing Trades Institute",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 8,
+   "rooms": [
+    "SACRAME"
+   ]
+  },
+  "PE Fields": {
+   "name": "PE Fields",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 7,
+   "spread": "outdoor PE, which the sheet draws as four separate fields",
+   "rooms": [
+    "FIELDS"
+   ]
+  },
+  "PLUMB Concord": {
+   "name": "PLUMB Concord",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 5,
+   "rooms": [
+    "CONCORD"
+   ]
+  },
+  "Art Gallery": {
+   "name": "Art Gallery",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 4,
+   "mapName": "Kaneko Art Gallery",
+   "mapKind": "place",
+   "coords": [
+    -121.348937,
+    38.6522225
+   ],
+   "rooms": [
+    "503"
+   ]
+  },
+  "ELECT Sacramento": {
+   "name": "ELECT Sacramento",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 4,
+   "rooms": [
+    "SACRAMEN"
+   ]
+  },
+  "ITC": {
+   "name": "ITC",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 4,
+   "mapName": "ITC",
+   "mapKind": "building",
+   "coords": [
+    -121.3476305,
+    38.65059
+   ],
+   "rooms": [
+    "118"
+   ]
+  },
+  "Adaptive P.E.": {
+   "name": "Adaptive P.E.",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 3,
+   "mapName": "Adaptive PE",
+   "mapKind": "building",
+   "coords": [
+    -121.345881,
+    38.6493027
+   ],
+   "rooms": [
+    "101"
+   ]
+  },
+  "CARPT Morgan Hill": {
+   "name": "CARPT Morgan Hill",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 3,
+   "rooms": [
+    "MORGAN HIL"
+   ]
+  },
+  "DRLTH Pleasanton": {
+   "name": "DRLTH Pleasanton",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 3,
+   "rooms": [
+    "PLEASTN"
+   ]
+  },
+  "CARPT Fresno": {
+   "name": "CARPT Fresno",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 2,
+   "rooms": [
+    "FRESNO"
+   ]
+  },
+  "DRLTH Fairfield": {
+   "name": "DRLTH Fairfield",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 2,
+   "rooms": [
+    "FAIRFIEL"
+   ]
+  },
+  "DRLTH Morgan Hill": {
+   "name": "DRLTH Morgan Hill",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 2,
+   "rooms": [
+    "MORGN HILL"
+   ]
+  },
+  "ELEVA San Francisco": {
+   "name": "ELEVA San Francisco",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 2,
+   "rooms": [
+    "SAN FRANCI"
+   ]
+  },
+  "IW Benicia": {
+   "name": "IW Benicia",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 2,
+   "rooms": [
+    "BENICIA"
+   ]
+  },
+  "IW Livermore": {
+   "name": "IW Livermore",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 2,
+   "rooms": [
+    "LIVERMORE"
+   ]
+  },
+  "PLUMB Sacramento": {
+   "name": "PLUMB Sacramento",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 2,
+   "rooms": [
+    "SACRAMENT"
+   ]
+  },
+  "McClellan": {
+   "name": "McClellan",
+   "offCampus": true,
+   "campus": "McClellan Outreach Center",
+   "sections": 2,
+   "rooms": [
+    "220"
+   ]
+  },
+  "Makeup room": {
+   "name": "Makeup room",
+   "offCampus": false,
+   "campus": "Main Campus",
+   "sections": 2,
+   "mapName": "Fine & Applied Arts",
+   "mapKind": "building",
+   "coords": [
+    -121.3497202,
+    38.6524177
+   ],
+   "rooms": [
+    "519"
+   ]
+  },
+  "UC Davis Medical Center": {
+   "name": "UC Davis Medical Center",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 1,
+   "rooms": [
+    "MED"
+   ]
+  },
+  "DRLTH Fresno": {
+   "name": "DRLTH Fresno",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 1,
+   "rooms": [
+    "FRSNO"
+   ]
+  },
+  "IW Sacramento": {
+   "name": "IW Sacramento",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 1,
+   "rooms": [
+    "SACRAMENTO"
+   ]
+  },
+  "IW Fresno": {
+   "name": "IW Fresno",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 1,
+   "rooms": [
+    "FRESN"
+   ]
+  },
+  "SHME Sacramento": {
+   "name": "SHME Sacramento",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 1,
+   "rooms": [
+    "SACRAMNTO"
+   ]
+  },
+  "SHME Modesto": {
+   "name": "SHME Modesto",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 1,
+   "rooms": [
+    "MODESTO"
+   ]
+  },
+  "SHME Fresno": {
+   "name": "SHME Fresno",
+   "offCampus": true,
+   "campus": "Main Campus",
+   "sections": 1,
+   "rooms": [
+    "FRES"
+   ]
+  }
+ },
+ "rooms": {
+  "101": [
+   "Adaptive P.E.",
+   "Arts and Science"
+  ],
+  "102": [
+   "Arts and Science",
+   "CTE"
+  ],
+  "103": [
+   "Arts and Science"
+  ],
+  "104": [
+   "Arts and Science",
+   "CTE"
+  ],
+  "105": [
+   "Arts and Science",
+   "STEM"
+  ],
+  "106": [
+   "STEM"
+  ],
+  "107": [
+   "CTE",
+   "STEM"
+  ],
+  "108": [
+   "STEM"
+  ],
+  "111": [
+   "Arts and Science"
+  ],
+  "112": [
+   "Arts and Science"
+  ],
+  "117": [
+   "CTE"
+  ],
+  "118": [
+   "ITC"
+  ],
+  "121": [
+   "STEM"
+  ],
+  "125": [
+   "Learning Resource"
+  ],
+  "126": [
+   "CTE"
+  ],
+  "127": [
+   "CTE"
+  ],
+  "160": [
+   "Raef Hall"
+  ],
+  "161": [
+   "Raef Hall"
+  ],
+  "162": [
+   "Raef Hall"
+  ],
+  "201": [
+   "STEM"
+  ],
+  "204": [
+   "CTE"
+  ],
+  "205": [
+   "CTE",
+   "Physical Education",
+   "STEM"
+  ],
+  "206": [
+   "CTE",
+   "Physical Education"
+  ],
+  "207": [
+   "CTE"
+  ],
+  "208": [
+   "CTE",
+   "STEM"
+  ],
+  "210": [
+   "CTE",
+   "STEM"
+  ],
+  "211": [
+   "STEM"
+  ],
+  "212": [
+   "STEM"
+  ],
+  "213": [
+   "CTE",
+   "STEM"
+  ],
+  "216": [
+   "CTE"
+  ],
+  "217": [
+   "CTE"
+  ],
+  "223": [
+   "STEM"
+  ],
+  "224": [
+   "STEM"
+  ],
+  "235": [
+   "Physical Education"
+  ],
+  "236": [
+   "Physical Education"
+  ],
+  "246": [
+   "CTE"
+  ],
+  "247": [
+   "CTE"
+  ],
+  "304": [
+   "STEM"
+  ],
+  "305": [
+   "STEM"
+  ],
+  "306": [
+   "STEM"
+  ],
+  "307": [
+   "STEM"
+  ],
+  "308": [
+   "STEM"
+  ],
+  "309": [
+   "STEM"
+  ],
+  "310": [
+   "STEM"
+  ],
+  "320": [
+   "STEM"
+  ],
+  "321": [
+   "STEM"
+  ],
+  "350": [
+   "Child Development Ctr."
+  ],
+  "400": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "401": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "402": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "403": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "405": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "406": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "407": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "408": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "409": [
+   "Tech Ed West"
+  ],
+  "410": [
+   "Tech Ed West"
+  ],
+  "411": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "412": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "414": [
+   "Science"
+  ],
+  "415": [
+   "Science"
+  ],
+  "416": [
+   "Science"
+  ],
+  "418": [
+   "Science"
+  ],
+  "420": [
+   "Science"
+  ],
+  "422": [
+   "Science"
+  ],
+  "424": [
+   "Science"
+  ],
+  "425": [
+   "Science"
+  ],
+  "426": [
+   "Science"
+  ],
+  "490": [
+   "Science Portable"
+  ],
+  "492": [
+   "Science Portable"
+  ],
+  "493": [
+   "Science Portable"
+  ],
+  "501": [
+   "Fine Arts"
+  ],
+  "502": [
+   "Fine Arts"
+  ],
+  "503": [
+   "Art Gallery"
+  ],
+  "504": [
+   "Fine Arts"
+  ],
+  "505": [
+   "Fine Arts"
+  ],
+  "507": [
+   "Fine Arts"
+  ],
+  "508": [
+   "Fine Arts"
+  ],
+  "510": [
+   "Fine Arts"
+  ],
+  "512": [
+   "Fine Arts"
+  ],
+  "513": [
+   "Fine Arts"
+  ],
+  "514": [
+   "Fine Arts"
+  ],
+  "515": [
+   "Fine Arts"
+  ],
+  "519": [
+   "Makeup room"
+  ],
+  "526": [
+   "Fine Arts"
+  ],
+  "547": [
+   "Fine Arts"
+  ],
+  "548": [
+   "Fine Arts"
+  ],
+  "550": [
+   "Fine Arts"
+  ],
+  "554": [
+   "Fine Arts"
+  ],
+  "580": [
+   "Fine Arts"
+  ],
+  "583": [
+   "Fine Arts"
+  ],
+  "584": [
+   "Fine Arts"
+  ],
+  "592": [
+   "Fine Arts"
+  ],
+  "594": [
+   "Fine Arts"
+  ],
+  "600": [
+   "Portable Village"
+  ],
+  "601": [
+   "Portable Village"
+  ],
+  "606": [
+   "Portable Village"
+  ],
+  "611": [
+   "Portable Village"
+  ],
+  "612": [
+   "Portable Village"
+  ],
+  "710": [
+   "Health and Ed"
+  ],
+  "716": [
+   "Health and Ed"
+  ],
+  "001": [
+   "Environmental Resources",
+   "Library"
+  ],
+  "002": [
+   "Environmental Resources"
+  ],
+  "101A": [
+   "CTE"
+  ],
+  "101B": [
+   "CTE"
+  ],
+  "103-1": [
+   "CTE"
+  ],
+  "103-2": [
+   "CTE"
+  ],
+  "125-1": [
+   "CTE"
+  ],
+  "200E": [
+   "Physical Education"
+  ],
+  "231A": [
+   "Physical Education"
+  ],
+  "536A": [
+   "Fine Arts"
+  ],
+  "537A": [
+   "Fine Arts"
+  ],
+  "602A": [
+   "Portable Village"
+  ],
+  "602B": [
+   "Portable Village"
+  ],
+  "603A": [
+   "Portable Village"
+  ],
+  "604B": [
+   "Portable Village"
+  ],
+  "610B": [
+   "Portable Village"
+  ],
+  "613A": [
+   "Portable Village"
+  ],
+  "FIELDS": [
+   "PE Fields"
+  ],
+  "L108": [
+   "Library"
+  ],
+  "MAIN GYM": [
+   "Physical Education"
+  ],
+  "POOL": [
+   "Swimming Pool"
+  ],
+  "PRACT GYM": [
+   "Physical Education"
+  ],
+  "RAD": [
+   "Learning Resource"
+  ],
+  "THEATRE": [
+   "Theatre"
+  ]
+ },
+ "courses": {
+  "ACCT 101": [
+   "STEM"
+  ],
+  "ACCT 301": [
+   "STEM"
+  ],
+  "ACCT 311": [
+   "STEM"
+  ],
+  "ACCT 341": [
+   "STEM"
+  ],
+  "ADAPT 310": [
+   "Physical Education"
+  ],
+  "ADAPT 330": [
+   "Adaptive P.E."
+  ],
+  "ADAPT 332": [
+   "Swimming Pool"
+  ],
+  "ADAPT 335": [
+   "Physical Education"
+  ],
+  "ADAPT 338": [
+   "Physical Education"
+  ],
+  "ANTH 300": [
+   "Portable Village"
+  ],
+  "ANTH 301": [
+   "Portable Village"
+  ],
+  "ANTH 310": [
+   "Portable Village"
+  ],
+  "ART 300": [
+   "Arts and Science",
+   "Fine Arts"
+  ],
+  "ART 302": [
+   "Fine Arts"
+  ],
+  "ART 304": [
+   "Fine Arts"
+  ],
+  "ART 312": [
+   "Fine Arts"
+  ],
+  "ART 320": [
+   "Arts and Science"
+  ],
+  "ART 323": [
+   "Arts and Science"
+  ],
+  "ART 327": [
+   "Fine Arts"
+  ],
+  "ART 328": [
+   "Fine Arts"
+  ],
+  "ART 329": [
+   "Fine Arts"
+  ],
+  "ART 336": [
+   "Fine Arts"
+  ],
+  "ART 337": [
+   "Fine Arts"
+  ],
+  "ART 370": [
+   "Fine Arts"
+  ],
+  "ART 372": [
+   "Fine Arts"
+  ],
+  "ART 390": [
+   "Fine Arts"
+  ],
+  "ART 391": [
+   "Fine Arts"
+  ],
+  "ART 442": [
+   "Art Gallery"
+  ],
+  "ART 443": [
+   "Art Gallery"
+  ],
+  "ART 445": [
+   "Art Gallery"
+  ],
+  "ARTH 300": [
+   "Raef Hall"
+  ],
+  "ARTH 310": [
+   "Raef Hall"
+  ],
+  "ARTH 318": [
+   "Raef Hall"
+  ],
+  "ARTNM 305": [
+   "Raef Hall"
+  ],
+  "ARTNM 322": [
+   "Fine Arts"
+  ],
+  "ARTNM 324": [
+   "Fine Arts"
+  ],
+  "ARTNM 371": [
+   "Arts and Science"
+  ],
+  "ARTNM 405": [
+   "Fine Arts"
+  ],
+  "ARTPH 300": [
+   "Fine Arts"
+  ],
+  "ARTPH 360": [
+   "Fine Arts"
+  ],
+  "ASTR 320": [
+   "STEM"
+  ],
+  "ASTR C1001": [
+   "STEM"
+  ],
+  "AT 100": [
+   "CTE"
+  ],
+  "AT 105": [
+   "CTE"
+  ],
+  "AT 110": [
+   "CTE"
+  ],
+  "AT 130": [
+   "CTE"
+  ],
+  "AT 140": [
+   "CTE"
+  ],
+  "AT 143": [
+   "CTE"
+  ],
+  "AT 145": [
+   "CTE"
+  ],
+  "AT 180": [
+   "CTE"
+  ],
+  "AT 181": [
+   "CTE"
+  ],
+  "AT 188": [
+   "CTE"
+  ],
+  "AT 310": [
+   "CTE"
+  ],
+  "AT 311": [
+   "CTE"
+  ],
+  "AT 313": [
+   "CTE"
+  ],
+  "AT 314": [
+   "CTE"
+  ],
+  "AT 325": [
+   "CTE"
+  ],
+  "AT 330": [
+   "CTE"
+  ],
+  "AT 331": [
+   "CTE"
+  ],
+  "AT 332": [
+   "CTE"
+  ],
+  "AT 343": [
+   "CTE"
+  ],
+  "AT 350": [
+   "CTE"
+  ],
+  "BIOL 300": [
+   "Arts and Science",
+   "Science"
+  ],
+  "BIOL 304": [
+   "Arts and Science",
+   "Science Portable"
+  ],
+  "BIOL 305": [
+   "Science Portable"
+  ],
+  "BIOL 310": [
+   "Arts and Science",
+   "Science"
+  ],
+  "BIOL 332": [
+   "Environmental Resources",
+   "Science Portable"
+  ],
+  "BIOL 370": [
+   "Science Portable"
+  ],
+  "BIOL 400": [
+   "Science"
+  ],
+  "BIOL 410": [
+   "Science"
+  ],
+  "BIOL 415": [
+   "Science"
+  ],
+  "BIOL 420": [
+   "Science"
+  ],
+  "BIOL 430": [
+   "Arts and Science",
+   "Science",
+   "Science Portable"
+  ],
+  "BIOL 431": [
+   "Science",
+   "Science Portable"
+  ],
+  "BIOL 440": [
+   "Science",
+   "Science Portable"
+  ],
+  "BIOL 442": [
+   "Science"
+  ],
+  "BIOL C1000": [
+   "Science Portable"
+  ],
+  "BMET 261": [
+   "CTE"
+  ],
+  "BMET 425": [
+   "CTE"
+  ],
+  "BUS 100": [
+   "STEM"
+  ],
+  "BUS 105": [
+   "STEM"
+  ],
+  "BUS 300": [
+   "STEM"
+  ],
+  "BUS 310": [
+   "STEM"
+  ],
+  "BUS 320": [
+   "STEM"
+  ],
+  "BUS 340": [
+   "STEM"
+  ],
+  "BUS 350": [
+   "STEM"
+  ],
+  "CHEM 305": [
+   "Arts and Science",
+   "Science"
+  ],
+  "CHEM 306": [
+   "Science"
+  ],
+  "CHEM 309": [
+   "Science"
+  ],
+  "CHEM 310": [
+   "Science"
+  ],
+  "CHEM 400": [
+   "Arts and Science",
+   "Science"
+  ],
+  "CHEM 401": [
+   "Arts and Science",
+   "Science"
+  ],
+  "CHEM 420": [
+   "Arts and Science",
+   "Science"
+  ],
+  "CHEM 421": [
+   "Arts and Science",
+   "Science"
+  ],
+  "CHEM 499": [
+   "Science"
+  ],
+  "CHEM 84": [
+   "Science"
+  ],
+  "CISA 315": [
+   "STEM"
+  ],
+  "CISC 310": [
+   "STEM"
+  ],
+  "CISC 320": [
+   "STEM"
+  ],
+  "CISC 323": [
+   "STEM"
+  ],
+  "CISN 300": [
+   "STEM"
+  ],
+  "CISN 340": [
+   "STEM"
+  ],
+  "CISN 341": [
+   "STEM"
+  ],
+  "CISP 300": [
+   "STEM"
+  ],
+  "CISP 310": [
+   "STEM"
+  ],
+  "CISP 350": [
+   "STEM"
+  ],
+  "CISP 360": [
+   "STEM"
+  ],
+  "CISP 370": [
+   "STEM"
+  ],
+  "CISP 400": [
+   "STEM"
+  ],
+  "CISP 430": [
+   "STEM"
+  ],
+  "CISP 440": [
+   "STEM"
+  ],
+  "CISP 480": [
+   "STEM"
+  ],
+  "COMM 302": [
+   "Tech Ed West"
+  ],
+  "COMM 311": [
+   "Tech Ed West"
+  ],
+  "COMM 325": [
+   "Tech Ed West"
+  ],
+  "COMM 331": [
+   "Tech Ed West"
+  ],
+  "COMM 361": [
+   "Tech Ed West"
+  ],
+  "COMM C1000": [
+   "CTE",
+   "Tech Ed West"
+  ],
+  "COMM C1004": [
+   "Tech Ed West"
+  ],
+  "DANCE 320": [
+   "Physical Education"
+  ],
+  "DANCE 321": [
+   "Physical Education"
+  ],
+  "DANCE 326": [
+   "Physical Education"
+  ],
+  "DANCE 340": [
+   "Physical Education"
+  ],
+  "DANCE 341": [
+   "Physical Education"
+  ],
+  "DANCE 351": [
+   "Physical Education"
+  ],
+  "DANCE 352": [
+   "Physical Education"
+  ],
+  "DANCE 353": [
+   "Physical Education"
+  ],
+  "DANCE 354": [
+   "Physical Education"
+  ],
+  "DANCE 390": [
+   "Physical Education"
+  ],
+  "DANCE 430": [
+   "Physical Education"
+  ],
+  "DEAF 310": [
+   "Arts and Science",
+   "Tech Ed West"
+  ],
+  "DEAF 312": [
+   "Tech Ed West"
+  ],
+  "DEAF 314": [
+   "Tech Ed West"
+  ],
+  "DEAF 316": [
+   "Tech Ed West"
+  ],
+  "DEAF 318": [
+   "Tech Ed West"
+  ],
+  "DEAF 351": [
+   "Tech Ed West"
+  ],
+  "DEAF 370": [
+   "Tech Ed West"
+  ],
+  "DESGN 270": [
+   "CTE"
+  ],
+  "DESGN 271": [
+   "CTE",
+   "Physical Education"
+  ],
+  "DESGN 300": [
+   "CTE"
+  ],
+  "DESGN 301": [
+   "CTE"
+  ],
+  "DESGN 302": [
+   "CTE"
+  ],
+  "DESGN 310": [
+   "CTE"
+  ],
+  "DESGN 320": [
+   "CTE"
+  ],
+  "DESGN 340": [
+   "CTE"
+  ],
+  "DESGN 351": [
+   "CTE"
+  ],
+  "DESGN 352": [
+   "CTE"
+  ],
+  "ECE 300": [
+   "Child Development Ctr."
+  ],
+  "ECE 312": [
+   "Child Development Ctr."
+  ],
+  "ECE 314": [
+   "Child Development Ctr."
+  ],
+  "ECE 320": [
+   "Child Development Ctr."
+  ],
+  "ECE 325": [
+   "Child Development Ctr."
+  ],
+  "ECE 350": [
+   "CTE",
+   "Tech Ed West"
+  ],
+  "ECE 430": [
+   "Child Development Ctr."
+  ],
+  "ECON 310": [
+   "STEM"
+  ],
+  "ECON 320": [
+   "STEM"
+  ],
+  "ECON C2001": [
+   "STEM"
+  ],
+  "ECON C2002": [
+   "STEM"
+  ],
+  "ELTRN 110": [
+   "CTE"
+  ],
+  "ELTRN 111": [
+   "CTE"
+  ],
+  "ELTRN 121": [
+   "CTE"
+  ],
+  "ELTRN 130": [
+   "CTE"
+  ],
+  "ELTRN 131": [
+   "CTE"
+  ],
+  "EMT 110": [
+   "Portable Village"
+  ],
+  "EMT 111": [
+   "Portable Village"
+  ],
+  "ENERGY 140": [
+   "CTE"
+  ],
+  "ENERGY 141": [
+   "CTE"
+  ],
+  "ENGED 305": [
+   "Learning Resource"
+  ],
+  "ENGED 320": [
+   "CTE"
+  ],
+  "ENGED 324": [
+   "CTE",
+   "Tech Ed West"
+  ],
+  "ENGL 301": [
+   "Tech Ed West"
+  ],
+  "ENGL 94": [
+   "CTE",
+   "Portable Village"
+  ],
+  "ENGL C1000": [
+   "CTE",
+   "Learning Resource",
+   "Library",
+   "Portable Village",
+   "STEM",
+   "Tech Ed West"
+  ],
+  "ENGL C1000H": [
+   "ITC",
+   "Learning Resource"
+  ],
+  "ENGL C1001": [
+   "Learning Resource",
+   "Library",
+   "Tech Ed West"
+  ],
+  "ENGL C1003": [
+   "ITC"
+  ],
+  "ENGLT 308": [
+   "Library"
+  ],
+  "ENGLT 310": [
+   "Tech Ed West"
+  ],
+  "ENGLT 335": [
+   "STEM"
+  ],
+  "ENGLT 392": [
+   "Learning Resource"
+  ],
+  "ENGLT 486": [
+   "Library"
+  ],
+  "ENGR 310": [
+   "STEM"
+  ],
+  "ENGR 312": [
+   "STEM"
+  ],
+  "ENGR 401": [
+   "STEM"
+  ],
+  "ENGR 41": [
+   "STEM"
+  ],
+  "ENGR 412": [
+   "STEM"
+  ],
+  "ENGR 42": [
+   "STEM"
+  ],
+  "ENGR 420": [
+   "STEM"
+  ],
+  "ENGRD 315": [
+   "Learning Resource"
+  ],
+  "ENGRD 316": [
+   "Learning Resource"
+  ],
+  "ESL 315": [
+   "CTE",
+   "STEM",
+   "Tech Ed West"
+  ],
+  "ESL 325": [
+   "CTE",
+   "Tech Ed West"
+  ],
+  "ESL 37": [
+   "CTE",
+   "Portable Village",
+   "STEM",
+   "Tech Ed West"
+  ],
+  "ESL 47": [
+   "CTE",
+   "ITC",
+   "Portable Village",
+   "Tech Ed West"
+  ],
+  "ESL 55": [
+   "CTE",
+   "STEM",
+   "Tech Ed West"
+  ],
+  "ESLG 31": [
+   "CTE",
+   "Portable Village",
+   "STEM"
+  ],
+  "ESLG 310": [
+   "CTE",
+   "Tech Ed West"
+  ],
+  "ESLG 320": [
+   "Tech Ed West"
+  ],
+  "ESLG 41": [
+   "CTE",
+   "STEM",
+   "Tech Ed West"
+  ],
+  "ESLG 51": [
+   "CTE",
+   "STEM",
+   "Tech Ed West"
+  ],
+  "ESLL 31": [
+   "CTE",
+   "Portable Village",
+   "STEM",
+   "Tech Ed West"
+  ],
+  "ESLL 310": [
+   "ITC",
+   "Tech Ed West"
+  ],
+  "ESLL 320": [
+   "Tech Ed West"
+  ],
+  "ESLL 41": [
+   "CTE",
+   "Portable Village",
+   "STEM"
+  ],
+  "ESLL 51": [
+   "CTE",
+   "STEM",
+   "Tech Ed West"
+  ],
+  "ESLW 340": [
+   "STEM",
+   "Tech Ed West"
+  ],
+  "ET 115": [
+   "CTE"
+  ],
+  "ET 197": [
+   "CTE"
+  ],
+  "ET 253": [
+   "CTE"
+  ],
+  "ET 302": [
+   "CTE"
+  ],
+  "ET 308": [
+   "CTE"
+  ],
+  "ET 322": [
+   "CTE"
+  ],
+  "ET 420": [
+   "CTE"
+  ],
+  "ETHNS 300": [
+   "Arts and Science",
+   "Fine Arts",
+   "Raef Hall"
+  ],
+  "ETHNS 320": [
+   "Raef Hall"
+  ],
+  "ETHNS 330": [
+   "Arts and Science"
+  ],
+  "ETHNS 350": [
+   "Raef Hall"
+  ],
+  "FASHN 330": [
+   "Arts and Science"
+  ],
+  "FASHN 342": [
+   "Arts and Science"
+  ],
+  "FASHN 357": [
+   "Arts and Science"
+  ],
+  "FASHN 358": [
+   "Arts and Science"
+  ],
+  "FASHN 374": [
+   "Arts and Science"
+  ],
+  "FASHN 379": [
+   "Arts and Science"
+  ],
+  "FASHN 380": [
+   "Arts and Science"
+  ],
+  "FASHN 381": [
+   "Arts and Science"
+  ],
+  "FASHN 395": [
+   "Arts and Science"
+  ],
+  "FASHN 499": [
+   "Arts and Science"
+  ],
+  "FITNS 304": [
+   "Physical Education"
+  ],
+  "FITNS 310": [
+   "Swimming Pool"
+  ],
+  "FITNS 314": [
+   "Swimming Pool"
+  ],
+  "FITNS 316": [
+   "Swimming Pool"
+  ],
+  "FITNS 321": [
+   "Physical Education"
+  ],
+  "FITNS 325": [
+   "Physical Education"
+  ],
+  "FITNS 344": [
+   "Physical Education"
+  ],
+  "FITNS 345": [
+   "Physical Education"
+  ],
+  "FITNS 346": [
+   "Physical Education"
+  ],
+  "FITNS 380": [
+   "Physical Education"
+  ],
+  "FITNS 381": [
+   "Physical Education"
+  ],
+  "FITNS 392": [
+   "Physical Education"
+  ],
+  "FITNS 393": [
+   "Physical Education"
+  ],
+  "FITNS 400": [
+   "Physical Education"
+  ],
+  "FITNS 441": [
+   "Swimming Pool"
+  ],
+  "FITNS 442": [
+   "Swimming Pool"
+  ],
+  "FITNS 443": [
+   "Swimming Pool"
+  ],
+  "FSE 312": [
+   "CTE"
+  ],
+  "FSE 330": [
+   "CTE"
+  ],
+  "FSE 365": [
+   "CTE"
+  ],
+  "FSE 370": [
+   "CTE"
+  ],
+  "GEOG 300": [
+   "Science"
+  ],
+  "GEOG 301": [
+   "Science"
+  ],
+  "GEOG 330": [
+   "Science"
+  ],
+  "GEOG 394": [
+   "Science"
+  ],
+  "GEOL 300": [
+   "Science"
+  ],
+  "GEOL 301": [
+   "Science"
+  ],
+  "GEOL 305": [
+   "Science"
+  ],
+  "GEOL 306": [
+   "Science"
+  ],
+  "GEOL 311": [
+   "Science"
+  ],
+  "GERM 401": [
+   "STEM"
+  ],
+  "GLST 301": [
+   "Portable Village"
+  ],
+  "HCD 310": [
+   "Science"
+  ],
+  "HCD 318": [
+   "CTE",
+   "Science"
+  ],
+  "HCD 382": [
+   "Science"
+  ],
+  "HCI 320": [
+   "Portable Village"
+  ],
+  "HCI 330": [
+   "Portable Village"
+  ],
+  "HIST 300": [
+   "Tech Ed West"
+  ],
+  "HIST 308": [
+   "Raef Hall"
+  ],
+  "HIST 320": [
+   "Arts and Science"
+  ],
+  "HIST 321": [
+   "Portable Village"
+  ],
+  "HIST 323": [
+   "Raef Hall"
+  ],
+  "HIST 327": [
+   "Tech Ed West"
+  ],
+  "HIST 332": [
+   "Fine Arts"
+  ],
+  "HIST 333": [
+   "Fine Arts"
+  ],
+  "HIST 353": [
+   "Tech Ed West"
+  ],
+  "HIST 364": [
+   "Raef Hall"
+  ],
+  "HIST 373": [
+   "STEM"
+  ],
+  "HIST C1001": [
+   "Fine Arts",
+   "Portable Village",
+   "Raef Hall"
+  ],
+  "HIST C1001H": [
+   "Portable Village"
+  ],
+  "HIST C1002": [
+   "Portable Village",
+   "Raef Hall"
+  ],
+  "HM 100": [
+   "Fine Arts"
+  ],
+  "HM 101": [
+   "Fine Arts"
+  ],
+  "HM 120": [
+   "Fine Arts"
+  ],
+  "HM 150": [
+   "Fine Arts"
+  ],
+  "HM 155": [
+   "Fine Arts"
+  ],
+  "HM 300": [
+   "Fine Arts"
+  ],
+  "HM 310": [
+   "Fine Arts"
+  ],
+  "HM 315": [
+   "Fine Arts"
+  ],
+  "HM 320": [
+   "Fine Arts"
+  ],
+  "HM 325": [
+   "Fine Arts"
+  ],
+  "HM 326": [
+   "Fine Arts"
+  ],
+  "HM 328": [
+   "Fine Arts"
+  ],
+  "HM 330": [
+   "Fine Arts"
+  ],
+  "HM 360": [
+   "Fine Arts"
+  ],
+  "HM 370": [
+   "Fine Arts"
+  ],
+  "HM 375": [
+   "Fine Arts"
+  ],
+  "HM 380": [
+   "Fine Arts"
+  ],
+  "HORT 100": [
+   "Environmental Resources"
+  ],
+  "HORT 143": [
+   "Environmental Resources"
+  ],
+  "HORT 201": [
+   "Environmental Resources"
+  ],
+  "HORT 202": [
+   "Environmental Resources"
+  ],
+  "HORT 300": [
+   "Environmental Resources"
+  ],
+  "HORT 316": [
+   "Environmental Resources"
+  ],
+  "HORT 320": [
+   "Environmental Resources"
+  ],
+  "HORT 322": [
+   "Environmental Resources"
+  ],
+  "HUM 300": [
+   "STEM"
+  ],
+  "HUM 301": [
+   "Portable Village"
+  ],
+  "HUM 310": [
+   "Portable Village"
+  ],
+  "HUM 320": [
+   "Tech Ed West"
+  ],
+  "IDES 300": [
+   "Arts and Science"
+  ],
+  "IDES 310": [
+   "Arts and Science"
+  ],
+  "INTRP 300": [
+   "Arts and Science"
+  ],
+  "INTRP 301": [
+   "Arts and Science"
+  ],
+  "INTRP 303": [
+   "Tech Ed West"
+  ],
+  "INTRP 320": [
+   "Arts and Science",
+   "Tech Ed West"
+  ],
+  "INTRP 334": [
+   "Health and Ed"
+  ],
+  "INTRP 336": [
+   "Arts and Science"
+  ],
+  "INTRP 340": [
+   "Arts and Science"
+  ],
+  "INTRP 342": [
+   "Arts and Science"
+  ],
+  "INTRP 344": [
+   "Arts and Science"
+  ],
+  "INTRP 349": [
+   "Arts and Science"
+  ],
+  "INTRP 350": [
+   "Arts and Science"
+  ],
+  "INTRP 352": [
+   "Arts and Science"
+  ],
+  "ITAL 401": [
+   "STEM"
+  ],
+  "JOUR 300": [
+   "Library"
+  ],
+  "JOUR 361": [
+   "Library"
+  ],
+  "JOUR 410": [
+   "Library"
+  ],
+  "JOUR 411": [
+   "Library"
+  ],
+  "JOUR 412": [
+   "Library"
+  ],
+  "JOUR 413": [
+   "Library"
+  ],
+  "KINES 300": [
+   "Physical Education"
+  ],
+  "KINES 330": [
+   "Physical Education"
+  ],
+  "LRC 300": [
+   "STEM"
+  ],
+  "MATH 300": [
+   "STEM"
+  ],
+  "MATH 310": [
+   "STEM"
+  ],
+  "MATH 333": [
+   "STEM"
+  ],
+  "MATH 341": [
+   "STEM"
+  ],
+  "MATH 342": [
+   "STEM"
+  ],
+  "MATH 355": [
+   "STEM"
+  ],
+  "MATH 356": [
+   "STEM"
+  ],
+  "MATH 372": [
+   "STEM"
+  ],
+  "MATH 373": [
+   "STEM"
+  ],
+  "MATH 375": [
+   "STEM"
+  ],
+  "MATH 383": [
+   "STEM"
+  ],
+  "MATH 400": [
+   "STEM"
+  ],
+  "MATH 401": [
+   "STEM"
+  ],
+  "MATH 402": [
+   "STEM"
+  ],
+  "MATH 410": [
+   "STEM"
+  ],
+  "MATH 420": [
+   "STEM"
+  ],
+  "MATHS 33": [
+   "STEM"
+  ],
+  "MATHS 45": [
+   "STEM"
+  ],
+  "MATHS 60": [
+   "STEM"
+  ],
+  "MATHS 61": [
+   "STEM"
+  ],
+  "MATHS 72": [
+   "STEM"
+  ],
+  "MATHS 73": [
+   "STEM"
+  ],
+  "MATHS 75": [
+   "STEM"
+  ],
+  "MATHS 83": [
+   "STEM"
+  ],
+  "MATHS 95": [
+   "STEM"
+  ],
+  "MGMT 300": [
+   "STEM"
+  ],
+  "MKT 300": [
+   "STEM"
+  ],
+  "MUFHL 400": [
+   "Fine Arts"
+  ],
+  "MUFHL 410": [
+   "Fine Arts"
+  ],
+  "MUIVI 200": [
+   "Fine Arts"
+  ],
+  "MUIVI 310": [
+   "Fine Arts"
+  ],
+  "MUIVI 311": [
+   "Fine Arts"
+  ],
+  "MUIVI 320": [
+   "Fine Arts"
+  ],
+  "MUIVI 321": [
+   "Fine Arts"
+  ],
+  "MUIVI 340": [
+   "Fine Arts"
+  ],
+  "MUIVI 341": [
+   "Fine Arts"
+  ],
+  "MUIVI 350": [
+   "Fine Arts"
+  ],
+  "MUP 310": [
+   "Fine Arts"
+  ],
+  "MUP 311": [
+   "Fine Arts"
+  ],
+  "MUP 320": [
+   "Fine Arts"
+  ],
+  "MUP 321": [
+   "Fine Arts"
+  ],
+  "MUP 327": [
+   "Fine Arts"
+  ],
+  "MUP 328": [
+   "Fine Arts"
+  ],
+  "MUP 330": [
+   "Fine Arts"
+  ],
+  "MUP 331": [
+   "Fine Arts"
+  ],
+  "MUP 350": [
+   "Fine Arts"
+  ],
+  "MUP 352": [
+   "Fine Arts"
+  ],
+  "MUP 370": [
+   "Fine Arts",
+   "Theatre"
+  ],
+  "MUP 400": [
+   "Fine Arts"
+  ],
+  "MUP 401": [
+   "Fine Arts"
+  ],
+  "MUP 428": [
+   "Fine Arts"
+  ],
+  "MUSM 311": [
+   "Fine Arts"
+  ],
+  "MUSM 313": [
+   "Fine Arts"
+  ],
+  "MUSM 320": [
+   "Fine Arts"
+  ],
+  "MUSM 321": [
+   "Fine Arts"
+  ],
+  "MUSM 334": [
+   "Fine Arts"
+  ],
+  "MUSM 342": [
+   "Fine Arts"
+  ],
+  "MUSM 344": [
+   "Fine Arts"
+  ],
+  "MUSM 350": [
+   "Fine Arts"
+  ],
+  "MUSM 356": [
+   "Fine Arts"
+  ],
+  "MUSM 357": [
+   "Fine Arts"
+  ],
+  "MUSM 361": [
+   "Fine Arts"
+  ],
+  "MUSM 367": [
+   "Fine Arts"
+  ],
+  "NATR 300": [
+   "Environmental Resources"
+  ],
+  "NATR 301": [
+   "Environmental Resources",
+   "Science Portable"
+  ],
+  "NATR 307": [
+   "Environmental Resources"
+  ],
+  "NATR 310": [
+   "Environmental Resources"
+  ],
+  "NATR 320": [
+   "Environmental Resources"
+  ],
+  "NATR 322": [
+   "Environmental Resources"
+  ],
+  "NATR 330": [
+   "Environmental Resources"
+  ],
+  "NURSE 101": [
+   "Portable Village"
+  ],
+  "NURSE 400": [
+   "Health and Ed"
+  ],
+  "NURSE 410": [
+   "Health and Ed"
+  ],
+  "NURSE 420": [
+   "Health and Ed"
+  ],
+  "NURSE 430": [
+   "Health and Ed"
+  ],
+  "NUTRI 300": [
+   "Arts and Science"
+  ],
+  "PACT 300": [
+   "Physical Education"
+  ],
+  "PACT 310": [
+   "Physical Education"
+  ],
+  "PACT 311": [
+   "Physical Education"
+  ],
+  "PHIL 300": [
+   "Fine Arts",
+   "STEM",
+   "Tech Ed West"
+  ],
+  "PHIL 310": [
+   "Tech Ed West"
+  ],
+  "PHIL 320": [
+   "Science"
+  ],
+  "PHIL 330": [
+   "Tech Ed West"
+  ],
+  "PHIL 350": [
+   "Science"
+  ],
+  "PHYS 312": [
+   "STEM"
+  ],
+  "PHYS 350": [
+   "STEM"
+  ],
+  "PHYS 360": [
+   "STEM"
+  ],
+  "PHYS 410": [
+   "STEM"
+  ],
+  "PHYS 421": [
+   "STEM"
+  ],
+  "PHYS 431": [
+   "STEM"
+  ],
+  "PMED 131": [
+   "Portable Village"
+  ],
+  "POLS 302": [
+   "STEM"
+  ],
+  "POLS 310": [
+   "Portable Village"
+  ],
+  "POLS 320": [
+   "Portable Village"
+  ],
+  "POLS C1000": [
+   "Portable Village",
+   "Tech Ed West"
+  ],
+  "POLS C1000H": [
+   "Portable Village"
+  ],
+  "PSYC 305": [
+   "Tech Ed West"
+  ],
+  "PSYC 310": [
+   "Fine Arts",
+   "Tech Ed West"
+  ],
+  "PSYC 311": [
+   "Science"
+  ],
+  "PSYC 320": [
+   "Science"
+  ],
+  "PSYC 330": [
+   "Portable Village",
+   "STEM"
+  ],
+  "PSYC 335": [
+   "Portable Village",
+   "STEM"
+  ],
+  "PSYC 340": [
+   "Tech Ed West"
+  ],
+  "PSYC 356": [
+   "CTE"
+  ],
+  "PSYC 365": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "PSYC 370": [
+   "Raef Hall",
+   "Science"
+  ],
+  "PSYC 372": [
+   "Child Development Ctr."
+  ],
+  "PSYC 390": [
+   "Tech Ed West"
+  ],
+  "PSYC 400": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "PSYC 401": [
+   "Tech Ed West"
+  ],
+  "PSYC 402": [
+   "Tech Ed West"
+  ],
+  "PSYC C1000": [
+   "Portable Village",
+   "Raef Hall",
+   "STEM",
+   "Science",
+   "Tech Ed West"
+  ],
+  "PSYC C1000H": [
+   "CTE"
+  ],
+  "RE 300": [
+   "STEM"
+  ],
+  "RE 310": [
+   "STEM"
+  ],
+  "RLST 301": [
+   "Arts and Science"
+  ],
+  "RUSS 401": [
+   "STEM"
+  ],
+  "SJS 300": [
+   "STEM"
+  ],
+  "SJS 310": [
+   "Fine Arts"
+  ],
+  "SLPA 105": [
+   "Health and Ed"
+  ],
+  "SLPA 115": [
+   "Child Development Ctr.",
+   "Health and Ed"
+  ],
+  "SLPA 120": [
+   "Health and Ed"
+  ],
+  "SOC 300": [
+   "Raef Hall",
+   "Science"
+  ],
+  "SOC 301": [
+   "STEM"
+  ],
+  "SOC 318": [
+   "Arts and Science"
+  ],
+  "SOC 321": [
+   "STEM"
+  ],
+  "SOC 480": [
+   "Tech Ed West"
+  ],
+  "SPAN 401": [
+   "Portable Village",
+   "STEM"
+  ],
+  "SPAN 402": [
+   "Portable Village",
+   "STEM"
+  ],
+  "SPAN 411": [
+   "CTE"
+  ],
+  "SPAN 412": [
+   "CTE"
+  ],
+  "SPORT 301": [
+   "PE Fields"
+  ],
+  "SPORT 311": [
+   "Physical Education"
+  ],
+  "SPORT 314": [
+   "Physical Education"
+  ],
+  "SPORT 316": [
+   "Physical Education"
+  ],
+  "SPORT 320": [
+   "Physical Education"
+  ],
+  "SPORT 325": [
+   "Physical Education"
+  ],
+  "SPORT 330": [
+   "PE Fields"
+  ],
+  "SPORT 350": [
+   "PE Fields"
+  ],
+  "SPORT 355": [
+   "PE Fields"
+  ],
+  "SPORT 366": [
+   "PE Fields"
+  ],
+  "SPORT 376": [
+   "Swimming Pool"
+  ],
+  "SPORT 386": [
+   "Physical Education"
+  ],
+  "SPORT 396": [
+   "Physical Education"
+  ],
+  "SPORT 405": [
+   "Physical Education"
+  ],
+  "STAT 10": [
+   "STEM"
+  ],
+  "STAT C1000": [
+   "STEM"
+  ],
+  "STAT C1000H": [
+   "STEM"
+  ],
+  "SWCD 300": [
+   "Health and Ed",
+   "Portable Village"
+  ],
+  "SWCD 310": [
+   "Health and Ed"
+  ],
+  "SWCD 330": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "SWCD 340": [
+   "Science",
+   "Tech Ed West"
+  ],
+  "SWCD 341": [
+   "Tech Ed West"
+  ],
+  "SWCD 342": [
+   "Tech Ed West"
+  ],
+  "SWCD 360": [
+   "Health and Ed"
+  ],
+  "SWCD 362": [
+   "Tech Ed West"
+  ],
+  "SWCD 365": [
+   "Tech Ed West"
+  ],
+  "SWCD 498": [
+   "Tech Ed West"
+  ],
+  "TA 300": [
+   "Fine Arts"
+  ],
+  "TA 344": [
+   "Fine Arts"
+  ],
+  "TA 350": [
+   "Fine Arts"
+  ],
+  "TA 351": [
+   "Fine Arts"
+  ],
+  "TA 356": [
+   "Fine Arts"
+  ],
+  "TA 362": [
+   "Fine Arts"
+  ],
+  "TA 370": [
+   "Fine Arts"
+  ],
+  "TA 375": [
+   "Fine Arts"
+  ],
+  "TA 420": [
+   "Theatre"
+  ],
+  "TA 422": [
+   "Theatre"
+  ],
+  "TA 430": [
+   "Fine Arts"
+  ],
+  "TA 433": [
+   "Fine Arts"
+  ],
+  "TA 437": [
+   "Makeup room"
+  ],
+  "TA 466": [
+   "Fine Arts",
+   "Theatre"
+  ],
+  "TAFILM 300": [
+   "Fine Arts"
+  ],
+  "TAFILM 302": [
+   "Fine Arts"
+  ],
+  "TAFILM 307": [
+   "Fine Arts"
+  ],
+  "TAFILM 320": [
+   "Fine Arts"
+  ],
+  "TAP 300": [
+   "Fine Arts"
+  ],
+  "TAP 301": [
+   "Fine Arts"
+  ],
+  "TAP 302": [
+   "Fine Arts"
+  ],
+  "TAP 303": [
+   "Fine Arts"
+  ],
+  "TAP 310": [
+   "Fine Arts"
+  ],
+  "TAP 311": [
+   "Fine Arts"
+  ],
+  "TAP 312": [
+   "Fine Arts"
+  ],
+  "TAP 313": [
+   "Fine Arts"
+  ],
+  "TAP 340": [
+   "Theatre"
+  ],
+  "TAP 341": [
+   "Theatre"
+  ],
+  "TAP 342": [
+   "Theatre"
+  ],
+  "TAP 343": [
+   "Theatre"
+  ],
+  "TAP 350": [
+   "Theatre"
+  ],
+  "TAP 351": [
+   "Theatre"
+  ],
+  "TAP 352": [
+   "Theatre"
+  ],
+  "TAP 353": [
+   "Theatre"
+  ],
+  "TMACT 302": [
+   "PE Fields"
+  ],
+  "TMACT 303": [
+   "PE Fields"
+  ],
+  "TMACT 330": [
+   "Physical Education"
+  ],
+  "TMACT 331": [
+   "Physical Education"
+  ],
+  "WELD 115": [
+   "CTE"
+  ],
+  "WELD 117": [
+   "CTE"
+  ],
+  "WELD 155": [
+   "CTE"
+  ],
+  "WELD 300": [
+   "CTE"
+  ],
+  "WELD 302": [
+   "CTE"
+  ],
+  "WELD 320": [
+   "CTE"
+  ],
+  "WELD 322": [
+   "CTE"
+  ],
+  "WELD 330": [
+   "CTE"
+  ],
+  "WELD 332": [
+   "CTE"
+  ],
+  "WELD 334": [
+   "CTE"
+  ],
+  "WELD 335": [
+   "CTE"
+  ],
+  "WELD 342": [
+   "CTE"
+  ]
+ }
+}
