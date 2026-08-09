@@ -519,6 +519,40 @@ This replaced Google's balloon, which the map wore until the selection animation
 was built and the marker it animated no longer matched the one the animation had
 been measured from.
 
+#### One hue per function
+
+This map used to spend a single blue on **eight of the twelve** amenity kinds.
+That was survivable while every marker carried its name in type beside it, and
+stopped being survivable the moment those names came off: a car park showed four
+telephones, two bike racks and two parking marks as eight identical blue dots.
+
+The replacement set was **searched rather than chosen**. Pairwise CIE-Lab
+distance across all ten hues has a minimum of **31.0** — which is what the
+six-hue palette it replaces already scored (31.6, red against orange), so ten
+hues cost nothing in separability while cutting the worst hue-sharing from eight
+kinds to three.
+
+Four are Google's own, sampled off their raster and not up for renegotiation:
+`#ea4335` medical, `#0b57d0` transport and parking, `#e8710a` food, `#b56aff`
+arts. The rest were searched for maximum separation against those:
+
+| | | |
+|---|---|---|
+| `#fbbc04` | emergency telephones | Google's yellow, and the colour a call point is painted in the physical world |
+| `#5b8c00` | bike racks | green is obvious for a bicycle, and Google's own `#188038` is **unavailable** — this map already spent its green on sport, and `#188038` sits dE **19.9** from it, close enough to read as the same marker. The olive is dE 42.1 away |
+| `#00a0b0` | restrooms | |
+| `#d01884` | bus stops and drop-off | one thing: transit |
+
+Yellow brought a second problem with it. A white pictogram on `#fbbc04` is
+**1.71:1** — at 16 px, a yellow disc with nothing legible in it. So the glyph
+colour is a rule rather than a table: white, unless white would fall below
+WCAG's 3:1 for a non-text graphic, in which case the map's own ink. Of the ten
+hues exactly one fails, so every marker that was already fine keeps the white
+glyph it had, and adding a hue later cannot quietly restyle them.
+
+Both properties are asserted: no two hues closer than dE 28, and every glyph and
+every label above 3:1 and 4.5:1 respectively, in both themes.
+
 #### Eighty-four markers on one campus
 
 Two rules thin the ambient layer, and between them the Parking Garage went from

@@ -15,7 +15,7 @@ import {
 } from '../src/pin-select.js';
 import {
   PIN_BASE_W, PIN_BOX, PIN_RING, PIN_ASPECT, LIFT_RING, LIFT_ASPECT, LIFT_DOT, LIFT_HEAD,
-  AMENITY_KINDS,
+  AMENITY_KINDS, pinColour, glyphInk, pinInk,
 } from '../src/map-images.js';
 import { KIND_NAMES } from '../src/building-popup.js';
 import { CATEGORIES } from '../src/categories.js';
@@ -118,5 +118,65 @@ test('every pin that can be tapped has a name for its card', () => {
     if (category.icon) {
       assert.ok(KIND_NAMES[category.icon], `no card title for the category disc "${category.icon}"`);
     }
+  }
+});
+
+/** CIE-Lab, so "how different do these look" is a number rather than an opinion. */
+function lab(hex) {
+  const srgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const [r, g, b] = srgb.map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  const xyz = [
+    (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047,
+    r * 0.2126 + g * 0.7152 + b * 0.0722,
+    (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883,
+  ].map((t) => (t > 0.008856 ? t ** (1 / 3) : 7.787 * t + 16 / 116));
+  return [116 * xyz[1] - 16, 500 * (xyz[0] - xyz[1]), 200 * (xyz[1] - xyz[2])];
+}
+const deltaE = (a, b) => Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]));
+
+const relLuminance = (hex) => {
+  const [r, g, b] = [1, 3, 5]
+    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a, b) => {
+  const [lo, hi] = [relLuminance(a), relLuminance(b)].sort((x, y) => x - y);
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+test('no two marker hues read as the same colour', () => {
+  const hues = [...new Set(AMENITY_KINDS.map(pinColour))];
+  assert.ok(hues.length >= 9, `only ${hues.length} distinct hues`);
+
+  // With the names off the ambient markers, colour is what separates a
+  // telephone from a bike rack at 16 px. The floor is the tightest pair the
+  // six-hue palette this replaces already had — red against orange, dE 31.6 —
+  // so a wider set is not allowed to be a muddier one.
+  let worst = { d: Infinity };
+  for (let i = 0; i < hues.length; i += 1) {
+    for (let j = i + 1; j < hues.length; j += 1) {
+      const d = deltaE(hues[i], hues[j]);
+      if (d < worst.d) worst = { d, a: hues[i], b: hues[j] };
+    }
+  }
+  assert.ok(worst.d > 28, `${worst.a} and ${worst.b} are only dE ${worst.d.toFixed(1)} apart`);
+
+  // The two greens are the pair this nearly went wrong on: Google's own #188038
+  // sits dE 19.9 from the mint this map already spends on sport.
+  assert.ok(deltaE(pinColour('bike_rack'), pinColour('sport')) > 35);
+});
+
+test('every pictogram is legible on the disc it sits in', () => {
+  for (const kind of AMENITY_KINDS) {
+    const disc = pinColour(kind);
+    // WCAG's floor for a non-text graphic. glyphInk switches to dark ink rather
+    // than let a glyph fall under it — one hue needs that and nothing says so
+    // at runtime, because an unreadable icon still renders.
+    assert.ok(contrast(disc, glyphInk(disc)) >= 3,
+      `${kind}: glyph on ${disc} is only ${contrast(disc, glyphInk(disc)).toFixed(2)}:1`);
+    // And the name under it, in both themes, against the ground it sits on.
+    assert.ok(contrast(pinInk(kind, 'light'), '#ffffff') >= 4.5, `${kind}: light label`);
+    assert.ok(contrast(pinInk(kind, 'dark'), '#212121') >= 4.5, `${kind}: dark label`);
   }
 });

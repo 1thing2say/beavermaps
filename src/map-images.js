@@ -66,30 +66,67 @@ LIFT.dotY = LIFT.tipY + PIN.w * LIFT.gap + LIFT.dotR;
 /** Total height of the lifted marker, tip of the ring to the base of the dot. */
 LIFT.h = LIFT.dotY + LIFT.dotR + 0.6;
 
-/** kind -> disc colour. Anything absent falls back to Google's service blue. */
+/**
+ * kind -> disc colour. Anything absent falls back to Google's service blue.
+ *
+ * ONE HUE PER FUNCTION, not one per file. This map used to spend a single blue
+ * on eight of the twelve amenity kinds, which was survivable while every marker
+ * carried its name in type beside it and stopped being survivable the moment
+ * those names came off: a car park showed four telephones, two bike racks and
+ * two parking marks as eight identical blue dots.
+ *
+ * The set is chosen by measurement rather than taste. Pairwise CIE-Lab distance
+ * across every hue below has a minimum of 31.0 — which is what the six-hue
+ * palette it replaces already scored (31.6, red against orange), so ten hues
+ * cost nothing in separability while cutting the worst hue-sharing from eight
+ * kinds to three.
+ *
+ * Four are Google's own, sampled off their raster and not up for renegotiation:
+ * #ea4335 medical, #0b57d0 transport and parking, #e8710a food, #b56aff arts.
+ * The rest were searched for maximum separation against those:
+ *
+ *   #fbbc04  emergency telephones — Google's yellow, and the colour a call point
+ *            is painted in the physical world. The only hue here a white glyph
+ *            cannot sit on; see glyphInk.
+ *   #5b8c00  bike racks. Green is the obvious hue for a bicycle and Google's own
+ *            #188038 is unavailable: this map already spent its green on sport,
+ *            and #188038 sits dE 19.9 from it — close enough to read as the same
+ *            marker. The olive is dE 42.1 away and unmistakable.
+ *   #00a0b0  restrooms.
+ *   #d01884  bus stops and drop-off, which are one thing: transit.
+ */
 const COLOURS = {
-  // Red stays rare on a Google map, which is what makes it mean something.
-  // Only the two genuinely medical kinds get it; the emergency phones are 84
-  // features and would drown the campus in alarm colour.
+  // Medical, and red stays rare on a Google map, which is what makes it mean
+  // something. Only the two genuinely medical kinds get it.
   defibrillator: '#ea4335',
   health_centre: '#ea4335',
-  emergency_phone: '#0b57d0',
+
+  // Call for help. Yellow rather than the blue of a blue-light phone, because
+  // fourteen of these are the densest set on the campus and blue is spoken for.
+  emergency_phone: '#fbbc04',
+
+  // Parking, in Google's own colour for it — the P is unmistakable and these
+  // four kinds are meant to read as one family.
   parking_permit: '#0b57d0',
-  restroom: '#0b57d0',
-  bike_rack: '#0b57d0',
-  motorcycle_parking: '#0b57d0',
-  drop_off: '#0b57d0',
-  drink_vending: '#ff8126',
-  food_vending: '#ff8126',
-  bus_stop: '#0b57d0',
   parking_badge: '#0b57d0',
+  motorcycle_parking: '#0b57d0',
+
+  restroom: '#00a0b0',
+  bike_rack: '#5b8c00',
+
+  // Transit: a stop and a drop-off are the same errand.
+  bus_stop: '#d01884',
+  drop_off: '#d01884',
+
+  drink_vending: '#e8710a',
+  food_vending: '#e8710a',
 
   // Category-only discs. These have no pictogram on my campus's sheet and no row in
   // amenities.json — they are directory entries (parking lots, HomeBases, the
   // cafeteria) that a chip in src/categories.js has to drop pins for.
   // Registered here so the whole set is one family and one loader.
   parking: '#0b57d0',
-  food: '#ff8126',
+  food: '#e8710a',
   homebase: '#b56aff',
 
   // Building POI discs, one per class in src/poi.js. These are the ones that
@@ -202,11 +239,40 @@ const GLYPH_SCALE = 0.66;
 const glyphFit = (scale) =>
   `translate(${PIN.cx} ${PIN.cy}) scale(${scale}) translate(-12 -12)`;
 
+/** Relative luminance, and the contrast ratio between two colours. WCAG's. */
+function luminance(hex) {
+  const channel = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const [r, g, b] = [1, 3, 5].map((i) => channel(parseInt(hex.slice(i, i + 2), 16) / 255));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+const contrast = (a, b) => {
+  const [lo, hi] = [luminance(a), luminance(b)].sort((x, y) => x - y);
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+/**
+ * What colour the pictogram inside a disc is drawn in.
+ *
+ * White, unless white would fall below WCAG's 3:1 for a non-text graphic — in
+ * which case the map's own ink. Of the ten hues this file uses, exactly one
+ * fails: #fbbc04 gives white 1.71:1, which at 16 px is a yellow disc with
+ * nothing legible in it. Every other marker keeps the white glyph it already
+ * had, so adding a hue cannot quietly restyle the ones that were fine.
+ *
+ * A rule rather than a second lookup table, because the failure it prevents is
+ * the kind nobody notices until a colour is changed months later.
+ */
+export const GLYPH_DARK = '#202124';
+export const glyphInk = (colour) =>
+  (contrast(colour, '#ffffff') >= 3 ? '#ffffff' : GLYPH_DARK);
+
 function glyphBody(kind, scale) {
   const glyph = GLYPHS[kind] ?? '<circle cx="12" cy="12" r="3.4"/>';
+  const ink = glyphInk(pinColour(kind));
   return typeof glyph === 'string'
-    ? `<g fill="#fff">${glyph}</g>`
-    : `<g fill="none" stroke="#fff" stroke-width="${(1.7 / scale).toFixed(2)}" `
+    ? `<g fill="${ink}">${glyph}</g>`
+    : `<g fill="none" stroke="${ink}" stroke-width="${(1.7 / scale).toFixed(2)}" `
       + 'stroke-linecap="round" stroke-linejoin="round">' + glyph.stroke + '</g>';
 }
 
