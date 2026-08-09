@@ -271,11 +271,16 @@ const rooms = new Map();
 const courses = new Map();
 for (const m of rows) {
   const name = SPELLING[m.building] ?? m.building;
+  // Courses keep their off-campus buildings. "Your class is at the Natomas
+  // centre, which is not on this map" is the correct answer to a search for it,
+  // and a far better one than no result at all. Rooms do not: an outreach
+  // centre numbers its own rooms (N101, LRC) in a space of its own, and mixing
+  // them into a campus room index would invent collisions that do not exist.
+  if (!courses.has(m.course)) courses.set(m.course, { title: m.title, in: new Set() });
+  courses.get(m.course).in.add(name);
   if (buildings.get(name).offCampus) continue;
   if (!rooms.has(m.room)) rooms.set(m.room, new Set());
   rooms.get(m.room).add(name);
-  if (!courses.has(m.course)) courses.set(m.course, new Set());
-  courses.get(m.course).add(name);
 }
 
 const sorted = (set) => [...set].sort();
@@ -289,7 +294,10 @@ const artifact = {
       .map(({ rooms: r, ...b }) => [b.name, { ...b, rooms: sorted(r) }]),
   ),
   rooms: Object.fromEntries([...rooms].sort(([a], [b]) => a.localeCompare(b)).map(([r, s]) => [r, sorted(s)])),
-  courses: Object.fromEntries([...courses].sort(([a], [b]) => a.localeCompare(b)).map(([c, s]) => [c, sorted(s)])),
+  courses: Object.fromEntries(
+    [...courses].sort(([a], [b]) => a.localeCompare(b))
+      .map(([c, v]) => [c, { title: v.title, in: sorted(v.in) }]),
+  ),
 };
 
 writeFileSync(path.join(root, 'src', 'rooms.json'), `${JSON.stringify(artifact, null, 1)}\n`);

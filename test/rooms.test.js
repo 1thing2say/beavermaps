@@ -120,14 +120,20 @@ test('every class resolves to a building that exists', () => {
   // building, so a course code always has an answer. 539 of them.
   const named = new Set(buildings.map((b) => b.name));
   assert.ok(Object.keys(rooms.courses).length > 400, 'the course index is suspiciously small');
-  for (const [course, names] of Object.entries(rooms.courses)) {
+  for (const [course, { title, in: names }] of Object.entries(rooms.courses)) {
+    assert.ok(title, `${course} has no title to show in a result row`);
     assert.ok(names.length > 0, `${course} names no building`);
     for (const name of names) assert.ok(named.has(name), `${course} names unknown building "${name}"`);
   }
   // A course taught in two buildings is normal — a lecture and its lab — and
   // the artifact must keep both rather than collapsing to the first.
-  const split = Object.values(rooms.courses).filter((n) => n.length > 1);
+  const split = Object.values(rooms.courses).filter((c) => c.in.length > 1);
   assert.ok(split.length > 20, `only ${split.length} courses span more than one building`);
+  // Courses keep their off-campus meetings, because "that class is at Natomas"
+  // is the right answer to give and the room index cannot give it.
+  const away = new Set(buildings.filter((b) => b.offCampus).map((b) => b.name));
+  const reachesAway = Object.values(rooms.courses).filter((c) => c.in.some((n) => away.has(n)));
+  assert.ok(reachesAway.length > 0, 'no course reaches an outreach centre — they were dropped');
 });
 
 test('the artifact says which term it is, because it will go stale', () => {

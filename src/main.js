@@ -38,6 +38,8 @@ import {
   withPoiIcons, withAmenityNames, POI_LABEL_KINDS, AMENITY_ZOOM, AMENITY_ZOOM_DEFAULT,
 } from './poi.js';
 import { ringOf, trimToCampus } from './campus-clip.js';
+import roomsData from './rooms.json';
+import { buildRoomIndex, lookupRoom } from './rooms.js';
 import { FONTS, SATELLITE, palette, styleKey } from './palette.js';
 
 import {
@@ -2931,6 +2933,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const searchClear = document.getElementById('place-clear');
 
   const MAX_RESULTS = 8;
+  // Built once from the committed artifact, which is static — unlike the place
+  // index below, which waits on a fetch.
+  const roomIndex = buildRoomIndex(roomsData);
   let searchIndex = [];
   let searchHits = [];
   let activeHit = -1;
@@ -2970,9 +2975,24 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return 0;
   }
 
+  /**
+   * Rooms and courses first, then places.
+   *
+   * Ahead rather than interleaved, and not because they score higher — they are
+   * not scored at all. Typing "320" or "ACCT 101" is a different kind of act
+   * from typing "library": it is a lookup with a right answer, and the place
+   * index cannot produce that answer at any score because it has never heard of
+   * a room. Ranking them together would let a fuzzy name match on some place
+   * whose description happens to contain "320" outrank the room itself.
+   *
+   * They still share the budget, so a query that is both — "STEM 213" is a
+   * building with that room AND a course code — cannot bury the ordinary
+   * results entirely.
+   */
   function runSearch(query) {
+    const rooms = lookupRoom(query, roomIndex).slice(0, MAX_RESULTS - 2);
     const terms = normalise(query).split(' ').filter(Boolean);
-    if (!terms.length) return [];
+    if (!terms.length) return rooms;
     const scored = [];
     for (const entry of searchIndex) {
       let total = 0;
@@ -2986,7 +3006,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // Shorter names break ties, so "Library" beats "Lockers for Library".
       if (total) scored.push({ entry, score: total - entry.nameKey.length / 1000 });
     }
-    return scored.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS).map((s) => s.entry);
+    const places = scored.sort((a, b) => b.score - a.score).map((s) => s.entry);
+    return [...rooms, ...places].slice(0, MAX_RESULTS);
   }
 
   function closeResults() {
@@ -3055,6 +3076,19 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   async function chooseDestination(entry) {
+    // A row with nowhere to go: a class at the Natomas centre, or outdoor PE,
+    // which the sheet draws as four separate fields. Both are real answers and
+    // both are shown; neither can be routed to, so the panel says why instead
+    // of dropping a pin somewhere defensible-looking.
+    if (!entry.points.length) {
+      searchInput.value = entry.name;
+      searchClear.classList.remove('hidden');
+      closeResults();
+      setStatus(entry.spread
+        ? `${entry.name} is ${entry.spread} — no single place to route to.`
+        : `${entry.name} is at ${entry.place}, which is not on this campus.`, true);
+      return;
+    }
     const coords = nearestInstance(entry);
     searchInput.value = entry.name;
     searchClear.classList.remove('hidden');
