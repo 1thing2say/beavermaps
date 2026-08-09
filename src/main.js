@@ -33,7 +33,9 @@ import { createProviderToggle, preferredProvider } from './provider.js';
 import { googleGround } from './google-tiles.js';
 import { paintIcons } from './g-icons.js';
 import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
-import { withPoiIcons, POI_LABEL_KINDS } from './poi.js';
+import {
+  withPoiIcons, withAmenityNames, POI_LABEL_KINDS, AMENITY_ZOOM, AMENITY_ZOOM_DEFAULT,
+} from './poi.js';
 import { ringOf, trimToCampus } from './campus-clip.js';
 import {
   buildAreas,
@@ -1102,12 +1104,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           // reason `text-anchor` is top: the anchor point is the coordinate, so
           // the offset has to clear the disc's own lower half.
           //
-          // Only once you are close enough for it to be worth reading. my campus's
-          // amenity names are generic — five "Emergency telephone"s can be on
-          // screen at once — so below this the disc's colour and glyph carry it
-          // alone, which is what they were drawn to do. Apple's own map holds
-          // its POI names back the same way.
-          'text-field': ['step', ['zoom'], '', 17, ['coalesce', ['get', 'label'], '']],
+          // `name`, not `label`: only an amenity whose name identifies it gets
+          // one printed, which is four of the eighty-four. The rest are the
+          // icon's own meaning set in type — see withAmenityNames in poi.js.
+          // Held to 17 on top of that, because even a real name is not worth
+          // reading when the whole campus is on screen.
+          'text-field': ['step', ['zoom'], '', 17, ['coalesce', ['get', 'name'], '']],
           'text-font': FONT.medium,
           'text-size': 11,
           'text-anchor': 'top',
@@ -1254,7 +1256,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // and the category's pins overlap-allow and carry names, which the ambient
     // ones deliberately do not.
     if (map.getLayer('campus-amenities')) {
-      map.setFilter('campus-amenities', active ? ['boolean', false] : hiddenPin('campus-amenities'));
+      map.setFilter('campus-amenities', active ? ['boolean', false] : amenityFilter());
     }
     if (map.getLayer('category-pins')) {
       map.setFilter('category-pins', hiddenPin('category-pins'));
@@ -1294,6 +1296,28 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /** The filter that hides the lifted pin from its own layer, or null. */
   const hiddenPin = (layer) =>
     (selectedPin?.layer === layer ? ['!=', ['id'], selectedPin.id] : null);
+
+  /**
+   * What the ambient amenity layer is allowed to draw.
+   *
+   * Two rules combined, because setting them in turn would mean each one put
+   * back what the other had just taken out. The zoom rank thins 84 markers down
+   * to the 31 worth seeing across a whole campus (see AMENITY_ZOOM in poi.js);
+   * the second hides whichever one has been lifted into a selection.
+   *
+   * A zoom expression in a `filter` is only re-evaluated at integer zooms, which
+   * is exactly why the thresholds in that table are integers.
+   */
+  function amenityFilter() {
+    const ranked = ['>=', ['zoom'], [
+      'match',
+      ['get', 'kind'],
+      ...Object.entries(AMENITY_ZOOM).flatMap(([kind, zoom]) => [kind, zoom]),
+      AMENITY_ZOOM_DEFAULT,
+    ]];
+    const hidden = hiddenPin('campus-amenities');
+    return hidden ? ['all', ranked, hidden] : ranked;
+  }
 
   /** How wide that layer is drawing its icons at this zoom, in CSS pixels. */
   const ambientWidth = (layer) => PIN_BASE_W * sizeAt(
@@ -2873,7 +2897,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
 
     if (amenities.status === 'fulfilled') {
-      campusAmenities = amenities.value;
+      // Named on the way in, the same way the labels are classified: only the
+      // four amenities whose label identifies them keep one to print. See
+      // withAmenityNames — the other eighty said the icon's own meaning, in
+      // type, four times over on a single building.
+      campusAmenities = withAmenityNames(amenities.value);
       addAmenityLayer();
     } else {
       console.error(amenities.reason);

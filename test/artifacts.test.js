@@ -11,7 +11,10 @@ import { load, CAMPUS, ringAreaM2, pointInRing } from './helpers.js';
 import { AMENITY_KINDS } from '../src/map-images.js';
 import { ICON_NAMES } from '../src/g-icons.js';
 import { CATEGORIES, collect } from '../src/categories.js';
-import { POI_CLASSES, POI_LABEL_KINDS, poiFor } from '../src/poi.js';
+import {
+  POI_CLASSES, POI_LABEL_KINDS, poiFor,
+  AMENITY_ZOOM, AMENITY_ZOOM_DEFAULT, withAmenityNames,
+} from '../src/poi.js';
 
 // build-labels.mjs reduces my campus's database names the same way; this repeats the
 // two mechanical rules so the join can be checked without importing the script,
@@ -178,6 +181,49 @@ test('every category resolves against the data and the icon sets', () => {
       assert.ok(onCampus(hit.coords), `${category.id}: ${hit.name} is off campus`);
     }
   }
+});
+
+test('the ambient amenity layer is thinned, and by the right half', () => {
+  const amenities = load('amenities');
+  const kinds = [...new Set(amenities.features.map((f) => f.properties.kind))];
+
+  // A kind with no entry silently behaves like a destination, which is the safe
+  // direction to fail in but not one anybody would notice.
+  for (const kind of kinds) {
+    assert.ok(AMENITY_ZOOM[kind], `no zoom rank for the amenity kind "${kind}"`);
+  }
+  for (const zoom of Object.values(AMENITY_ZOOM)) {
+    // Integers, and this is load-bearing: a zoom expression inside a `filter` is
+    // only re-evaluated at integer zooms, so 17.5 would behave as 17 or 18 and
+    // the table would be quietly lying about where the line is.
+    assert.equal(zoom, Math.round(zoom), 'thresholds must be integers');
+    assert.ok(zoom >= AMENITY_ZOOM_DEFAULT);
+  }
+
+  // The point of the split, asserted as a count rather than described: at the
+  // zoom the whole campus fits, two thirds of the markers are not drawn.
+  const at = (zoom) => amenities.features.filter((f) => AMENITY_ZOOM[f.properties.kind] <= zoom);
+  assert.equal(amenities.features.length, 84);
+  assert.equal(at(16).length, 31);
+  assert.equal(at(18).length, 84);
+});
+
+test('only an amenity whose name identifies it prints one', () => {
+  const named = withAmenityNames(load('amenities')).features.filter((f) => f.properties.name);
+
+  // Four of eighty-four. The rest say the icon's own meaning — "Emergency
+  // telephone" fourteen times over — and four of those landed on the Parking
+  // Garage at once, which is what turned one building into a wall of type.
+  assert.equal(named.length, 4);
+  assert.deepEqual(
+    named.map((f) => f.properties.name).sort(),
+    ['Bus 1 Heading North', 'Bus 1 and 82 Heading West', 'Bus 82 Heading South',
+      'Health & Wellness Center'],
+  );
+
+  // And nothing is lost: the card still has a word for every one of them.
+  const all = withAmenityNames(load('amenities')).features;
+  assert.ok(all.every((f) => f.properties.label));
 });
 
 // The appearance control names its glyphs by mode. `icon()` returns an empty

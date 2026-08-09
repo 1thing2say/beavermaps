@@ -1,4 +1,5 @@
-// Which pictogram a printed building name earns.
+// What a marker earns on this map: which pictogram, which name, and how close
+// you have to be before it is drawn at all.
 //
 // Google's basemap does not label a place with bare text — it draws a small
 // coloured disc and sets the name beside it, and the colour says what sort of
@@ -13,6 +14,10 @@
 //
 // Rules are ordered and the first match wins. That ordering is load-bearing in
 // two places, both marked below.
+//
+// The amenity rules at the bottom of the file are the same idea applied to
+// amenities.json, and for the same reason: nothing about my campus's data changes,
+// only what this map chooses to do with it.
 
 /** Disc id -> what it means. The ids are registered as images in map-images.js. */
 export const POI_CLASSES = {
@@ -79,5 +84,83 @@ export function withPoiIcons(collection) {
       if (!icon) return feature;
       return { ...feature, properties: { ...feature.properties, poi: icon } };
     }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Amenities: what gets a name, and when it appears
+// ---------------------------------------------------------------------------
+
+/**
+ * The zoom each kind of amenity starts being drawn at.
+ *
+ * 84 markers on one campus is a lot, and they are not evenly interesting. The
+ * split is between things you go LOOKING for and things you notice once you are
+ * already somewhere: nobody scans a whole campus for an emergency telephone,
+ * but plenty of people scan it for a restroom or a defibrillator.
+ *
+ * So the thirty-one destinations stay on from 16, and the fifty-three pieces of
+ * infrastructure — fourteen phones, fifteen bike racks, ten permit machines,
+ * eight parking badges, six motorcycle bays — wait until 18, by which point you
+ * are looking at a building or two rather than the whole site. On the Parking
+ * Garage alone that is the difference between seven markers and one.
+ *
+ * Nothing is lost by waiting. Every one of these kinds has a chip that draws
+ * ALL of them at any zoom, and a legend row that outlines the buildings and car
+ * parks holding them. This is the ambient layer only — the one you did not ask
+ * for.
+ */
+export const AMENITY_ZOOM = {
+  // Destinations.
+  health_centre: 16,
+  defibrillator: 16,
+  restroom: 16,
+  bus_stop: 16,
+  food_vending: 16,
+  drink_vending: 16,
+  drop_off: 16,
+  // Infrastructure.
+  emergency_phone: 18,
+  bike_rack: 18,
+  parking_permit: 18,
+  parking_badge: 18,
+  motorcycle_parking: 18,
+};
+
+/** Anything not listed above behaves like a destination. */
+export const AMENITY_ZOOM_DEFAULT = 16;
+
+/**
+ * Give an amenity a printed name only when that name identifies it.
+ *
+ * This is the rule the category pins have always used, applied to the ambient
+ * layer where it matters far more. Of 84 amenities, 80 carry a label shared with
+ * at least one other: "Emergency telephone" fourteen times, "Bike rack" fifteen.
+ * Printed on the map they are not names, they are the icon's own meaning set in
+ * type — and four of them landed on the Parking Garage at once, each one two
+ * lines deep, which is what turned one building into a wall of text.
+ *
+ * Four survive, and they are exactly the four worth reading: the Health &
+ * Wellness Center, and the three bus stops, whose labels carry the route and the
+ * direction rather than the word "bus".
+ *
+ * The rest keep their label in `properties.label`, which is what the card prints
+ * when one is tapped. Nothing is lost; it is moved to where there is room for it.
+ */
+export function withAmenityNames(collection) {
+  const seen = new Map();
+  for (const feature of collection.features) {
+    const label = feature.properties.label;
+    seen.set(label, (seen.get(label) ?? 0) + 1);
+  }
+  return {
+    ...collection,
+    features: collection.features.map((feature) => ({
+      ...feature,
+      properties: {
+        ...feature.properties,
+        ...(seen.get(feature.properties.label) === 1 ? { name: feature.properties.label } : {}),
+      },
+    })),
   };
 }

@@ -519,6 +519,42 @@ This replaced Google's balloon, which the map wore until the selection animation
 was built and the marker it animated no longer matched the one the animation had
 been measured from.
 
+#### Eighty-four markers on one campus
+
+Two rules thin the ambient layer, and between them the Parking Garage went from
+seven markers under fourteen lines of type to one label and a few small discs.
+
+**A name is printed only when it identifies.** Of 84 amenities, 80 carry a label
+shared with at least one other — "Emergency telephone" fourteen times, "Bike
+rack" fifteen. On the map those are not names, they are the icon's own meaning
+set in type, and four of them landed on the Parking Garage at once. Four survive
+and they are the four worth reading: the Health & Wellness Center, and the three
+bus stops, whose labels carry the route and the direction rather than the word
+"bus". The rest keep their label for the card to print on a tap. Nothing is lost;
+it is moved to where there is room for it.
+
+**A marker appears at the zoom it becomes useful.** The split is between things
+you go *looking* for and things you notice once you are already somewhere:
+
+| | | from |
+|---|---|---|
+| destinations | health centre, defibrillators, restrooms, bus stops, vending, drop-off | **z16** |
+| infrastructure | 14 emergency phones, 15 bike racks, 10 permit machines, 8 parking badges, 6 motorcycle bays | **z18** |
+
+31 markers where the whole campus fits, all 84 by the time you are looking at a
+building or two. Nobody scans a campus for an emergency telephone; plenty of
+people scan it for a restroom.
+
+Nothing is hidden, only deferred. Every one of those kinds has a chip that draws
+**all** of them at any zoom — the Emergency phones chip renders 14 of 14 at
+z16.6 — and a legend row that outlines the buildings and car parks holding them.
+The rank governs the ambient layer only: the one you did not ask for.
+
+The thresholds are **integers**, and that is load-bearing rather than tidy: a
+zoom expression inside a Mapbox `filter` is only re-evaluated at integer zoom
+levels, so a 17.5 would behave as 17 or 18 and the table would be quietly lying
+about where the line is.
+
 #### The label moved with it, and that is the larger half
 
 Google writes a POI's name **beside** its pin, vertically centred on the head.
