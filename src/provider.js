@@ -49,30 +49,43 @@ export function preferredProvider() {
  * Wire up the toggle. Like the theme and basemap controls, the button
  * advertises the provider it will switch *to*, not the one on screen.
  *
+ * `surfaces` is a list because this control is reachable from two places — the
+ * layers menu and the rail — and there is exactly one piece of state behind
+ * them. Every surface is redrawn from it on every change, so neither can drift:
+ * neither holds anything. Same arrangement, and the same reasoning, as the
+ * appearance control in theme.js.
+ *
  * `revert` exists because this control can fail in a way the other two cannot:
  * Google's tiles need a key, an enabled API and a matching referrer
  * restriction, none of which can be checked until a tile is actually asked for.
- * When that request comes back refused, the caller uses this to put the button
- * back where it was, so the label never claims a basemap that is not drawn.
+ * When that request comes back refused, the caller uses this to put the buttons
+ * back where they were, so no label claims a basemap that is not drawn.
  */
-export function createProviderToggle({ button, icon, label, onChange }) {
+export function createProviderToggle({ surfaces, onChange }) {
   let provider = preferredProvider();
+
+  /** Every surface says what pressing it will DO, not what is on screen. */
+  function paint() {
+    const target = provider === 'google' ? 'mapbox' : 'google';
+    for (const { button, icon, label } of surfaces) {
+      icon.innerHTML = ICONS[target];
+      label.textContent = LABELS[target];
+      button.setAttribute('aria-label', `Switch to the ${LABELS[target]} basemap`);
+    }
+  }
 
   function apply(next, { persist }) {
     provider = next;
-
-    const target = provider === 'google' ? 'mapbox' : 'google';
-    icon.innerHTML = ICONS[target];
-    label.textContent = LABELS[target];
-    button.setAttribute('aria-label', `Switch to the ${LABELS[target]} basemap`);
-
+    paint();
     if (persist) localStorage.setItem(STORAGE_KEY, provider);
     onChange(provider);
   }
 
-  button.addEventListener('click', () => {
-    apply(provider === 'google' ? 'mapbox' : 'google', { persist: true });
-  });
+  for (const { button } of surfaces) {
+    button.addEventListener('click', () => {
+      apply(provider === 'google' ? 'mapbox' : 'google', { persist: true });
+    });
+  }
 
   apply(provider, { persist: false });
 
@@ -81,9 +94,7 @@ export function createProviderToggle({ button, icon, label, onChange }) {
     revert() {
       provider = 'mapbox';
       localStorage.setItem(STORAGE_KEY, provider);
-      icon.innerHTML = ICONS.google;
-      label.textContent = LABELS.google;
-      button.setAttribute('aria-label', `Switch to the ${LABELS.google} basemap`);
+      paint();
     },
   };
 }

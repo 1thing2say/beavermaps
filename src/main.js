@@ -553,6 +553,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const railTheme = document.getElementById('rail-theme');
   const railThemeIcon = document.getElementById('rail-theme-icon');
   const railThemeText = document.getElementById('rail-theme-text');
+  const railProvider = document.getElementById('rail-provider');
+  const railProviderIcon = document.getElementById('rail-provider-icon');
+  const railProviderText = document.getElementById('rail-provider-text');
   const basemapToggle = document.getElementById('basemap-toggle');
   const basemapIcon = document.getElementById('basemap-toggle-icon');
   const basemapLabel = document.getElementById('basemap-toggle-label');
@@ -2580,9 +2583,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // Last of the three, so that its initial onChange — which can start a session
   // request — runs after the theme and basemap have published their own state.
   providerControl = createProviderToggle({
-    button: providerToggle,
-    icon: providerIcon,
-    label: providerLabel,
+    // Two doors onto one setting: the layers menu, and the rail beside the
+    // appearance button. The rail is hidden below 640px, which is why the menu
+    // keeps its row rather than the rail taking the control over.
+    surfaces: [
+      { button: providerToggle, icon: providerIcon, label: providerLabel },
+      { button: railProvider, icon: railProviderIcon, label: railProviderText },
+    ],
     onChange: (provider) => {
       currentProvider = provider;
       syncBasemapStyle();

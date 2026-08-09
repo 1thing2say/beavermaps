@@ -342,6 +342,34 @@ controls in the bottom-right. The previous layout put a 600 px map inside a
 padded card under a page heading, which spent the top third of a phone screen on
 furniture.
 
+### Who draws the ground (`src/provider.js`)
+
+Mapbox or Google, and it is a **third axis** rather than a third value on the
+basemap toggle, because it is genuinely independent of the other two: both
+providers offer a road map and imagery, both are readable in either theme, and
+every combination of provider × basemap × theme means something. Everything
+drawn *on* the ground — the network, my campus's sheet, the labels, the route, the
+pins — is ours either way and does not change.
+
+Like the appearance control, it appears **twice and holds no state in either
+place**: a button on the rail beside the theme, and a row in the layers menu.
+`surfaces` is a list, every one of them redrawn from a single `provider` on
+every change, so neither can drift — neither holds anything. The rail is hidden
+below 640 px, which is why the menu keeps its row rather than handing the
+control over.
+
+Google is the default and Mapbox is the fallback, and it has to be that way
+round: Google's half can fail where Mapbox's cannot — a missing key, a disabled
+Map Tiles API, a referrer the key does not allow — and none of those can be
+detected until a session is actually requested. `revert()` puts every surface
+back when one comes back refused, so no label is left claiming a basemap that is
+not drawn.
+
+Every one of these toggles advertises what pressing it will **do**, not what is
+on screen — "Satellite" when you are on the road map, "Google" when Mapbox is
+drawing. The appearance button is the exception, and has to be: it cycles three
+ways, so it names where you are and puts where you are going in its label.
+
 ### Appearance: light, dark, auto
 
 Three states, and the third one is why it is not a switch. **Auto is not a
