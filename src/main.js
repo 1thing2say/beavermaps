@@ -30,6 +30,7 @@ import {
 import { createThemeControl, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
+import { createSkinControl, preferredSkin, applySkinAttribute } from './skin.js';
 import { googleGround } from './google-tiles.js';
 import { paintIcons } from './g-icons.js';
 import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
@@ -37,6 +38,8 @@ import {
   withPoiIcons, withAmenityNames, POI_LABEL_KINDS, AMENITY_ZOOM, AMENITY_ZOOM_DEFAULT,
 } from './poi.js';
 import { ringOf, trimToCampus } from './campus-clip.js';
+import { FONTS, SATELLITE, palette, styleKey } from './palette.js';
+
 import {
   buildAreas,
   highlightFor,
@@ -54,204 +57,6 @@ const accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 // rather than silently doing nothing — see addGoogleGround.
 const googleKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
 
-// Mapbox Standard rather than the classic light-v11/dark-v11 pair. Standard is
-// a style *package*: its internal layers are not addressable, so nothing here
-// can call removeLayer or setFilter on the basemap. What it gives back is a
-// configuration API and named slots to insert into, which is what the campus
-// mask below is built on.
-//
-// It also collapses light and dark into one style under two light presets, so
-// the theme toggle is now a config change rather than a setStyle. Custom
-// sources and layers survive it instead of being rebuilt.
-const STANDARD = 'mapbox://styles/mapbox/standard';
-
-// Per-theme layer colours, tuned to read like Google Maps.
-//
-// The reference is Google's own hierarchy, which is what makes their sheets
-// legible at a glance: pale neutral ground, saturated green for planting, and
-// circulation drawn *lighter* than the ground it crosses. Nothing on a Google
-// map is a bare line — every road is a white ribbon inside a grey casing, and
-// that casing is what separates it from the land without needing a hue of its
-// own.
-//
-// This replaces a palette that gave the network a deliberate blue cast so it
-// read as *our* data rather than Mapbox's. That was right while the campus was
-// bare, and wrong now that my campus's drawn pavement sits underneath it: the ribbon
-// and the pavement are the same paths and have to look like one thing.
-//
-// `mask` is the colour painted over the campus once Mapbox's own data inside it
-// has been taken out. It is deliberately a shade off the surrounding land
-// rather than an exact match: matching exactly would make the campus look like
-// a hole where the map failed to load, and would drift the moment Mapbox
-// retunes Standard.
-//
-// These render as authored only because the mask sets fill-emissive-strength.
-// Without it Standard lights the fill through its own lighting model, and under
-// the `night` preset that swallowed it: an authored #141922 came back as
-// #0e111d, and raising the authored value threefold moved the rendered pixel by
-// about a tenth — so it is not a multiply that can be pre-compensated for. The
-// fix belongs in the paint spec, not in these numbers.
-//
-// `land` recolours the printed my campus sheet. It is keyed by the `kind` written by
-// scripts/build-basemap.mjs, and a kind with no entry here keeps my campus's own print
-// colour, which is the right fallback for the things that have no theme opinion
-// — court markings, sign faces, the HOME BASE badges — and the wrong one for
-// ground, so every ground class needs a key.
-//
-// `basemapConfig` is the same palette pushed into Mapbox Standard's own
-// configuration, so the city around the campus is drawn in Google's colours
-// too. Without it the mask edge is a visible seam between two different maps.
-//
-// IMPORTANT: those values are NOT emissive, so unlike everything above they go
-// through Standard's lighting. The night set is therefore authored light and
-// lands dark — see the note on the dark palette.
-const THEMES = {
-  dark: {
-    style: STANDARD,
-    lightPreset: 'night',
-    // Google's dark map inverts the light one's contrast: roads are lighter
-    // than the land rather than darker, which is what keeps the network
-    // readable when everything else has gone to near-black.
-    network: '#3c4043',
-    networkCasing: '#191919',
-    casing: '#174ea6',
-    route: '#4285f4',
-    building: '#2f3336',
-    buildingLine: '#3f4448',
-    mask: '#212121',
-    // Same two hues, inverted for a dark ground: the slate lightens and the
-    // greenspace teal is lifted rather than re-hued.
-    label: '#c6d1dc',
-    labelHalo: '#1a1a1a',
-    areaLabel: '#4fbe90',
-    // Pitch and court markings. my campus prints them white, which at
-    // fill-emissive-strength 1 glares against night ground.
-    sportLine: '#5a6b52',
-    parkingLabel: '#9aa0a6',
-    // What a legend row paints on the shapes it is asking about.
-    //
-    // Purple because every other meaning on this map is already spoken for:
-    // blue is the route, green the start pin, red the destination, white the
-    // path ribbon, cream the buildings. A hue nothing else uses cannot be
-    // mistaken for a route or a marker, which matters when the thing it is
-    // drawn on top of is a whole car park.
-    //
-    // Lightened for the night ground rather than re-hued, the same way the
-    // label and greenspace colours are.
-    highlight: '#c58af9',
-    land: {
-      lawn: '#1d2f24',
-      tree: '#274934',
-      shrub: '#223a2b',
-      paving: '#2b2b2b',
-      parking: '#262626',
-      parking_stripe: '#333333',
-      walkway: '#3c4043',
-      driveway: '#35393c',
-      offsite_road: '#2f3234',
-      crossing: '#4a4d50',
-      sport: '#223529',
-      track: '#3a2e26',
-      closed: '#2a2a2a',
-      pool: '#17313f',
-      building: '#2f2f2f',
-    },
-    // Authored ~1.33x lighter than the target, because the night preset lands
-    // these at roughly three quarters of their written value — the same
-    // measurement that forced fill-emissive-strength on the layers above. Our
-    // own fills opt out of the lighting; Standard's config cannot, so it is
-    // pre-compensated here instead.
-    basemapConfig: {
-      colorLand: '#2c2c2c',        // -> ~#212121, Google's dark ground
-      colorGreenspace: '#273f30',
-      colorWater: '#1f4254',
-      colorRoads: '#50555a',       // -> ~#3c4043, lighter than the land
-      colorMotorways: '#5f5340',
-      colorTrunks: '#544c3d',
-      colorBuildings: '#3f3f3f',
-      colorRoadLabels: '#9aa0a6',
-      colorPlaceLabels: '#d0d3d6',
-      colorPointOfInterestLabels: '#9aa0a6',
-      roadsBrightness: 1,
-    },
-  },
-  light: {
-    style: STANDARD,
-    lightPreset: 'day',
-    // The Google road: white core, grey casing. Both are drawn from the same
-    // source in addNetworkLayers, the casing simply wider and underneath.
-    network: '#ffffff',
-    networkCasing: '#d2d5d9',
-    // Google's navigation blue, and the darker blue they case it with.
-    casing: '#1967d2',
-    route: '#4285f4',
-    // Campus buildings on Google are a warm cream, distinct from the neutral
-    // grey they give ordinary city blocks. That contrast is most of what makes
-    // an institution read as one place rather than a district.
-    building: '#e8e0cd',
-    buildingLine: '#d8cfb8',
-    mask: '#f1f1ef',
-    // Sampled off the screenshot, not assumed. Google's label ink is a cool
-    // blue-grey slate (H 195-212, L~38%), not the neutral charcoal #3c4043 an
-    // earlier pass used; and their greenspace names are the same teal-green as
-    // their park icons, #17a773, not an olive.
-    label: '#42586b',
-    labelHalo: '#ffffff',
-    areaLabel: '#17a773',
-    sportLine: '#ffffff',
-    parkingLabel: '#67788a',
-    // Google's own purple, which is the saturated end of the same hue the dark
-    // theme lifts. See the note there for why this map had a spare colour.
-    highlight: '#a142f4',
-    land: {
-      // Sampled off a Google Maps screenshot of a comparable campus rather than
-      // picked by eye. Google's greens are not the yellow-olive you get by
-      // reaching for "grass": they sit at hue 143 — a cool mint — at 79-90%
-      // lightness, and they use exactly three tiers by area. An earlier pass
-      // authored these around hue 94-108, which is what made the campus read as
-      // heavily green when 62% of its surface is planting.
-      // Assigned by AREA, not by how dense the thing is in life. my campus's sheet
-      // draws 509 individual tree canopies over the lawn, so putting trees on
-      // Google's darkest tier made that tier 41% of our green where it is 11%
-      // of theirs — the same three colours reading far heavier. Trees take the
-      // middle tier and the rare shrubs take the dark one, which lands our
-      // proportions near Google's while still using their exact values.
-      lawn: '#d3f8e2',   // Google's 67.9% tier: the base park fill
-      tree: '#c3f1d5',   // their 15.6% tier: 509 canopies, one step down only
-      shrub: '#a9eac2',  // their 11.0% tier: 46 features, so it stays rare
-      paving: '#f0f0ee',
-      parking: '#eaeaea',
-      parking_stripe: '#f7f7f7',
-      // Pavement is left white and the grey arrives as the network casing on
-      // top, exactly as Google builds a road. Colouring the pavement grey as
-      // well would double the casing and thicken every path.
-      walkway: '#ffffff',
-      driveway: '#ffffff',
-      offsite_road: '#ffffff',
-      crossing: '#e9e9e9',
-      sport: '#c3f1d5',
-      track: '#e3c9b6',
-      closed: '#e4e4e4',
-      pool: '#a5d8f3',
-      building: '#e8e0cd',
-    },
-    basemapConfig: {
-      colorLand: '#f3f3f1',
-      colorGreenspace: '#d3f8e2',
-      colorWater: '#a5d8f3',
-      colorRoads: '#ffffff',
-      colorMotorways: '#fbd9a0',
-      colorTrunks: '#fce8c2',
-      colorBuildings: '#e9e6df',
-      colorRoadLabels: '#5f6368',
-      colorPlaceLabels: '#3c4043',
-      colorPointOfInterestLabels: '#5f6368',
-      // Default is 0.4, which greys Standard's roads down until they read as
-      // land. Google's do not — they are the brightest thing on the sheet.
-      roadsBrightness: 1,
-    },
-  },
-};
 
 // Google's road ribbon, in pixels. Not the ground-width curve the printed sheet
 // uses: paths.json carries only `from`/`to`, so there is no per-segment width to
@@ -282,101 +87,6 @@ const NETWORK_CASING_WIDTH = [
 // used; only the values move.
 const GOOGLE_GREEN = '#1e8e3e';
 const GOOGLE_RED = '#ea4335';
-
-/**
- * Roboto — the face Google Maps actually sets its labels in, and one Mapbox
- * serves from its own font endpoint (verified: Regular, Medium and Bold all
- * return 200), so this costs no webfont and no extra request from the page.
- *
- * The fallback in each stack is the Arial Unicode face Mapbox ships for glyphs
- * Roboto has no coverage for; without it a missing codepoint renders as tofu.
- */
-const FONT = {
-  regular: ['Roboto Regular', 'Arial Unicode MS Regular'],
-  medium: ['Roboto Medium', 'Arial Unicode MS Regular'],
-  bold: ['Roboto Bold', 'Arial Unicode MS Bold'],
-};
-
-// Imagery is dark, busy and its own fixed brightness, so it does not follow the
-// light/dark theme and needs high-contrast line colours of its own.
-const SATELLITE = {
-  style: 'mapbox://styles/mapbox/standard-satellite',
-  lightPreset: 'day',
-  // Sky blue rather than white: the imagery basemap draws its own roads in
-  // cream, and a white network is indistinguishable from them over pale roofs.
-  network: '#38bdf8',
-  // Google cases its roads over imagery too, but with near-black instead of
-  // grey — a photograph has no reliable background value to sit a light casing
-  // against, and the dark one reads over pale roofs and dark tarmac alike.
-  networkCasing: '#0b1220',
-  casing: '#0b1220',
-  route: '#facc15',
-  building: '#94a3b8',
-  // No fill mask over imagery — seeing the ground is the entire point of this
-  // basemap, so here the campus only gets the clip, which removes Mapbox's
-  // labels and 3D objects while leaving the photograph intact.
-  mask: null,
-  // Same reasoning for the ground cover: painting my campus's lawns and car parks over
-  // a photograph of the actual lawns and car parks hides the better data. The
-  // amenity symbols and place labels stay, because the imagery carries neither.
-  land: null,
-  buildingLine: null,
-  label: '#ffffff',
-  labelHalo: '#101828',
-  areaLabel: '#ffffff',
-  parkingLabel: '#dbeafe',
-  // Lighter again than the dark theme's. A photograph has no flat ground value
-  // to sit a mid-tone against — foliage, tarmac and pale roofs are all in one
-  // frame — so the outline goes bright and lets the fill do the tinting.
-  highlight: '#d8b4fe',
-};
-
-/**
- * The style loaded when Google is drawing the ground: no sources, no layers,
- * nothing to see through. Google's raster already carries roads, water, labels
- * and place names, so leaving Standard underneath would double-draw all of it.
- *
- * `glyphs` is the one thing an empty style still owes us. Every campus label is
- * a symbol layer, and a style with no glyph endpoint renders them as nothing at
- * all — silently, since a missing font is not a style error.
- *
- * Frozen and defined once because `syncBasemapStyle` compares style identity;
- * an object literal rebuilt per call would never equal itself and would
- * setStyle on every toggle, forever.
- */
-const BLANK_STYLE = Object.freeze({
-  version: 8,
-  sources: {},
-  layers: [],
-  glyphs: 'mapbox://fonts/mapbox/{fontstack}/{range}.pbf',
-});
-
-/** Layer colours and basemap style for the current provider/basemap/theme. */
-function palette(provider, basemap, theme) {
-  const base = basemap === 'satellite' ? SATELLITE : THEMES[theme];
-  if (provider !== 'google') return base;
-
-  // Same overlay colours — the campus is drawn identically over either ground —
-  // but the Standard configuration keys are dropped rather than left to fail:
-  // there is no basemap import on a blank style for them to apply to, and
-  // setConfigProperty would throw thirteen times on every style load.
-  return { ...base, style: BLANK_STYLE, lightPreset: null, basemapConfig: null };
-}
-
-/**
- * Identity of the applied style. A change here means a full reload; anything
- * else is recoloured in place.
- *
- * Not just the style URL, because under Google every combination shares the one
- * blank style: the map type and the theme are baked into the tile session, not
- * into the style, so switching to satellite or to dark would otherwise keep
- * serving the tiles it was already serving.
- */
-function styleKey(provider, basemap, theme) {
-  return provider === 'google'
-    ? `google:${basemap}:${theme}`
-    : palette(provider, basemap, theme).style;
-}
 
 // Comfortable campus walking pace. Used for the ETA and for the simulator.
 const WALK_FEET_PER_SEC = 4.6;
@@ -419,13 +129,21 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // wrong theme, and so the basemap starts on the matching style.
   let currentTheme = preferredTheme();
   applyThemeAttribute(currentTheme);
+  // Same reasoning one line up, and it matters more here: the skin decides the
+  // corner radius, the typeface and whether a card is opaque, so publishing it
+  // late would open the app in one design language and switch to the other.
+  let currentSkin = preferredSkin();
+  applySkinAttribute(currentSkin);
   let currentBasemap = preferredBasemap();
   let currentProvider = preferredProvider();
-  let appliedStyleKey = styleKey(currentProvider, currentBasemap, currentTheme);
+  let appliedStyleKey = styleKey(currentProvider, currentBasemap, currentTheme, currentSkin);
+
+  /** The label face for the look currently on screen. See FONTS. */
+  const mapFont = () => FONTS[currentSkin] ?? FONTS.classic;
 
   const map = new mapboxgl.Map({
     container: 'map',
-    style: palette(currentProvider, currentBasemap, currentTheme).style,
+    style: palette(currentProvider, currentBasemap, currentTheme, currentSkin).style,
     // Fitting the network's own bounds rather than a fixed centre/zoom means the
     // campus fills the frame on a phone and a desktop alike.
     bounds: CAMPUS_BOUNDS,
@@ -564,6 +282,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const providerToggle = document.getElementById('provider-toggle');
   const providerIcon = document.getElementById('provider-toggle-icon');
   const providerLabel = document.getElementById('provider-toggle-label');
+  const railSkin = document.getElementById('rail-skin');
+  const railSkinIcon = document.getElementById('rail-skin-icon');
+  const railSkinText = document.getElementById('rail-skin-text');
+  const skinToggle = document.getElementById('skin-toggle');
+  const skinIcon = document.getElementById('skin-toggle-icon');
+  const skinLabel = document.getElementById('skin-toggle-label');
 
   function setDistanceFeet(feet) {
     distanceText.innerHTML =
@@ -692,7 +416,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * is absent from every feature, so the base coalesces to 0.
    */
   function addBuildingsLayer() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
 
     // The theme toggle no longer rebuilds the style, so an existing layer has
     // to be recoloured in place rather than left on the old palette.
@@ -797,7 +521,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * layer and the campus renders inside out.
    */
   function addBasemapLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
     const { land } = colors;
 
     // Over imagery there is nothing to add — see SATELLITE.land.
@@ -952,7 +676,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * Mapbox honours the order it was given.
    */
   function addHighlightLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
 
     if (map.getLayer('highlight-fill')) {
       for (const [id, property] of [
@@ -1031,7 +755,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * paint value because a symbol layer has one `text-color` and this map draws
    * eight categories through it.
    */
-  const amenityHalo = () => palette(currentProvider, currentBasemap, currentTheme).labelHalo;
+  const amenityHalo = () => palette(currentProvider, currentBasemap, currentTheme, currentSkin).labelHalo;
 
   const inkFor = (property) => {
     // Over imagery a tint has nothing fixed to sit against — foliage, tarmac
@@ -1110,7 +834,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           // Held to 17 on top of that, because even a real name is not worth
           // reading when the whole campus is on screen.
           'text-field': ['step', ['zoom'], '', 17, ['coalesce', ['get', 'name'], '']],
-          'text-font': FONT.medium,
+          'text-font': mapFont().medium,
           'text-size': 11,
           'text-anchor': 'top',
           'text-offset': [0, 0.85],
@@ -1174,7 +898,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * means clearing a category is a setData(EMPTY), not a filter on a mixed set.
    */
   function addCategoryLayer() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
 
     if (map.getLayer('category-pins')) {
       // Same shape as the other builders: a theme change re-runs this to
@@ -1216,7 +940,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           'icon-allow-overlap': true,
           'text-optional': true,
           'text-field': ['get', 'name'],
-          'text-font': FONT.medium,
+          'text-font': mapFont().medium,
           'text-size': 12,
           // Under the disc, and far enough under to clear its lower half —
           // the anchor point is the coordinate and the disc is centred on it.
@@ -1681,7 +1405,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const CARD_WIDTH = 288;
 
   function addDirectoryLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
 
     if (map.getLayer('campus-directory-fill')) {
       map.setPaintProperty('campus-directory-fill', 'fill-color', colors.route);
@@ -1806,7 +1530,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   function addLabelLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
 
     if (map.getLayer('campus-labels-building')) {
       for (const kind of LABEL_KINDS) {
@@ -1833,7 +1557,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // A style swap can land between the loader resolving and this running, and
     // the palette can have changed under it — so both are re-read here.
     if (map.getLayer('campus-labels-building') || !map.getSource('campus-labels')) return;
-    const colors = palette(currentProvider, currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
 
     const common = {
       type: 'symbol',
@@ -1897,7 +1621,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           // Google's own hierarchy is set in weight, not colour: area names in
           // Medium, major buildings in Medium, everything else Regular. Bold
           // appears nowhere on their map at these sizes.
-          'text-font': area || major ? FONT.medium : FONT.regular,
+          'text-font': area || major ? mapFont().medium : mapFont().regular,
           'text-size': labelSize(area ? 0.95 : 1),
           // 8 ems is where the sheet breaks its own labels, so the printed ones
           // keep their original line breaks. The names added from my campus's database
@@ -2003,7 +1727,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * Mapbox draws the campus from, so the cut lands exactly on their edge.
    */
   function addCampusMask() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
 
     if (!map.getSource('campus-boundary')) {
       map.addSource('campus-boundary', { type: 'geojson', data: campusBoundary });
@@ -2101,7 +1825,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   function addNetworkLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme);
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
 
     // Mapbox Standard exposes configuration instead of addressable layers, and
     // this is where light and dark actually happen now.
@@ -2514,6 +2238,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         key: googleKey,
         basemap: currentBasemap,
         theme: currentTheme,
+        // The raster has to wear the same look as the campus drawn on top of
+        // it, or the mask edge becomes a seam between two design languages —
+        // the same reason the theme is passed, one axis further out.
+        skin: currentSkin,
         bounds: CAMPUS_BOUNDS,
       });
 
@@ -2567,7 +2295,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * chrome restyles.
    */
   function syncBasemapStyle() {
-    const nextKey = styleKey(currentProvider, currentBasemap, currentTheme);
+    const nextKey = styleKey(currentProvider, currentBasemap, currentTheme, currentSkin);
 
     if (nextKey !== appliedStyleKey) {
       appliedStyleKey = nextKey;
@@ -2576,7 +2304,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // diff:false forces a full style reload. The default diffing path can
       // drop custom layers without firing style.load, leaving a bare basemap.
       // style.load re-adds our layers and re-requests the ground.
-      map.setStyle(palette(currentProvider, currentBasemap, currentTheme).style, { diff: false });
+      map.setStyle(palette(currentProvider, currentBasemap, currentTheme, currentSkin).style, { diff: false });
       return;
     }
 
@@ -2624,6 +2352,23 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     ],
     onChange: (provider) => {
       currentProvider = provider;
+      syncBasemapStyle();
+    },
+  });
+
+  // After the other three, for the reason the provider control is after the
+  // first two: publishing a value calls syncBasemapStyle, and this is the axis
+  // that can force a full reload, so it must not run while another control has
+  // yet to say what it wants. `currentSkin` itself was read much earlier — the
+  // stylesheet needs it before the first frame — so this initial pass only
+  // re-publishes a value the style key already agrees with, and reloads nothing.
+  createSkinControl({
+    surfaces: [
+      { button: skinToggle, icon: skinIcon, label: skinLabel },
+      { button: railSkin, icon: railSkinIcon, label: railSkinText },
+    ],
+    onChange: (skin) => {
+      currentSkin = skin;
       syncBasemapStyle();
     },
   });

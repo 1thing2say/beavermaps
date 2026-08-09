@@ -19,6 +19,7 @@ import {
 } from '../src/map-images.js';
 import { KIND_NAMES } from '../src/building-popup.js';
 import { CATEGORIES } from '../src/categories.js';
+import { deltaE, contrast } from './helpers.js';
 
 /** The interpolation Mapbox will run, done by hand from the expression itself. */
 function evaluate(expr, zoom) {
@@ -120,30 +121,6 @@ test('every pin that can be tapped has a name for its card', () => {
     }
   }
 });
-
-/** CIE-Lab, so "how different do these look" is a number rather than an opinion. */
-function lab(hex) {
-  const srgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-  const [r, g, b] = srgb.map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-  const xyz = [
-    (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047,
-    r * 0.2126 + g * 0.7152 + b * 0.0722,
-    (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883,
-  ].map((t) => (t > 0.008856 ? t ** (1 / 3) : 7.787 * t + 16 / 116));
-  return [116 * xyz[1] - 16, 500 * (xyz[0] - xyz[1]), 200 * (xyz[1] - xyz[2])];
-}
-const deltaE = (a, b) => Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]));
-
-const relLuminance = (hex) => {
-  const [r, g, b] = [1, 3, 5]
-    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
-    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-};
-const contrast = (a, b) => {
-  const [lo, hi] = [relLuminance(a), relLuminance(b)].sort((x, y) => x - y);
-  return (hi + 0.05) / (lo + 0.05);
-};
 
 test('no two marker hues read as the same colour', () => {
   const hues = [...new Set(AMENITY_KINDS.map(pinColour))];

@@ -39,7 +39,8 @@ export const GOOGLE_MAP_TYPE = {
 const FALLBACK_ATTRIBUTION = 'Map data ©Google';
 
 /**
- * Dark styling for the roadmap tiles, in Google's own style-array schema.
+ * Dark styling for the roadmap tiles under the CLASSIC look, in Google's own
+ * style-array schema.
  *
  * Without this the dark theme would be a seam: our overlay drawn in near-black
  * inside the campus, Google's daylight roadmap everywhere outside it, and the
@@ -75,6 +76,78 @@ const DARK_STYLE = [
   { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#17313f' }] },
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4a6a7a' }] },
 ];
+
+/**
+ * The same job for the Apple look, and a bigger one: this styles the LIGHT map
+ * too, where the classic look could leave it alone.
+ *
+ * Google's daylight roadmap already agrees with our classic palette closely
+ * enough to need no styling at all — the campus sheet was drawn from a Google
+ * Maps screenshot in the first place. It agrees with Apple's about nothing: the
+ * land is neutral where Apple's is warm, the greens are mint where Apple's are
+ * yellow, and the labels are slate where Apple's are black. Left unstyled, the
+ * campus would sit on it as an obviously foreign patch.
+ *
+ * Values are the same table as APPLE in main.js, straight across. Roads are the
+ * one place the two deliberately differ: a road here is a *road*, and Apple
+ * draws those white with a grey casing, while the grey ribbon inside the campus
+ * is what they use for a path. The distinction is theirs, and keeping it is what
+ * makes the boundary read as campus-versus-city rather than as a seam.
+ *
+ * Unlike main.js's night table these are targets rather than pre-compensated
+ * values: a raster tile arrives already lit, and there is no light preset in
+ * front of it to correct for.
+ */
+const APPLE_LIGHT_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#efece2' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#000000' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#fefdf6' }] },
+  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#d9d5c8' }] },
+  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#e3ecd2' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#bee298' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#476a26' }] },
+  { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#ffffff' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#dfdfda' }] },
+  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#6f6d65' }] },
+  { featureType: 'road.highway', elementType: 'geometry.fill', stylers: [{ color: '#f6d5a2' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#e9c58e' }] },
+  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#e0ded4' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#9fd2f6' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4a7f9e' }] },
+];
+
+const APPLE_DARK_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#2f2e2a' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#ddddd9' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#1e1e1b' }] },
+  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#494741' }] },
+  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#333429' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#36412a' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#95ae7a' }] },
+  // The same inversion the campus network uses at night: the ways go lighter
+  // than the ground rather than darker, with a near-black edge under them.
+  { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#4e4e4b' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#1e1e1b' }] },
+  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#a2a09b' }] },
+  { featureType: 'road.highway', elementType: 'geometry.fill', stylers: [{ color: '#503f2b' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1e1e1b' }] },
+  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#3a3934' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#1c3d4f' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#5d8296' }] },
+];
+
+/**
+ * Which style array a look wants for a theme.
+ *
+ * The classic light entry is empty on purpose rather than missing: Google's own
+ * daylight roadmap IS the classic light palette, so there is nothing to say.
+ * Writing it out keeps the table total, so a new theme or look is a row here
+ * rather than a lookup that quietly falls through to unstyled tiles.
+ */
+export const GROUND_STYLE = {
+  classic: { light: [], dark: DARK_STYLE },
+  apple: { light: APPLE_LIGHT_STYLE, dark: APPLE_DARK_STYLE },
+};
 
 /**
  * Nobody else's business on a campus map.
@@ -119,7 +192,7 @@ const NO_ORGANISATIONS = [
  */
 const sessions = new Map();
 
-function sessionBody(mapType, theme) {
+function sessionBody(mapType, theme, skin) {
   const body = {
     mapType,
     language: 'en-US',
@@ -134,16 +207,17 @@ function sessionBody(mapType, theme) {
   // land after it and win — a `poi` colour set above must not put back a label
   // this has just switched off.
   if (mapType === 'roadmap') {
-    body.styles = [...(theme === 'dark' ? DARK_STYLE : []), ...NO_ORGANISATIONS];
+    const ground = (GROUND_STYLE[skin] ?? GROUND_STYLE.classic)[theme] ?? [];
+    body.styles = [...ground, ...NO_ORGANISATIONS];
   }
   return body;
 }
 
-async function mintSession(key, mapType, theme) {
+async function mintSession(key, mapType, theme, skin) {
   const response = await fetch(`${CREATE_SESSION}?key=${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(sessionBody(mapType, theme)),
+    body: JSON.stringify(sessionBody(mapType, theme, skin)),
   });
 
   // Google puts the actionable part in the body, not the status line: a
@@ -158,14 +232,14 @@ async function mintSession(key, mapType, theme) {
   return payload;
 }
 
-function session(key, mapType, theme) {
-  const id = `${mapType}:${theme}`;
+function session(key, mapType, theme, skin) {
+  const id = `${mapType}:${theme}:${skin}`;
   const cached = sessions.get(id);
   // `expiry` is a unix timestamp in seconds, as a string. A minute of slack, so
   // a session cannot expire between this check and the tile requests it feeds.
   if (cached && cached.expiresAt > Date.now() + 60_000) return cached.promise;
 
-  const promise = mintSession(key, mapType, theme);
+  const promise = mintSession(key, mapType, theme, skin);
   // Assume the documented two weeks until the response says otherwise, then
   // correct. Guessing short is safe — the worst case is one extra mint.
   const entry = { promise, expiresAt: Date.now() + 12 * 24 * 3600 * 1000 };
@@ -230,13 +304,14 @@ async function fetchAttribution(key, token, [[west, south], [east, north]], zoom
  * @param {string}   options.key      Browser API key, referrer-restricted.
  * @param {string}   options.basemap  'map' | 'satellite'.
  * @param {string}   options.theme    'light' | 'dark'.
+ * @param {string}   options.skin     'apple' | 'classic'.
  * @param {number[][]} options.bounds [[w, s], [e, n]], for the attribution call.
  */
-export async function googleGround({ key, basemap, theme, bounds }) {
+export async function googleGround({ key, basemap, theme, skin, bounds }) {
   if (!key) throw new Error('No Google Maps API key — set VITE_GOOGLE_MAPS_KEY in .env');
 
   const mapType = GOOGLE_MAP_TYPE[basemap] ?? GOOGLE_MAP_TYPE.map;
-  const { session: token } = await session(key, mapType, theme);
+  const { session: token } = await session(key, mapType, theme, skin);
   const auth = `session=${encodeURIComponent(token)}&key=${encodeURIComponent(key)}`;
 
   return {

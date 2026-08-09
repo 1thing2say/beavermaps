@@ -60,6 +60,15 @@
                 <span id="rail-provider-icon" class="g-rail-icon"></span>
                 <span id="rail-provider-text" class="g-rail-text">Mapbox</span>
             </button>
+            <!-- The widest setting of the four, and the last one, because it
+                 restyles the three above it as well as the map: which design
+                 language the whole app wears. Same arrangement again — one
+                 piece of state, a row in the layers menu for the phone, and a
+                 button here that names the look it will switch *to*. -->
+            <button id="rail-skin" type="button" class="g-rail-btn">
+                <span id="rail-skin-icon" class="g-rail-icon"></span>
+                <span id="rail-skin-text" class="g-rail-text">Classic</span>
+            </button>
         </nav>
 
         <!-- The top bar: search box at a fixed width, chips taking whatever
@@ -221,6 +230,19 @@
                         data-theme-mode="auto">
                         <span class="g-layer-icon" data-icon="auto"></span>
                         Auto
+                    </button>
+                </div>
+
+                <!-- Which design language the app wears: the Google Maps
+                     conventions it was built to, or Apple's. Its own group
+                     rather than a third button in "Map type", because it is not
+                     one — map type is what the ground shows, this is what the
+                     entire app is modelled on, chrome included. -->
+                <p class="g-layers-heading g-layers-heading--split">Look</p>
+                <div class="g-layers-row">
+                    <button id="skin-toggle" type="button" class="g-layer-btn g-layer-btn--wide">
+                        <span id="skin-toggle-icon" class="g-layer-icon"></span>
+                        <span id="skin-toggle-label">Classic</span>
                     </button>
                 </div>
 

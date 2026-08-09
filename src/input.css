@@ -69,6 +69,38 @@
        Only the phone layout claims it back, because only there does the panel
        span the full width and cover them. */
     --g-credit-h: 22px;
+
+    /* --- what the two looks disagree about --------------------------------
+       Everything below is overridden wholesale by the Apple skin further down.
+       They are tokens rather than skin-specific rules because the alternative —
+       a `[data-skin="apple"] .g-card { ... }` beside every shape — is two
+       component libraries pretending to be one, and the second always drifts.
+
+       The rule for what earns a token: a value the two looks disagree about but
+       which means the same thing in both. A card's corner radius qualifies. The
+       fact that Apple centres a panel title does not, and lives as a rule. */
+    --g-font: Roboto, "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
+    --g-radius: 8px;
+    --g-radius-sm: 8px;
+    /* Google's search field is a full capsule; Apple's is a rounded rect. */
+    --g-radius-search: 24px;
+
+    /* A card's background is a colour here and a *material* under Apple: a
+       translucent fill over a blurred, saturated copy of whatever it covers.
+       Classic sets the filter to `none`, which costs nothing — the browser skips
+       the backdrop pass entirely rather than blurring by zero. */
+    --g-card-bg: var(--g-surface);
+    --g-card-filter: none;
+
+    /* The fill behind a secondary action. Google outlines the button and leaves
+       it transparent; Apple tints it with the accent at low alpha and drops the
+       border. Both are expressible as one fill plus one border colour. */
+    --g-tint: transparent;
+    --g-tint-line: var(--g-line);
+
+    /* The rule under a panel heading. Apple separates with weight and space
+       instead, so it sets this transparent rather than restyling four heads. */
+    --g-head-rule: var(--g-line);
 }
 
 :root[data-theme="dark"] {
@@ -84,6 +116,124 @@
     --g-hover: rgba(232, 234, 237, 0.1);
     --g-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 6px 2px rgba(0, 0, 0, 0.35);
     --g-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6), 0 1px 3px 1px rgba(0, 0, 0, 0.35);
+}
+
+/* One halo colour for every name drawn straight onto the map, DOM or GL. The
+   selected pin's caption is an HTML element and the symbol labels beside it are
+   rasterised by Mapbox, so the two read the same value from opposite sides of
+   the renderer — and under Apple that value is not the surface colour, because
+   Apple's halo is a warm white their cards are not. */
+:root {
+    --g-label-halo: var(--g-surface);
+}
+
+/* ===========================================================================
+   The Apple skin
+   ===========================================================================
+   Measured off a macOS Maps screen capture rather than recalled, and the
+   measurements are worth stating because two of them are surprising.
+
+   THE MATERIAL. A macOS card is not a translucent fill — it is a translucent
+   fill over a *saturated* copy of its backdrop, and the saturation is most of
+   what makes it read as Apple. Solving the capture for both terms at once, with
+   the sidebar over a known park green (#bee298):
+
+       light   saturate(2.2)  + white at 68%
+       dark    saturate(1.67) + black at 68.5%
+
+   Both were then checked against an independent sample — the same materials
+   over the sand (#efe7cb) elsewhere in the frame — and predicted it to within
+   two levels per channel. That is the whole reason `backdrop-filter` carries a
+   `saturate()` here: drop it and the blur alone lands visibly grey.
+
+   THE CORNERS are continuous, not circular, and the capture proves it rather
+   than assuming it: the control stack's corner insets 16px horizontally but
+   takes 20px vertically to reach the straight edge. A circular arc gives 1.0 of
+   one per 1.0 of the other by definition; 1.25 is a superellipse.
+
+   `border-radius` can only draw the circular one, and it is used anyway. CSS
+   has grown a `corner-shape` property for exactly this, but its exponent is a
+   number whose parameterisation would have to be guessed here — and a guessed
+   curve is a worse answer than a known-approximate one, on a file where every
+   other value came off a measurement. The radii below are therefore the
+   measured sizes drawn with the wrong curve, which at 14px is a sub-pixel
+   difference along one eighth of each corner.
+   =========================================================================== */
+:root[data-skin="apple"] {
+    --g-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+        Inter, "Helvetica Neue", system-ui, sans-serif;
+
+    /* 14 for cards and 10 for controls: the family the capture's stack, search
+       field and buttons fall into, rounded to whole pixels. */
+    --g-radius: 14px;
+    --g-radius-sm: 10px;
+    --g-radius-search: 12px;
+
+    /* systemBackground / secondarySystemBackground. Opaque, and deliberately so
+       — this is what the material flattens to where a backdrop cannot be had
+       (the page background, a label halo, a browser without backdrop-filter). */
+    --g-surface: #ffffff;
+    --g-surface-2: #f2f2f7;
+    --g-card-bg: rgba(255, 255, 255, 0.68);
+    --g-card-filter: saturate(220%) blur(30px);
+
+    /* label / secondaryLabel. Apple's secondary text is *translucent* rather
+       than a lighter grey, which is what keeps it correct over a material whose
+       own value moves with whatever is under it.
+
+       The alpha is 0.78 and Apple's is 0.6, and that is a deliberate deviation
+       rather than a transcription error. Composited the way it is actually
+       drawn — secondary ink over a 68% white material over this palette's
+       darkest light ground — 0.6 measures 3.2:1, which is under the 4.5 this
+       app holds everything else to. 0.78 is the smallest step that clears it,
+       at 5.05:1. The dark block below keeps 0.6, because there it already
+       measures 5.95:1 and needs no help. */
+    --g-text: #000000;
+    --g-text-dim: rgba(60, 60, 67, 0.78);
+    --g-line: rgba(60, 60, 67, 0.29);
+
+    --g-blue: #007aff;
+    --g-on-blue: #ffffff;
+    --g-highlight: #af52de;
+    --g-highlight-soft: rgba(175, 82, 222, 0.14);
+    --g-hover: rgba(120, 120, 128, 0.12);
+
+    /* A hairline ring plus one wide, soft drop. Google stacks two tight dark
+       shadows to lift a card off white; Apple's cards are over a photograph or
+       a map as often as not, so the ring does the separating and the shadow
+       only gives depth. */
+    --g-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 8px 28px rgba(0, 0, 0, 0.16);
+    --g-shadow-sm: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 2px 10px rgba(0, 0, 0, 0.12);
+
+    --g-tint: color-mix(in srgb, var(--g-blue) 15%, transparent);
+    --g-tint-line: transparent;
+    --g-head-rule: transparent;
+
+    /* Measured, and not white: #fefdf6 is a warm off-white. */
+    --g-label-halo: #fefdf6;
+}
+
+:root[data-skin="apple"][data-theme="dark"] {
+    --g-surface: #1c1c1e;
+    --g-surface-2: #2c2c2e;
+    --g-card-bg: rgba(0, 0, 0, 0.685);
+    --g-card-filter: saturate(167%) blur(30px);
+
+    --g-text: #ffffff;
+    --g-text-dim: rgba(235, 235, 245, 0.6);
+    --g-line: rgba(84, 84, 88, 0.65);
+
+    --g-blue: #0a84ff;
+    --g-on-blue: #ffffff;
+    --g-highlight: #bf5af2;
+    --g-highlight-soft: rgba(191, 90, 242, 0.18);
+    --g-hover: rgba(120, 120, 128, 0.24);
+
+    --g-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 8px 28px rgba(0, 0, 0, 0.5);
+    --g-shadow-sm: 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 2px 10px rgba(0, 0, 0, 0.4);
+
+    /* The dark map's halo, from the same palette the symbol labels use. */
+    --g-label-halo: #1e1e1b;
 }
 
 :root[data-theme="dark"] {
@@ -371,8 +521,8 @@
     /* The same halo every other label on this map is drawn with, rather than a
        plate — it has to read over lawn, tarmac and imagery alike. */
     text-shadow:
-        0 0 3px var(--g-surface), 0 0 3px var(--g-surface),
-        0 0 3px var(--g-surface), 0 0 3px var(--g-surface);
+        0 0 3px var(--g-label-halo), 0 0 3px var(--g-label-halo),
+        0 0 3px var(--g-label-halo), 0 0 3px var(--g-label-halo);
     /* Fades with the growth rather than snapping in at the end, which is what
        Apple's does — the caption is part of the same gesture as the lift. */
     opacity: 0;
@@ -442,7 +592,7 @@
     overflow: hidden;
     background: var(--g-surface);
     color: var(--g-text);
-    font-family: Roboto, "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
+    font-family: var(--g-font);
     -webkit-font-smoothing: antialiased;
 }
 
@@ -477,11 +627,18 @@ body.navigating .app-chrome {
     color: inherit;
 }
 
-/* Every floating surface. One radius, one shadow, one border. */
+/* Every floating surface. One radius, one shadow, one background.
+ *
+ * The background is a *material*: under Apple it is translucent and the filter
+ * blurs and saturates whatever it covers, under Google it is an opaque colour
+ * and the filter is `none`. Written once here, so a card, a menu, a suggestion
+ * list and a popup are one surface in both looks and cannot drift apart. */
 .g-card {
-    background: var(--g-surface);
+    background: var(--g-card-bg);
+    -webkit-backdrop-filter: var(--g-card-filter);
+    backdrop-filter: var(--g-card-filter);
     color: var(--g-text);
-    border-radius: 8px;
+    border-radius: var(--g-radius);
     box-shadow: var(--g-shadow);
 }
 
@@ -532,7 +689,7 @@ body.navigating .app-chrome {
     width: 48px;
     padding: 8px 0;
     border: 0;
-    border-radius: 8px;
+    border-radius: var(--g-radius-sm);
     background: transparent;
     color: var(--g-text-dim);
     cursor: pointer;
@@ -608,7 +765,7 @@ body.navigating .app-chrome {
     align-items: center;
     height: 48px;
     padding: 0 8px 0 16px;
-    border-radius: 24px;
+    border-radius: var(--g-radius-search);
     width: var(--g-col-w);
     flex: none;
 }
@@ -713,8 +870,10 @@ body.navigating .app-chrome {
     list-style: none;
     max-height: 320px;
     overflow-y: auto;
-    background: var(--g-surface);
-    border-radius: 8px;
+    background: var(--g-card-bg);
+    -webkit-backdrop-filter: var(--g-card-filter);
+    backdrop-filter: var(--g-card-filter);
+    border-radius: var(--g-radius);
     box-shadow: var(--g-shadow);
 }
 
@@ -872,7 +1031,7 @@ body.navigating .app-chrome {
     justify-content: space-between;
     gap: 8px;
     padding: 14px 8px 10px 16px;
-    border-bottom: 1px solid var(--g-line);
+    border-bottom: 1px solid var(--g-head-rule);
 }
 
 .g-panel-title {
@@ -1125,9 +1284,9 @@ body.navigating .app-chrome {
 }
 
 .g-btn--ghost {
-    background: transparent;
+    background: var(--g-tint);
     color: var(--g-blue);
-    border-color: var(--g-line);
+    border-color: var(--g-tint-line);
 }
 
 .g-btn--ghost:hover:not(:disabled) {
@@ -1161,7 +1320,7 @@ body.navigating .app-chrome {
     height: 64px;
     padding: 0;
     border: 2px solid var(--g-surface);
-    border-radius: 8px;
+    border-radius: var(--g-radius);
     overflow: hidden;
     box-shadow: var(--g-shadow);
     cursor: pointer;
@@ -1249,7 +1408,7 @@ body.navigating .app-chrome {
     width: 76px;
     padding: 8px 4px;
     border: 1px solid var(--g-line);
-    border-radius: 8px;
+    border-radius: var(--g-radius-sm);
     background: transparent;
     color: var(--g-text);
     font-size: 12px;
@@ -1386,14 +1545,14 @@ body.navigating .app-chrome {
     padding: 8px 16px 12px;
     font-size: 11px;
     color: var(--g-text-dim);
-    border-top: 1px solid var(--g-line);
+    border-top: 1px solid var(--g-head-rule);
 }
 
 /* --- Mapbox's own controls, restyled to match ------------------------------ */
 
 .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
     background: var(--g-surface);
-    border-radius: 8px;
+    border-radius: var(--g-radius-sm);
     box-shadow: var(--g-shadow-sm);
 }
 
@@ -1451,6 +1610,181 @@ body.navigating .app-chrome {
 body.navigating .mapboxgl-ctrl-scale,
 body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     display: none;
+}
+
+/* ===========================================================================
+   The Apple skin: the differences that are not values
+   ===========================================================================
+   Everything a token could carry is already carried by one. What is left is the
+   handful of places where the two looks disagree about the *shape* of a control
+   rather than its colour, and each of these is a single idea:
+
+     - the rail is a floating stack of glyphs, not an edge-to-edge bar
+     - a card titles itself in the centre, in bold, with no rule under it
+     - the layers switcher is a glyph, not a picture of a map
+     - the turn-by-turn sign is a card like every other card
+
+   Scoped on the attribute so they simply do not exist under the classic look —
+   no rule below has to be undone by anything above it.
+   =========================================================================== */
+
+/* Apple has no left rail; the nearest thing in their own Maps is the floating
+   control stack in the top-right corner, so that is what this becomes. It keeps
+   the rail's reserved width rather than reclaiming it, because the column, the
+   layers switcher and the attribution all measure from --g-rail-w and the point
+   here is a restyle, not a relayout. */
+[data-skin="apple"] .g-rail {
+    top: var(--g-gap);
+    bottom: auto;
+    left: var(--g-gap);
+    width: 44px;
+    padding: 4px;
+    gap: 2px;
+    border-right: 0;
+    border-radius: var(--g-radius);
+    background: var(--g-card-bg);
+    -webkit-backdrop-filter: var(--g-card-filter);
+    backdrop-filter: var(--g-card-filter);
+    box-shadow: var(--g-shadow);
+}
+
+/* Icon-only, like the stack it is modelled on. The captions were the label for
+   a control whose meaning changes — Auto/Light/Dark, Mapbox/Google, Apple/
+   Classic — so they are hidden rather than removed: every one of those controls
+   also writes the same words into its button's aria-label, and a screen reader
+   still gets them. */
+[data-skin="apple"] .g-rail-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+}
+
+[data-skin="apple"] .g-rail-text {
+    display: none;
+}
+
+[data-skin="apple"] .g-rail-icon {
+    width: 20px;
+    height: 20px;
+}
+
+/* Apple centres a place card's name and sets it large and bold, with the
+   category underneath in grey — see the Seely Park card. The close button
+   leaves the flow to allow it, since a centred title cannot share a row with
+   something only one side has. */
+[data-skin="apple"] .g-panel-head {
+    position: relative;
+    justify-content: center;
+    text-align: center;
+    padding: 16px 44px 12px;
+}
+
+[data-skin="apple"] .g-panel-title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+[data-skin="apple"] .g-panel-head .g-icon-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+}
+
+/* Apple's dismiss control is a filled translucent disc, not a bare glyph. */
+[data-skin="apple"] .g-icon-btn {
+    background: var(--g-hover);
+}
+
+[data-skin="apple"] .g-icon-btn:hover {
+    background: var(--g-surface-2);
+}
+
+/* Chips are the one floating control that is not a .g-card, so it needs the
+   material said again rather than inherited. */
+[data-skin="apple"] .g-chip,
+[data-skin="apple"] .g-chip-arrow {
+    background: var(--g-card-bg);
+    -webkit-backdrop-filter: var(--g-card-filter);
+    backdrop-filter: var(--g-card-filter);
+}
+
+/* ...and therefore its own hover, since the classic one resolves to an opaque
+   colour that would cancel the material on the way past. */
+[data-skin="apple"] .g-chip:hover:not(:disabled):not([aria-pressed="true"]) {
+    background: color-mix(in srgb, var(--g-blue) 12%, var(--g-card-bg));
+}
+
+/* Bigger and heavier: Apple's actions are 40px capsules with semibold labels,
+   which is what lets the primary one carry a glyph and a word at this size. */
+[data-skin="apple"] .g-btn {
+    height: 40px;
+    font-weight: 600;
+}
+
+/* A 64px picture of some imagery is a Google control. Apple puts the same
+   setting behind one glyph in the stack, so the thumbnail goes and the caption
+   — a bare text node, hence the font-size rather than a display — stops
+   printing the word under it. */
+[data-skin="apple"] .g-layers-btn {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    background: var(--g-card-bg);
+    -webkit-backdrop-filter: var(--g-card-filter);
+    backdrop-filter: var(--g-card-filter);
+    color: var(--g-text);
+}
+
+[data-skin="apple"] .g-layers-thumb {
+    display: none;
+}
+
+[data-skin="apple"] .g-layers-caption {
+    position: absolute;
+    inset: 0;
+    padding: 0;
+    font-size: 0;
+    color: inherit;
+    background: transparent;
+}
+
+[data-skin="apple"] .g-layers-caption .g-icon {
+    width: 22px;
+    height: 22px;
+}
+
+/* The turn-by-turn sign is a homage to a drifting grid menu, which is a
+   different design language again — under Apple it is simply a card. The grid
+   layer is switched off rather than recoloured: it is the one decoration here
+   with no counterpart on the other side. */
+[data-skin="apple"] .nav-sign {
+    border-radius: var(--g-radius);
+    color: var(--g-text);
+    text-shadow: none;
+    background-color: var(--g-card-bg);
+    -webkit-backdrop-filter: var(--g-card-filter);
+    backdrop-filter: var(--g-card-filter);
+    box-shadow: var(--g-shadow);
+}
+
+[data-skin="apple"] .nav-sign::before {
+    display: none;
+}
+
+[data-skin="apple"] .nav-sign-dim {
+    color: var(--g-text-dim);
+}
+
+[data-skin="apple"] .nav-end-btn {
+    background-color: var(--g-tint);
+    color: var(--g-blue);
+    border-radius: 9999px;
+    font-weight: 600;
+}
+
+[data-skin="apple"] .nav-end-btn:hover {
+    background-color: color-mix(in srgb, var(--g-blue) 26%, transparent);
 }
 
 /* --- narrow screens -------------------------------------------------------- */
