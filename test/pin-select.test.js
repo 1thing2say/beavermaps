@@ -15,11 +15,12 @@ import {
 } from '../src/pin-select.js';
 import {
   PIN_BASE_W, PIN_BOX, PIN_RING, PIN_ASPECT, LIFT_RING, LIFT_ASPECT, LIFT_DOT, LIFT_HEAD,
-  AMENITY_KINDS, pinColour, glyphInk, pinInk,
+  AMENITY_KINDS, pinColour, glyphInk, pinInk, restingSvg, liftedSvg,
+  FILL_TOP, FILL_BOTTOM,
 } from '../src/map-images.js';
 import { KIND_NAMES } from '../src/building-popup.js';
 import { CATEGORIES } from '../src/categories.js';
-import { deltaE, contrast } from './helpers.js';
+import { deltaE, contrast, relLuminance } from './helpers.js';
 
 /** The interpolation Mapbox will run, done by hand from the expression itself. */
 function evaluate(expr, zoom) {
@@ -156,4 +157,32 @@ test('every pictogram is legible on the disc it sits in', () => {
     assert.ok(contrast(pinInk(kind, 'light'), '#ffffff') >= 4.5, `${kind}: light label`);
     assert.ok(contrast(pinInk(kind, 'dark'), '#212121') >= 4.5, `${kind}: dark label`);
   }
+});
+
+/** The two stop colours out of an SVG's one linearGradient. */
+function gradientStops(svg) {
+  const stops = [...svg.matchAll(/<stop offset="([01])" stop-color="(#[0-9a-f]{6})"/g)];
+  assert.equal(stops.length, 2, 'a marker should carry exactly one two-stop gradient');
+  return stops.map((m) => m[2]);
+}
+
+test('a marker does not change colour when it is picked up', () => {
+  // Measuring Apple's two states turned up that they share one gradient: their
+  // lifted head runs rgb(70,205,86) to rgb(28,164,60) and the resting disc
+  // beside it rgb(76,203,86) to rgb(18,160,51), which is the same pair within a
+  // couple of levels. Ours used to have a gradient on the lifted state only, so
+  // selecting a pin visibly flattened-to-shaded as well as growing.
+  //
+  // The two SVGs are built by different functions, so nothing but this notices
+  // if one of them is later "simplified" back to a flat fill.
+  for (const kind of AMENITY_KINDS) {
+    const resting = gradientStops(restingSvg(kind));
+    const lifted = gradientStops(liftedSvg(kind));
+    assert.deepEqual(resting, lifted, `${kind} is shaded differently at rest`);
+    // ...and the gradient is a real one, lighter at the top, in every hue.
+    const [top, bottom] = resting.map(relLuminance);
+    assert.ok(top > bottom, `${kind} is darker at the top`);
+    assert.ok(top / bottom > 1.15, `${kind}'s gradient is too faint to see`);
+  }
+  assert.ok(FILL_TOP > 1 && FILL_BOTTOM < 1, 'the gradient no longer straddles the flat colour');
 });

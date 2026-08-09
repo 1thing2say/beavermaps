@@ -31,13 +31,16 @@
 // drawn by eye. Their marker is not one shape at two sizes — selecting a place
 // changes what it is:
 //
-//   at rest    a flat CIRCLE, category-coloured, with a white ring a good
-//              eighth of its width, centred ON the place. No tail: nothing is
-//              pointing, because the disc is already sitting on the spot.
+//   at rest    a CIRCLE, category-coloured, with a white ring a good eighth of
+//              its width, centred ON the place. No tail: nothing is pointing,
+//              because the disc is already sitting on the spot.
 //   selected   a teardrop that RISES off the ground — round head, a short nub
-//              rather than a tail, a vertical gradient in the fill — leaving a
-//              separate little dot behind on the place itself. That dot is what
-//              keeps the exact position while the head floats above it.
+//              rather than a tail — leaving a separate little dot behind on the
+//              place itself. That dot is what keeps the exact position while
+//              the head floats above it.
+//
+// Both fills carry the same vertical gradient; see FILL_TOP below, where the
+// measurement that establishes they are the same one is written down.
 //
 // The numbers below are read off the capture at its own scale and divided
 // through, so they are ratios rather than pixels:
@@ -236,6 +239,29 @@ const LIFT_PATH = [
 // a centred stroke, so half of its 3.05 eats into the fill and the usable radius
 // is 9.95, not 11.475. Apple's own glyph fills a little over half the disc.
 const GLYPH_SCALE = 0.66;
+
+/**
+ * The vertical gradient in a marker's fill, as multipliers on its flat colour.
+ *
+ * Measured down the LEFT of Apple's disc, clear of the glyph, in both states —
+ * and the finding is that there is only one gradient. The lifted head runs
+ * rgb(70,205,86) to rgb(28,164,60); the resting disc beside it, a third of the
+ * size, runs rgb(76,203,86) to rgb(18,160,51). Those are the same two ends
+ * within a couple of levels, so a marker does not gain a gradient when it is
+ * picked up — it had one all along.
+ *
+ * Applied as a shade of whatever category colour a kind uses rather than as two
+ * hard-coded greens, so the ten hues all get the same treatment.
+ */
+export const FILL_TOP = 1.18;
+export const FILL_BOTTOM = 0.88;
+
+/** The <defs> block both states share, keyed so two SVGs cannot collide. */
+const fillGradient = (base, id) =>
+  `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">`
+  + `<stop offset="0" stop-color="${shade(base, FILL_TOP)}"/>`
+  + `<stop offset="1" stop-color="${shade(base, FILL_BOTTOM)}"/>`
+  + '</linearGradient></defs>';
 const glyphFit = (scale) =>
   `translate(${PIN.cx} ${PIN.cy}) scale(${scale}) translate(-12 -12)`;
 
@@ -284,7 +310,7 @@ function glyphBody(kind, scale) {
  * that draws one anchors centre rather than bottom, and every label that goes
  * with one hangs beneath it rather than beside it.
  */
-function svgFor(kind) {
+export function restingSvg(kind) {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PIN_BOX.w} ${n(PIN_BOX.h)}" `
     + `width="${PIN.w * 2}" height="${n(PIN_BOX.h * 2)}">`
@@ -293,7 +319,8 @@ function svgFor(kind) {
     // every browser that loads the map.
     + `<ellipse cx="${PIN.cx}" cy="${n(PIN.cy + PIN.r + 0.9)}" rx="${n(PIN.r * 0.62)}" ry="1.1" `
     + 'fill="rgba(0,0,0,0.20)"/>'
-    + `<circle cx="${PIN.cx}" cy="${PIN.cy}" r="${n(PIN.r)}" fill="${pinColour(kind)}" `
+    + fillGradient(pinColour(kind), `rg-${kind}`)
+    + `<circle cx="${PIN.cx}" cy="${PIN.cy}" r="${n(PIN.r)}" fill="url(#rg-${kind})" `
     + `stroke="#fff" stroke-width="${PIN.ring}"/>`
     + `<g transform="${glyphFit(GLYPH_SCALE)}">${glyphBody(kind, GLYPH_SCALE)}</g>`
     + '</svg>'
@@ -303,13 +330,7 @@ function svgFor(kind) {
 /**
  * The lifted marker: head, nub, and the dot it leaves behind.
  *
- * The gradient is Apple's and it is what stops a 42 px disc reading as a
- * sticker — sampled down the left of their head, the fill runs rgb(70,205,86)
- * at the top to rgb(28,164,60) at the bottom, which is the same hue about 18%
- * lighter and 12% darker than the flat colour. Reproduced as a multiply on
- * whatever category colour this kind uses rather than as two hard-coded greens.
- *
- * The dot is not decoration either. The head has floated up off the ground, so
+ * The dot is not decoration. The head has floated up off the ground, so
  * without it the marker would be claiming a spot half its own height above the
  * thing it names — the dot is where the place actually is, and it is the only
  * part of the drawing that does not move during the animation.
@@ -332,10 +353,7 @@ function liftedShape(base, id, inner, { dot = true } = {}) {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PIN.w} ${n(boxH)}" `
     + 'width="100%" height="100%" aria-hidden="true">'
-    + `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">`
-    + `<stop offset="0" stop-color="${shade(base, 1.18)}"/>`
-    + `<stop offset="1" stop-color="${shade(base, 0.88)}"/>`
-    + '</linearGradient></defs>'
+    + fillGradient(base, id)
     + `<path d="${LIFT_PATH}" fill="url(#${id})" stroke="#fff" `
     + `stroke-width="${LIFT.ring}" stroke-linejoin="round"/>`
     + inner
@@ -496,6 +514,6 @@ export function loadAmenityIcons(map) {
       resolve();
     };
     image.onerror = () => resolve();
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgFor(kind))}`;
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(restingSvg(kind))}`;
   })));
 }
