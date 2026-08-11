@@ -21,7 +21,6 @@ import {
 import { maneuverIcon } from './nav-icons.js';
 import {
   loadAmenityIcons, routePin, liftedOffset, ROUTE_PIN_W, PIN_BASE_W, AMENITY_KINDS, pinInk,
-  hatchSvg, loadSvgImage,
 } from './map-images.js';
 import { buildingCard, pinCard } from './building-popup.js';
 import {
@@ -672,16 +671,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // my campus prints both in the same grey as everything else, which makes the one
   // place on this map you cannot go look exactly like the places you can.
   //
-  // So it is taken out of the sheet layers and drawn again in red: a wash, a
-  // hatch over the wash, a hard outline, and the word itself. Four passes
-  // rather than a colour change, because "shut" is not a shade of a building —
-  // hatching is what says a shape is excluded rather than merely different, and
-  // it survives being seen at a glance and in greyscale.
+  // So it keeps the grey every other building has and gains a red wash and a
+  // hard red outline over it, with the word itself in red once you are close
+  // enough for the word to be worth reading.
+  //
+  // Three passes, and it was four: a diagonal hatch sat over the wash. It went
+  // because a texture on a map whose every other shape is flat colour was the
+  // loudest thing on the campus, and it was shouting on behalf of one small
+  // block. It did not scale either — `fill-pattern` tiles in SCREEN space, so
+  // zooming out packed the stripes tighter until they were a solid red smear
+  // where a quiet tint belonged.
   // -------------------------------------------------------------------------
 
   const CLOSED_KIND = 'closed';
   const CLOSED_TEXT = 'Closed';
-  const CLOSED_HATCH = 'closed-hatch';
 
   /**
    * One red for the marks, two for the word.
@@ -739,7 +742,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function addClosedLayers() {
     if (!palette(currentProvider, currentBasemap, currentTheme, currentSkin).land) {
       // Over imagery the sheet is not drawn at all, so neither is this.
-      for (const id of ['campus-closed-line', 'campus-closed-hatch', 'campus-closed-fill']) {
+      for (const id of ['campus-closed-line', 'campus-closed-fill']) {
         if (map.getLayer(id)) map.removeLayer(id);
       }
       return;
@@ -749,20 +752,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (map.getLayer('campus-closed-fill')) return;
     if (!campusBasemap || !map.getSource('campus-sheet')) return;
 
-    // The pattern first, every time. Images do not survive setStyle and this
-    // runs on style.load, so a hatch registered at startup is already gone by
-    // the second call — and a `fill-pattern` naming an image that is not there
-    // draws nothing at all, silently.
-    loadSvgImage(map, CLOSED_HATCH, hatchSvg(CLOSED_RED))
-      .then(placeClosedLayers)
-      .catch((error) => console.error('closed hatch unavailable:', error));
-  }
-
-  function placeClosedLayers() {
-    // A style swap can land between the image resolving and this running.
-    if (map.getLayer('campus-closed-fill') || !map.getSource('campus-sheet')) return;
-
     const only = ['==', ['get', 'kind'], CLOSED_KIND];
+    // The wash is ground and sits with the ground: under the paths, and under
+    // the legend's outlines when they are up. The outline does not — see
+    // belowRoute, and note the two anchors are deliberately different.
     const anchor = map.getLayer('highlight-fill') ? 'highlight-fill' : belowNetwork();
 
     map.addLayer({
@@ -773,22 +766,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       filter: only,
       paint: {
         'fill-color': CLOSED_RED,
-        // Low enough that the hatch on top is what carries the message and the
-        // wash only tints the ground it crosses.
-        'fill-opacity': 0.14,
-        'fill-emissive-strength': 1,
-      },
-    }, anchor);
-
-    map.addLayer({
-      id: 'campus-closed-hatch',
-      type: 'fill',
-      source: 'campus-sheet',
-      slot: 'middle',
-      filter: only,
-      paint: {
-        'fill-pattern': CLOSED_HATCH,
-        'fill-opacity': 0.55,
+        // A wash over the building grey, not a colour of its own. There was a
+        // hatch on top of this and it is gone: on a map whose every other shape
+        // is flat colour, a texture was the loudest thing on the campus, and it
+        // was shouting on behalf of one small block. Wash and outline say the
+        // same thing quietly, and they scale — a hatch is a fixed pixel grid, so
+        // zooming out packed it into a solid red smear.
+        'fill-opacity': 0.1,
         'fill-emissive-strength': 1,
       },
     }, anchor);
@@ -802,12 +786,19 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       layout: { 'line-join': 'round' },
       paint: {
         'line-color': CLOSED_RED,
-        // Thicker than the sheet's 0.4: this is the one edge on the map that is
-        // a boundary rather than a drawn line.
-        'line-width': groundWidth(1.4),
+        // Barely over the sheet's own 0.4. It was 1.4 and reading as a warning
+        // band: this shape is the only red on an otherwise grey-and-mint
+        // campus, so it does not need weight to be found — being red is already
+        // the whole of the emphasis, and the width was spending it twice.
+        'line-width': groundWidth(0.6),
+        // Washed rather than solid, for the same reason. Held above the paths
+        // it crosses (see belowRoute) so the boundary still reads as continuous
+        // — that is what the layer is FOR — but at an opacity where it sits in
+        // the sheet rather than on top of it.
+        'line-opacity': 0.45,
         'line-emissive-strength': 1,
       },
-    }, anchor);
+    }, belowRoute());
   }
 
   // -------------------------------------------------------------------------
@@ -2270,6 +2261,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
      * have to stay upright — so they cannot share a layer, whatever else they
      * have in common.
      *
+     * Deliberately the quietest label on the map. The wash and the outline are
+     * what say the block is shut, and they say it at every zoom; the word only
+     * names what the colour already meant, so it is fine print rather than a
+     * headline. At the zoom the whole campus fits, a red shape reads instantly
+     * and a 12px word across it is just clutter over one small building.
+     *
      * `symbol-placement: point` with map-aligned rotation, not `line` placement
      * along the edge: the word belongs in the middle of the block saying what
      * the block is, not run along its boundary like a street name.
@@ -2277,26 +2274,31 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     map.addLayer({
       ...common,
       id: 'campus-labels-closed',
+      // Well past the 15 the other labels start at, and past the 16 the ambient
+      // pictograms wait for. By here the block is a large shape on screen with
+      // room inside it for a word, which is the only condition under which this
+      // one is worth drawing.
+      minzoom: 17.5,
       filter: ['==', ['get', 'text'], CLOSED_TEXT],
       layout: {
         'text-field': ['get', 'text'],
-        'text-font': mapFont().medium,
-        'text-size': labelSize(1),
+        // Regular, not the medium the building names use, and smaller than all
+        // of them: this is an annotation on a shape, not the name of a place.
+        'text-font': mapFont().regular,
+        'text-size': labelSize(0.8),
         'text-letter-spacing': 0.06,
         'text-rotation-alignment': 'map',
         'text-rotate': closedBearing(campusBasemap),
-        // Nothing gets to push this one out of the way. It is the only label on
-        // the map that is a warning rather than a name, and a collision solver
-        // that dropped it would leave a red hatched shape with nothing saying
-        // why. Everything else still avoids IT, because they are collidable.
-        'text-allow-overlap': true,
-        'text-ignore-placement': true,
+        // Collidable like everything else. It was overlap-allowed on the
+        // grounds that a warning must never be dropped, which was the wrong
+        // reading: the red is the warning and it cannot be dropped, so the word
+        // is free to give way to a name that has nowhere else to go.
       },
       paint: {
         'text-color': CLOSED_INK[currentTheme === 'dark' ? 'dark' : 'light'],
         'text-halo-color': colors.labelHalo,
-        'text-halo-width': 1.4,
-        'text-halo-blur': 0.4,
+        'text-halo-width': 1.1,
+        'text-halo-blur': 0.5,
         'text-emissive-strength': 1,
       },
     });
@@ -2470,6 +2472,25 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return undefined;
   }
 
+  /**
+   * The layer to insert below to sit OVER the paths but still under the route.
+   *
+   * The closed block's outline is the one campus edge that wants this. my campus's
+   * walkways run straight across the shape and, drawn under them, the boundary
+   * came apart into four red segments with white paths laid over the gaps —
+   * which reads as a shape you can walk through, the opposite of what the red
+   * is there to say.
+   *
+   * Under the route regardless, for the reason the highlight is: nothing on
+   * this map gets to bury the directions somebody is following.
+   */
+  function belowRoute() {
+    for (const id of ['route-legs', 'route-casing', 'route-line']) {
+      if (map.getLayer(id)) return id;
+    }
+    return undefined;
+  }
+
   function addNetworkLayers() {
     const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
 
@@ -2500,8 +2521,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     addCampusMask();
     addBasemapLayers();
-    // Straight after the sheet, because it replaces one of the sheet's shapes.
-    addClosedLayers();
     // Above the sheet it annotates, below the network added further down.
     addHighlightLayers();
 
@@ -2610,6 +2629,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     } else {
       map.setPaintProperty('route-line', 'line-color', colors.route);
     }
+
+    // After the route layers rather than after the sheet it belongs to, and
+    // only because of where its OUTLINE goes: belowRoute has to have a route
+    // layer to name, and none of them exist until a few lines above this. The
+    // wash still lands with the ground — the two halves carry their own
+    // anchors, so building them late costs nothing.
+    addClosedLayers();
 
     // Last, so the symbols and labels sit above the route rather than under it.
     addDirectoryLayers();

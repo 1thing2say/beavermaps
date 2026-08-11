@@ -538,50 +538,6 @@ export function routePin(colour, { title = '' } = {}) {
  * marker, and taking the whole overlay down for it would be a worse trade.
  * Images do not survive setStyle, hence hasImage rather than a load-once flag.
  */
-/**
- * A tileable 45-degree hatch, for the one area on this map that is fenced off.
- *
- * Three segments rather than one, and that is what makes it seam-free: a single
- * corner-to-corner stroke leaves the two half-diagonals at the opposite corners
- * unpainted, so the tiles meet in a visible dotted line. The short pair at
- * (-1,1)-(1,-1) and (N-1,N+1)-(N+1,N-1) fill exactly those, and every stroke
- * runs past the edge so the joins land outside the tile instead of on it.
- *
- * Drawn on transparent ground: the wash underneath is its own fill layer, so
- * the tint can be a real colour at a real opacity rather than whatever survives
- * being baked into a pattern bitmap.
- */
-export function hatchSvg(colour, { size = 16, width = 2 } = {}) {
-  const line = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"`
-    + ` viewBox="0 0 ${size} ${size}">`
-    + `<g stroke="${colour}" stroke-width="${width}" stroke-linecap="square">`
-    + line(-1, 1, 1, -1)
-    + line(-1, size + 1, size + 1, -1)
-    + line(size - 1, size + 1, size + 1, size - 1)
-    + '</g></svg>';
-}
-
-/**
- * Register one SVG string as a map image under `name`.
- *
- * Resolves rather than rejects on a decode failure, for the same reason
- * loadAmenityIcons does: a missing pattern costs a hatch, and taking the layer
- * that wanted it off the map would cost the whole annotation.
- */
-export function loadSvgImage(map, name, svg, { pixelRatio = 2, width, height } = {}) {
-  return new Promise((resolve) => {
-    if (map.hasImage(name)) { resolve(); return; }
-    const image = new Image(width, height);
-    image.onload = () => {
-      if (!map.hasImage(name)) map.addImage(name, image, { pixelRatio });
-      resolve();
-    };
-    image.onerror = () => resolve();
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  });
-}
-
 export function loadAmenityIcons(map) {
   return Promise.all(AMENITY_KINDS.map((kind) => new Promise((resolve) => {
     if (map.hasImage(kind)) {
