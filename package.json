@@ -13,8 +13,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server/index.js",
-    "test": "node --test test/",
-    "test:watch": "node --test --watch test/"
+    "test": "node --test test/[!.]*.test.js",
+    "test:watch": "node --test --watch test/[!.]*.test.js"
   },
   "repository": {
     "type": "git",
