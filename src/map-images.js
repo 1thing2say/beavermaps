@@ -132,6 +132,27 @@ const COLOURS = {
   food: '#e8710a',
   homebase: '#b56aff',
 
+  // The one place the parking family is deliberately split.
+  //
+  // Hovering Parking answers with two sets at once — the named lots, and the
+  // ten machines you buy the permit from — and in Google's single blue those
+  // are one undifferentiated field of pins. So the machines get their own disc
+  // for that view: the same pictogram, a lighter azure.
+  //
+  // Lightness rather than a new hue, and that is the whole argument. A machine
+  // is not a different errand from the lot it stands in, so a genuinely foreign
+  // colour would say something untrue; the wheel is also full, since ten hues
+  // already sit dE 31 apart at the tightest and every gap wide enough for an
+  // eleventh is a neon nobody would ship. A big step down the same hue reads as
+  // "same errand, different object", which is exactly the relationship.
+  //
+  // dE 39.7 from #0b57d0 at its nearest, so it clears the separation floor with
+  // room, and 3.46:1 against a white glyph, so it keeps the white one every
+  // other disc in this family has. The ambient `parking_permit` pictogram is
+  // untouched — on the map at rest, and under its own Permit machines row,
+  // a machine is still Google blue.
+  parking_meter: '#1490de',
+
   // Building POI discs, one per class in src/poi.js. These are the ones that
   // sit on the map all the time, beside my campus's printed building names, and the
   // colour is the point: Google's map is scannable because its categories are
@@ -148,6 +169,18 @@ const COLOURS = {
 
 const FALLBACK = '#0b57d0';
 
+/**
+ * The permit machine's P, drawn once and used by both discs that are one.
+ *
+ * `parking_permit` is the machine as my campus's sheet prints it; `parking_meter` is
+ * the same machine in the lighter azure the Parking row needs to tell it apart
+ * from the lots around it. Same object, so the same pictogram — the colour is
+ * the only thing the two views disagree about, and a second hand-drawn P would
+ * be a way for them to start disagreeing about more.
+ */
+const PERMIT_MACHINE =
+  '<path fill-rule="evenodd" d="M9 5.4h4.3a4.3 4.3 0 0 1 0 8.6h-1.8v4.6H9zm2.5 2.5v3.6h1.8a1.8 1.8 0 0 0 0-3.6z"/>';
+
 // Glyphs on a 24x24 grid, centred. Filled unless the entry says otherwise —
 // the two vehicles are line drawings, which stay legible when a filled version
 // would just be a blob at this size.
@@ -156,8 +189,8 @@ const GLYPHS = {
   health_centre: '<path d="M10.4 5h3.2v3.9h3.9v3.2h-3.9V16h-3.2v-3.9H6.5V8.9h3.9z"/>',
   emergency_phone:
     '<path d="M9.1 5.2a1.2 1.2 0 0 1 1.7.4l1.2 2a1.2 1.2 0 0 1-.3 1.6l-1.2.9a9.2 9.2 0 0 0 3.9 3.9l.9-1.2a1.2 1.2 0 0 1 1.6-.3l2 1.2a1.2 1.2 0 0 1 .4 1.7l-.9 1.3a2 2 0 0 1-2.2.8C11.7 16.3 7.7 12.3 6.4 7.3a2 2 0 0 1 .8-2.2z"/>',
-  parking_permit:
-    '<path fill-rule="evenodd" d="M9 5.4h4.3a4.3 4.3 0 0 1 0 8.6h-1.8v4.6H9zm2.5 2.5v3.6h1.8a1.8 1.8 0 0 0 0-3.6z"/>',
+  parking_permit: PERMIT_MACHINE,
+  parking_meter: PERMIT_MACHINE,
   restroom: '<path d="M12 7.4l4.8 8.6H7.2z"/>',
   drop_off:
     '<path d="M5.6 13.1 7 9.5a2 2 0 0 1 1.9-1.3h6.2A2 2 0 0 1 17 9.5l1.4 3.6v4.6h-2.2v-1.4H7.8v1.4H5.6zm2.6-.6h7.6l-.9-2.3H9.1z"/>',

@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { load, CAMPUS, ringAreaM2, pointInRing } from './helpers.js';
 
-import { AMENITY_KINDS } from '../src/map-images.js';
+import { AMENITY_KINDS, pinColour } from '../src/map-images.js';
 import { ICON_NAMES } from '../src/g-icons.js';
 import { CATEGORIES, collect } from '../src/categories.js';
 import {
@@ -188,6 +188,42 @@ test('every category resolves against the data and the icon sets', () => {
       // "drink_vending" in 12px type under a disc on a public map.
       assert.doesNotMatch(hit.name, /^[a-z0-9]+(_[a-z0-9]+)+$/,
         `${category.id}: "${hit.name}" is a raw kind, so amenities.json is missing a label`);
+    }
+  }
+});
+
+test('a row that answers with two sets draws them in two colours', () => {
+  const amenities = load('amenities');
+  const places = load('places');
+
+  // Only parking has a `kindIcons` override today. Written over whatever
+  // carries one rather than over that id, because the rule is what matters: a
+  // row that draws two sets at once has to be able to tell them apart, and an
+  // override that silently resolved to the colour it was overriding would look
+  // exactly like no override at all.
+  const splits = CATEGORIES.filter((category) => category.kindIcons);
+  assert.ok(splits.length > 0, 'no category uses kindIcons — has the parking row lost its machines?');
+
+  for (const category of splits) {
+    const hits = collect(category, { amenities, places });
+
+    for (const [kind, disc] of Object.entries(category.kindIcons)) {
+      assert.ok(AMENITY_KINDS.includes(disc),
+        `${category.id}: map-images.js has no disc "${disc}"`);
+      assert.ok(hits.some((hit) => hit.icon === disc),
+        `${category.id}: nothing collected draws "${disc}", so the override is dead`);
+      assert.notEqual(pinColour(disc), pinColour(kind),
+        `${category.id}: "${disc}" is the same colour as the "${kind}" it overrides`);
+    }
+
+    // And the override has to differ from what the row's OWN pins are drawn in,
+    // which is the collision the whole thing exists to avoid: the lots come
+    // from places.json wearing category.icon, the machines from amenities.json
+    // wearing the override, and in one blue those were twenty identical discs.
+    if (!category.icon) continue;
+    for (const disc of Object.values(category.kindIcons)) {
+      assert.notEqual(pinColour(disc), pinColour(category.icon),
+        `${category.id}: "${disc}" and "${category.icon}" arrive together in one colour`);
     }
   }
 });

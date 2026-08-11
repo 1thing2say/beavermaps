@@ -39,14 +39,27 @@ export const CATEGORIES = [
     glyph: 'parking',
     icon: 'parking',
     // Their lot names all end in "Parking Lot", "Parking Garage" or name the
-    // metered lot; the permit machines are a separate legend entry below.
+    // metered lot. These are the pins that carry a real name — "Myrtle Parking
+    // Lot East" — which is what somebody asking about parking is looking for.
     match: (name) => /parking (lot|garage)|metered parking/i.test(name),
-    // The only row on this key that is about ground rather than about objects,
-    // so it is the only one that names a class of the printed sheet: hovering it
-    // outlines all 22 car parks, not the nine points my campus lists as destinations.
-    // See src/highlight.js.
+    // ...and the ten machines you buy the permit from, which is the other half
+    // of the same question: knowing which lot to use is no help without knowing
+    // where to pay. They keep their own row on the key as well — the printed
+    // legend lists them separately and this is not the place to overrule it —
+    // but a row about parking that omitted them was answering half.
+    //
+    // Drawn in `parking_meter` rather than in their own `parking_permit` disc,
+    // which is the same pictogram in a lighter azure. Both sets arrive together
+    // here and Google's single blue made twenty-odd pins one undifferentiated
+    // field; on the map at rest, and under Permit machines, a machine is still
+    // blue. See the note beside the colour in src/map-images.js.
+    kinds: ['parking_permit'],
+    kindIcons: { parking_permit: 'parking_meter' },
+    // The one row that also names a class of the printed sheet, so PRESSING it
+    // outlines all 22 car parks under the pins. Hovering does not — a hover
+    // previews objects now, on every row including this one. See previewLegendRow.
     zones: 'parking',
-    legend: 'Parking lots and garage',
+    legend: 'Parking lots, garage and permit machines',
   },
   {
     id: 'food',
@@ -138,6 +151,13 @@ export const CATEGORY_ICONS = [...new Set(CATEGORIES.map((c) => c.icon).filter(B
  * `icon` is the map image the pin is drawn with: a legend kind draws its own
  * pictogram, a directory row draws the category's.
  *
+ * `category.kindIcons` overrides the first of those for one kind. Only parking
+ * uses it, and only because it draws two sets at once: its lots and its permit
+ * machines would otherwise arrive in the same blue. A per-category override
+ * rather than a second colour in amenities.json, since the machine is only a
+ * different colour in THIS row's answer — everywhere else it is what the
+ * printed sheet says it is.
+ *
  * Deliberately not deduplicated by name: my campus lists "Food Vending Machine" five
  * times because there are five of them, and a list that collapses those to one
  * row answers the wrong question. Search dedupes; a category list must not.
@@ -153,7 +173,7 @@ export function collect(category, { amenities, places }) {
         name: f.properties.label ?? f.properties.kind,
         sub: null,
         coords: f.geometry.coordinates,
-        icon: f.properties.kind,
+        icon: category.kindIcons?.[f.properties.kind] ?? f.properties.kind,
       });
     }
   }

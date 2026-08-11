@@ -80,6 +80,10 @@ export const KIND_NAMES = {
   health_centre: 'Health & Wellness Center',
   emergency_phone: 'Emergency telephone',
   parking_permit: 'Daily parking permit machine',
+  // The same machine, in the disc the Parking row draws it with. It is tappable
+  // there like any other pin, so it needs the card title its blue twin has —
+  // and the same one, because a lighter disc does not make it a different thing.
+  parking_meter: 'Daily parking permit machine',
   restroom: 'All-gender restroom',
   bike_rack: 'Bike rack',
   motorcycle_parking: 'Motorcycle parking',

@@ -671,13 +671,35 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let legendReady = false;
 
   /**
-   * A hovered row wins over the selected one, and gives it back on the way out.
+   * Which row the outline belongs to — and a hover is no longer one of them.
    *
-   * Two variables rather than one because a preview has to be undoable: hover
-   * "Defibrillator" while "Parking" is selected and the car parks come back the
-   * moment the pointer leaves, without the selection ever having been touched.
+   * Hovering used to outline whatever it pointed at. It does not any more: a
+   * hover now previews the row's PINS, which arrive over a cleared campus (see
+   * previewLegendRow). Tinting ground purple underneath them said two things
+   * about one question, and the outline was the half nobody had asked for —
+   * "where are the defibrillators" is answered by six discs, not by shading the
+   * buildings they hang in.
+   *
+   * Parking is not the exception it looks like it should be. It is the one row
+   * that names a class of the printed sheet, so it is the one row whose ground
+   * IS an answer — but its pins say the same thing better, because a lot you
+   * can read the name of beats a lot you can only see the shape of, and the
+   * permit machines have no shape on the sheet at all. Its outline survives on
+   * the PRESS, where there is room for context under a committed answer.
+   *
+   * So a hover takes the outline off rather than replacing it, which is what
+   * keeps the two answers off the map at the same time. Still undoable, which
+   * is why there were two variables to begin with: a hover never writes
+   * stickyRow, so leaving the row hands the outline straight back to the
+   * selection without the selection ever having been touched.
+   *
+   * Pointing at the row that is ALREADY selected is not a preview, though —
+   * there is nothing for it to preview that is not on screen — so that case
+   * keeps the outline rather than suppressing it. Without the second half of
+   * this test, pressing a row would hide its own outline until the pointer
+   * happened to leave, which reads as the press having half-failed.
    */
-  const shownRow = () => hoverRow ?? stickyRow;
+  const shownRow = () => (hoverRow && hoverRow !== stickyRow ? null : stickyRow);
 
   function paintHighlight() {
     const shown = shownRow();
@@ -916,6 +938,30 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let categoryHits = [];
 
   /**
+   * The hovered row's category, which the map draws in place of the selection
+   * for exactly as long as the pointer is on the row.
+   *
+   * Separate from activeCategory for the same reason hoverRow is separate from
+   * stickyRow: a preview has to be undoable. Hovering never writes the
+   * selection, so leaving the row puts back the pressed category's pins — or
+   * the whole campus, if nothing was pressed.
+   */
+  let hoverCategory = null;
+  let hoverHits = [];
+
+  /**
+   * What the pin layer is actually drawing, which is the preview if there is
+   * one and the selection otherwise.
+   *
+   * Every read that is about WHAT IS ON THE MAP goes through these; the reads
+   * that are about what the user has committed to — the results list, the
+   * camera, which row shows as pressed — keep reading activeCategory directly.
+   * That split is the whole difference between a preview and a selection.
+   */
+  const shownCategory = () => hoverCategory ?? activeCategory;
+  const shownHits = () => (hoverCategory ? hoverHits : categoryHits);
+
+  /**
    * Pins for `match` categories.
    *
    * Its own source rather than appending to amenities.json, because these are
@@ -1003,7 +1049,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * once small underneath its own animation.
    */
   function paintCategory() {
-    const active = Boolean(activeCategory);
+    const active = Boolean(shownCategory());
 
     // The ambient pictograms go away entirely while a category is up, and the
     // category draws every one of its own pins instead. Two reasons that beats
@@ -1022,7 +1068,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (!source) return;
     source.setData(active ? {
       type: 'FeatureCollection',
-      features: categoryHits.map((hit) => ({
+      features: shownHits().map((hit) => ({
         type: 'Feature',
         properties: { icon: hit.icon, name: hit.name ?? '' },
         geometry: { type: 'Point', coordinates: hit.coords },
@@ -1380,7 +1426,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * names is harder to read, not clearer.
    */
   const labelFilter = (kind) => {
-    if (activeCategory && POI_LABEL_KINDS.has(kind)) return ['boolean', false];
+    if (shownCategory() && POI_LABEL_KINDS.has(kind)) return ['boolean', false];
     const mine = ['==', ['get', 'kind'], kind];
     const hidden = hiddenPin(`campus-labels-${kind}`);
     return hidden ? ['all', mine, hidden] : mine;
@@ -1583,6 +1629,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     map.fitBounds(bounds, { padding: pad, maxZoom, duration: 700 });
   }
 
+  /**
+   * A category's pins, nearest first.
+   *
+   * Shared by the press and the hover preview, so the two cannot disagree about
+   * what a row means. The preview IS the answer, arriving early.
+   */
+  function hitsFor(category) {
+    return collect(category, { amenities: campusAmenities, places: campusPlaces })
+      .map((hit) => ({ ...hit, feet: feetFrom(hit.coords) }))
+      .sort((a, b) => a.feet - b.feet);
+  }
+
   function selectCategory(id) {
     const category = CATEGORY_BY_ID.get(id);
     if (!category) return;
@@ -1591,7 +1649,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (activeCategory === id) { clearCategory(); return; }
 
     activeCategory = id;
-    const found = collect(category, { amenities: campusAmenities, places: campusPlaces });
+
+    // The hover that led here is being promoted to a selection, so the preview
+    // state goes now. Nothing changes on screen — these are the same pins, and
+    // shownCategory falls straight through to activeCategory — but leaving it
+    // set would arm the mouseleave that is about to happen to tear down the
+    // selection it had just become.
+    hoverCategory = null;
+    hoverHits = [];
 
     // EVERY pin gets its name, including the six that all read "All-gender
     // restroom". This used to print a name only where it identified one pin
@@ -1610,9 +1675,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // layer: names that cannot fit are dropped and their discs stay. That is the
     // right place for the decision, since it depends on the zoom rather than on
     // the wording.
-    categoryHits = found
-      .map((hit) => ({ ...hit, feet: feetFrom(hit.coords) }))
-      .sort((a, b) => a.feet - b.feet);
+    categoryHits = hitsFor(category);
 
     // On a phone the legend is a full-width sheet over the map, so leaving it
     // up would mean answering "where are the restrooms" with a card covering
@@ -2981,15 +3044,55 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     renderLegend();
   }
 
+  /**
+   * Point at a row and its answer arrives on the map.
+   *
+   * This used to outline ground in purple. It now does what pressing does, less
+   * the parts that commit: the campus empties, the row's pins arrive on the
+   * lift's spring with their names, and the whole thing is undone the moment the
+   * pointer leaves. No results list, no camera move — a preview that flew the
+   * map somewhere would make running an eye down twelve rows unusable, and the
+   * pins land wherever they are, in view or not.
+   *
+   * Every row behaves this way, parking included. Its 22 outlined car parks were
+   * a real answer, but its pins are a better one — a lot you can read the name
+   * of beats a lot you can only see the shape of — and the permit machines that
+   * belong to the same question have no shape on the sheet to outline at all.
+   *
+   * The reversal is the reason this is cheap enough to fire on mouseenter:
+   * `choreography` cancels whatever is mid-flight and `fadeFrom` picks up the
+   * opacity where the cancelled run left it, so dragging the pointer down the
+   * column dissolves one set into the next instead of restarting twelve times.
+   */
   function previewLegendRow(id) {
     if (hoverRow === id) return;
     hoverRow = id;
+    // The outline goes with the pointer arriving, not with the pins landing:
+    // shownRow drops it for the whole time a hover is up. See shownRow.
     paintHighlight();
+
+    const category = id ? CATEGORY_BY_ID.get(id) : null;
+    if (hoverCategory === (category?.id ?? null)) return;
+
+    hoverCategory = category?.id ?? null;
+    hoverHits = category ? hitsFor(category) : [];
+
+    // Whichever direction this is: onto a row, off a row, or straight from one
+    // row to the next. `shownCategory` has already been updated, so the only
+    // question left is whether anything should be on the map when this settles.
+    if (shownCategory()) playCategorySwap();
+    else playCategoryClear();
   }
 
-  /** Both halves of the state, for the places the legend itself goes away. */
+  /** Every half of the state, for the places the legend itself goes away. */
   function clearLegendHighlight() {
-    hoverRow = null;
+    // Through previewLegendRow rather than by nulling hoverRow, because a hover
+    // now owns pins as well as the outline and the panel can close with the
+    // pointer still on a row — a closing legend that left a preview behind would
+    // strand a category on the map with nothing on screen naming it. Returns
+    // immediately when there was no hover, so this costs nothing in the common
+    // case and never plays a spurious animation.
+    previewLegendRow(null);
     if (activeCategory) clearCategory();
     else { stickyRow = null; paintHighlight(); }
   }
