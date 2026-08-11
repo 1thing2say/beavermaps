@@ -1,9 +1,19 @@
-// The card shown when a building is tapped.
+// The card shown when a building or a pin is tapped.
 //
-// Built as DOM rather than an HTML string because the two buttons need handlers
-// and because everything in src/directory.json is third-party text — my campus's own
+// Built as DOM rather than an HTML string because the buttons need handlers and
+// because everything in src/directory.json is third-party text — my campus's own
 // department names and descriptions — which has no business being interpolated
 // into markup.
+//
+// These used to be floating cards: each brought its own white background,
+// border and shadow, and Mapbox anchored it to the thing it described. They are
+// panel *contents* now, written into #place-panel in the left column, so the
+// surface belongs to the panel and everything here is set in the same `--g-`
+// tokens as the rest of the chrome. That is not tidying — a card that painted
+// `bg-white` inside a translucent Apple-skin panel would be an opaque rectangle
+// sitting in a blurred one, and its greys were hard-coded past both looks.
+
+import { icon } from './g-icons.js';
 
 const FEET_PER_METRE = 10.7639; // squared: m² -> ft²
 
@@ -17,20 +27,39 @@ function el(tag, className, text) {
   return node;
 }
 
+/**
+ * The head every card in this panel shares: title, whatever qualifies it, and
+ * the one control that closes the whole thing.
+ *
+ * The close button is the card's rather than the panel shell's because the shell
+ * is an empty div — one card wants a subtitle and two lines of facts under the
+ * heading, the other wants a single line, and a shell that owned the head would
+ * have to be told which.
+ */
+function head(title, onClose) {
+  const row = el('div', 'g-panel-head');
+  const text = el('div', 'g-place-head-text');
+  text.append(el('h2', 'g-panel-title', title));
+
+  const close = el('button', 'g-icon-btn');
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Close');
+  close.innerHTML = icon('close');
+  close.addEventListener('click', onClose);
+
+  row.append(text, close);
+  return { row, text };
+}
+
 /** The two buttons every card on this map ends with, and their wiring. */
 function actions(coords, name, { onStart, onEnd }) {
-  const row = el('div', 'flex gap-2 px-4 py-3 bg-gray-50 dark:bg-neutral-900/60 '
-    + 'border-t border-gray-100 dark:border-neutral-700');
+  const row = el('div', 'g-place-actions');
 
-  const start = el('button', 'flex-1 text-sm font-semibold py-2 rounded-md '
-    + 'bg-white dark:bg-neutral-800 text-gray-700 dark:text-gray-200 '
-    + 'border border-gray-300 dark:border-neutral-600 '
-    + 'hover:bg-gray-100 dark:hover:bg-neutral-700 transition-colors', 'Start here');
+  const start = el('button', 'g-btn g-btn--ghost', 'Start here');
   start.type = 'button';
   start.addEventListener('click', () => onStart(coords, name));
 
-  const go = el('button', 'flex-1 text-sm font-semibold py-2 rounded-md text-white '
-    + 'bg-emerald-600 hover:bg-emerald-500 transition-colors', 'Go here');
+  const go = el('button', 'g-btn g-btn--primary', 'Go here');
   go.type = 'button';
   go.addEventListener('click', () => onEnd(coords, name));
 
@@ -75,28 +104,15 @@ export const KIND_NAMES = {
  * @param {object} handlers   { onStart, onEnd, onClose }
  */
 export function pinCard({ coords, kind, name }, { onStart, onEnd, onClose }) {
-  const card = el('div', 'campus-card w-56 max-w-full rounded-lg overflow-hidden '
-    + 'bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 shadow-xl');
+  const card = el('div', 'g-place');
 
-  const head = el('div', 'flex items-start gap-2 px-4 pt-3 pb-2');
-  const text = el('div', 'flex-1 min-w-0');
   // The kind is the fallback title, not a subtitle under it: "Bike Rack /
   // bike rack" is the same word printed twice at two sizes.
-  text.append(el('div', 'font-bold text-base leading-tight text-gray-900 dark:text-gray-50',
-    name ?? KIND_NAMES[kind] ?? 'Marker'));
+  const { row, text } = head(name ?? KIND_NAMES[kind] ?? 'Marker', onClose);
   if (name && KIND_NAMES[kind] && KIND_NAMES[kind] !== name) {
-    text.append(el('div', 'text-xs text-gray-500 dark:text-gray-400 mt-0.5', KIND_NAMES[kind]));
+    text.append(el('p', 'g-panel-sub', KIND_NAMES[kind]));
   }
-  head.append(text);
-
-  const close = el('button', 'flex-none -mr-1 -mt-0.5 w-7 h-7 rounded-full leading-none '
-    + 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 '
-    + 'hover:bg-gray-100 dark:hover:bg-neutral-700 transition-colors', '×');
-  close.type = 'button';
-  close.setAttribute('aria-label', 'Close');
-  close.addEventListener('click', onClose);
-  head.append(close);
-  card.append(head);
+  card.append(row);
 
   card.append(actions(coords, name ?? KIND_NAMES[kind] ?? null, { onStart, onEnd }));
   return card;
@@ -105,49 +121,43 @@ export function pinCard({ coords, kind, name }, { onStart, onEnd, onClose }) {
 
 /**
  * @param {object} props        a feature from src/directory.json
- * @param {object} handlers     { onStart, onEnd } — given the entrance coords
+ * @param {object} handlers     { onStart, onEnd, onClose }
  */
-export function buildingCard(props, { onStart, onEnd }) {
+export function buildingCard(props, { onStart, onEnd, onClose }) {
   const {
     name, officialName, parts, area_m2: area, height, contents = [], facilities = [], entrance,
   } = props;
 
-  const card = el('div', 'campus-card w-72 max-w-full rounded-lg overflow-hidden '
-    + 'bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 shadow-xl');
+  const card = el('div', 'g-place');
 
-  const head = el('div', 'px-4 pt-3 pb-2');
-  head.append(el('div', 'font-bold text-base leading-tight text-gray-900 dark:text-gray-50', name));
+  const { row, text } = head(name, onClose);
 
   // Only worth showing when it says something the heading does not.
-  if (officialName && officialName !== name) {
-    head.append(el('div', 'text-xs text-gray-500 dark:text-gray-400 mt-0.5', officialName));
-  }
+  if (officialName && officialName !== name) text.append(el('p', 'g-panel-sub', officialName));
 
   const facts = [`${Math.round(area * FEET_PER_METRE).toLocaleString()} sq ft`];
   if (height) facts.push(`${Math.round(height * 3.28084)} ft tall`);
-  head.append(el('div', 'text-xs text-gray-400 dark:text-gray-500 mt-1', facts.join(' · ')));
+  text.append(el('p', 'g-place-facts', facts.join(' · ')));
 
-  if (parts?.length) {
-    head.append(el('div', 'text-xs text-gray-500 dark:text-gray-400 mt-1', parts.join(' · ')));
-  }
-  card.append(head);
+  if (parts?.length) text.append(el('p', 'g-place-facts', parts.join(' · ')));
+  card.append(row);
 
   if (contents.length) {
-    const body = el('div', 'px-4 pb-2 max-h-44 overflow-y-auto border-t '
-      + 'border-gray-100 dark:border-neutral-700 pt-2');
-    body.append(el('div', 'text-[10px] uppercase tracking-wider font-semibold '
-      + 'text-gray-400 dark:text-gray-500 mb-1',
-    contents.length === 1 ? '1 destination inside' : `${contents.length} destinations inside`));
+    const body = el('div', 'g-place-body');
+    body.append(el('p', 'g-place-kicker',
+      contents.length === 1 ? '1 destination inside' : `${contents.length} destinations inside`));
 
-    const list = el('ul', 'space-y-1');
+    const list = el('ul', 'g-place-list');
     for (const entry of contents) {
-      const item = el('li', 'text-sm text-gray-700 dark:text-gray-300 leading-snug');
-      item.append(el('span', 'font-medium', entry.name));
+      // No class of its own: the two spans below are blocks in a gapped flex
+      // column, which is the whole of what a row here needs to be.
+      const item = el('li');
+      item.append(el('span', 'g-place-item-name', entry.name));
       if (entry.description) {
         const short = entry.description.length > TRIM
           ? `${entry.description.slice(0, TRIM).trimEnd()}…`
           : entry.description;
-        item.append(el('div', 'text-xs text-gray-500 dark:text-gray-400', short));
+        item.append(el('span', 'g-place-item-sub', short));
       }
       list.append(item);
     }
@@ -156,12 +166,9 @@ export function buildingCard(props, { onStart, onEnd }) {
   }
 
   if (facilities.length) {
-    const strip = el('div', 'px-4 py-2 border-t border-gray-100 dark:border-neutral-700 '
-      + 'text-xs text-gray-500 dark:text-gray-400');
-    strip.textContent = facilities
+    card.append(el('p', 'g-place-facilities', facilities
       .map((f) => (f.n ? `${f.name} ×${f.n}` : f.name))
-      .join(' · ');
-    card.append(strip);
+      .join(' · ')));
   }
 
   // No entrance means no routing node was found near the walls, which would

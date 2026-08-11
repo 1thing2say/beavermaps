@@ -16,65 +16,36 @@
   screen still shows usable map. The old layout put a 600px map inside a padded
   card under a heading, which spent the top third of the viewport on furniture.
 
-  Nothing here is a Google asset. The shapes (pill search field, category chips,
-  bottom-right control stack, corner layers switcher) are the conventions; the
-  icons are drawn in src/g-icons.js and the categories come from my campus's own
-  printed legend.
+  Nothing here is a Google asset. The shapes (pill search field, bottom-right
+  control stack, corner layers switcher) are the conventions; the icons are
+  drawn in src/g-icons.js and the categories come from my campus's own printed legend.
+  The legend down the right edge is neither company's — Google has no such panel
+  and Apple's is a filter sheet — and it is here because this map has a printed
+  key to be faithful to and they do not.
 -->
 
 <body class="g-body">
     <div class="app-shell">
         <div id="map"></div>
 
-        <!-- Far-left rail. Google's holds account-level things; ours holds the
-             two that mean something here, plus the panel collapse. -->
-        <nav class="g-rail app-chrome" aria-label="Main">
-            <button id="rail-menu" type="button" class="g-rail-btn" aria-label="Hide the route panel"
-                aria-expanded="true">
-                <span class="g-rail-icon" data-icon="menu"></span>
-            </button>
-            <button id="rail-legend" type="button" class="g-rail-btn" aria-label="Map legend">
-                <span class="g-rail-icon" data-icon="legend"></span>
-                <span class="g-rail-text">Legend</span>
-            </button>
-            <button id="rail-clear" type="button" class="g-rail-btn" aria-label="Clear the route">
-                <span class="g-rail-icon" data-icon="close"></span>
-                <span class="g-rail-text">Clear</span>
-            </button>
-            <!-- The same setting as the Appearance row in the layers menu, and
-                 the same state behind both — this one cycles rather than asking,
-                 because a rail button has room for one glyph. It lives here so
-                 the setting is one click away instead of two; the menu keeps its
-                 explicit three, which is what a phone gets when the rail goes. -->
-            <button id="rail-theme" type="button" class="g-rail-btn">
-                <span id="rail-theme-icon" class="g-rail-icon"></span>
-                <span id="rail-theme-text" class="g-rail-text">Auto</span>
-            </button>
-            <!-- Who draws the ground, on the same terms as the appearance
-                 button above it: one control, two places to reach it, one piece
-                 of state behind both. Next to the theme because they are the
-                 same kind of setting — what the map looks like, not what it is
-                 showing — and both keep their row in the layers menu, which is
-                 what a phone gets when this rail goes. -->
-            <button id="rail-provider" type="button" class="g-rail-btn">
-                <span id="rail-provider-icon" class="g-rail-icon"></span>
-                <span id="rail-provider-text" class="g-rail-text">Mapbox</span>
-            </button>
-            <!-- The widest setting of the four, and the last one, because it
-                 restyles the three above it as well as the map: which design
-                 language the whole app wears. Same arrangement again — one
-                 piece of state, a row in the layers menu for the phone, and a
-                 button here that names the look it will switch *to*. -->
-            <button id="rail-skin" type="button" class="g-rail-btn">
-                <span id="rail-skin-icon" class="g-rail-icon"></span>
-                <span id="rail-skin-text" class="g-rail-text">Classic</span>
-            </button>
-        </nav>
+        <!-- There was a far-left rail here: panel collapse, legend, clear
+             route, and one-glyph cycles for appearance, provider and skin. It
+             is gone, and nothing went with it.
 
-        <!-- The top bar: search box at a fixed width, chips taking whatever
-             room is left. Google runs its chip strip across the map rather than
-             stacking it under the search field, and the difference is real —
-             in a 400px column only three chips fit before they need scrolling. -->
+             Every setting on it was a second door onto a control the layers
+             menu already had — that was the arrangement from the start, since
+             the rail was hidden on a phone and the menu had to carry them
+             anyway. Clear was a duplicate of the route panel's own Clear
+             button. Only two things lived nowhere else, and both moved rather
+             than being dropped: the legend, which is now the panel down the
+             right edge, and the panel collapse, which is the top bar's
+             directions button — a toggle rather than an opener. -->
+
+
+        <!-- The top bar. Only the search field now: the category strip that used
+             to take the rest of the bar is the legend on the right, where twelve
+             categories can be read down a column instead of scrolled through a
+             slot four at a time. -->
         <div class="g-topbar app-chrome">
             <div class="g-search g-card">
                 <label for="place-search" class="sr-only">Search for a destination</label>
@@ -88,27 +59,27 @@
                 <button id="search-go" type="button" class="g-search-icon" aria-label="Search">
                     <span class="g-icon" data-icon="search"></span>
                 </button>
-                <button id="directions-btn" type="button" class="g-directions" aria-label="Directions">
+                <button id="directions-btn" type="button" class="g-directions" aria-label="Directions"
+                    aria-expanded="false">
                     <span class="g-icon" data-icon="directions"></span>
                 </button>
                 <ul id="place-results" role="listbox" aria-label="Matching destinations" class="g-results hidden"></ul>
             </div>
-
-            <!-- Category chips. Populated from src/categories.js, which is
-                 my campus's printed legend rather than Google's POI verticals. -->
-            <div id="chip-scroller" class="g-chips-wrap">
-                <button id="chips-prev" type="button" class="g-chip-arrow hidden" aria-label="Scroll categories left">
-                    <span class="g-icon" data-icon="chevronLeft"></span>
-                </button>
-                <div id="category-chips" class="g-chips" role="toolbar" aria-label="Map categories"></div>
-                <button id="chips-next" type="button" class="g-chip-arrow hidden" aria-label="Scroll categories right">
-                    <span class="g-icon" data-icon="chevronRight"></span>
-                </button>
-            </div>
         </div>
 
-        <!-- The column that hangs under the search box: results, then route. -->
+        <!-- The column that hangs under the search box: what you tapped, then
+             the category results, then the route. -->
         <div id="top-left" class="g-topleft app-chrome">
+
+            <!-- Whatever is selected on the map — a building, or one of the
+                 pins that is not part of a building — writes its card in here.
+                 It used to be a Mapbox popup anchored to the thing itself, and
+                 that is the one card on this map that cannot be: a building
+                 card is 288px wide and runs to the height of its directory, so
+                 opening the LRC covered the middle of the campus with a list of
+                 what is inside the LRC. The tie to the marker is not lost — the
+                 pin lifts and stays lifted for as long as this is open. -->
+            <div id="place-panel" class="g-card g-panel hidden"></div>
 
             <!-- The category results list, in the slot Google gives its own. -->
             <div id="category-panel" class="g-card g-panel hidden">
@@ -124,8 +95,13 @@
                 <ul id="category-list" class="g-panel-list"></ul>
             </div>
 
-            <!-- Route panel. Same information as before, in Google's card. -->
-            <div id="side-panel" class="g-card g-panel">
+            <!-- Route panel. Same information as before, in Google's card.
+                 Closed on arrival: a map you have just opened is one you are
+                 reading, not one you are walking, and "Not set / Not set / 0 ft"
+                 is a form waiting to be filled in rather than an answer. The
+                 directions button in the top bar opens it, and so does anything
+                 that actually sets an endpoint — see showRoutePanel in main.js. -->
+            <div id="side-panel" class="g-card g-panel hidden">
                 <div class="g-route-head">
                     <div class="g-route-endpoints">
                         <div class="g-endpoint">
@@ -167,24 +143,35 @@
                 </div>
             </div>
 
-            <!-- Legend sheet, opened from the rail. The printed key, since every
-                 chip and pictogram on this map comes out of it — but a live one:
-                 each row is a button that outlines the buildings and car parks
-                 holding that thing. The rows are built in src/main.js from the
-                 same list the chips come from, so the key cannot drift.
+        </div>
 
-                 In the column rather than floating beside it, which is where it
-                 used to be. A card that outlines things on the map must not be
-                 sitting on top of the map: the old position put 280px of sheet
-                 over the middle of the campus, so the shapes a row lit up were
-                 as likely to be under it as beside it. Here the space it costs
-                 is space campusPadding was already reserving. -->
-            <div id="legend-sheet" class="g-card g-panel g-legend hidden" role="dialog"
-                aria-label="Map legend" aria-modal="false">
+        <!-- The legend, docked right, and the only list of the twelve
+             categories there is now.
+             ===================================================================
+             There used to be two. A chip strip across the top asked "where are
+             the defibrillators" and dropped pins; this sheet, buried behind a
+             row in the layers menu, asked "which buildings have one" and
+             outlined them. Both were built from src/categories.js, both showed
+             the same twelve rows in the same order with the same pictograms,
+             and the split between them was a distinction about the question
+             rather than about the thing being asked after.
+
+             So one list, and the two answers live on the two interactions a row
+             already had: POINT at a row and the buildings holding that thing
+             outline, PRESS it and its pins arrive with their names. They do not
+             fight — one paints ground, the other draws markers — and a press
+             now gets both, which is what someone asking "restrooms" wanted in
+             the first place.
+
+             On the right because it is a key: it says what the map's symbols
+             mean, so it belongs beside the map rather than on top of it, and
+             the left column is already three cards deep. -->
+        <div class="g-right app-chrome">
+            <div id="legend-panel" class="g-card g-panel g-legend" role="region" aria-label="Map legend">
                 <div class="g-panel-head">
                     <div>
                         <h2 class="g-panel-title">Legend</h2>
-                        <p class="g-panel-sub">Point at a row to outline it on the map</p>
+                        <p class="g-panel-sub">Point to outline · press to find</p>
                     </div>
                     <button id="legend-close" type="button" class="g-icon-btn" aria-label="Close legend">
                         <span class="g-icon" data-icon="close"></span>
@@ -246,13 +233,13 @@
                     </button>
                 </div>
 
-                <!-- The rail is hidden below 640px and it was the only way to
-                     open the legend — which matters more now that its rows
-                     outline things, and matters most on the device someone is
-                     actually holding on the campus. A second door onto the same
-                     sheet and the same state, not a second control. -->
-                <p class="g-layers-heading g-layers-heading--split g-phone-only">Legend</p>
-                <div class="g-layers-row g-phone-only">
+                <!-- The legend is a permanent panel on the right at desktop
+                     widths, so this row is a way back rather than the way in:
+                     it re-opens a legend that was closed, and on a phone —
+                     where a right-hand column would be most of the screen and
+                     the panel starts closed — it is still the way in. -->
+                <p class="g-layers-heading g-layers-heading--split">Legend</p>
+                <div class="g-layers-row">
                     <button id="layers-legend" type="button" class="g-layer-btn g-layer-btn--wide">
                         <span class="g-layer-icon" data-icon="legend"></span>
                         Map legend

@@ -179,6 +179,15 @@ test('every category resolves against the data and the icon sets', () => {
       assert.ok(AMENITY_KINDS.includes(hit.icon),
         `${category.id}: no disc registered for "${hit.icon}"`);
       assert.ok(onCampus(hit.coords), `${category.id}: ${hit.name} is off campus`);
+
+      // Every one of these is now PRINTED under its pin. `collect` falls back to
+      // the raw `kind` when a feature carries no label, and that fallback used
+      // to be invisible: names were only drawn where they identified a single
+      // pin, so a missing label was silently one of the many that stayed bare.
+      // Now the whole category is captioned and a gap in the data reads as
+      // "drink_vending" in 12px type under a disc on a public map.
+      assert.doesNotMatch(hit.name, /^[a-z0-9]+(_[a-z0-9]+)+$/,
+        `${category.id}: "${hit.name}" is a raw kind, so amenities.json is missing a label`);
     }
   }
 });

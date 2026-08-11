@@ -44,5 +44,9 @@
     "express": "^5.2.1",
     "geojson-path-finder": "^2.1.0",
     "mapbox-gl": "^3.23.1"
+  },
+  "allowScripts": {
+    "@parcel/watcher@2.5.6": true,
+    "fsevents@2.3.3": true
   }
 }

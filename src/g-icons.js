@@ -12,7 +12,12 @@
 
 /** name -> inner SVG markup on a 24x24 viewBox, filled with currentColor. */
 const PATHS = {
-  menu: '<path d="M3 6.5h18v2H3zm0 4.5h18v2H3zm0 4.5h18v2H3z"/>',
+  // A hamburger lived here, and it was the left rail's collapse button. The rail
+  // is gone and the route panel now collapses from the directions button in the
+  // top bar, which has its own glyph, so nothing draws three stacked lines any
+  // more. Removed rather than left in reach: every other name in this table is
+  // referenced by something, and the one exception is the one nobody notices has
+  // gone stale.
   close:
     '<path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3 10.6 10.6 16.9 4.3z"'
     + ' transform="translate(2.4 0)"/>',

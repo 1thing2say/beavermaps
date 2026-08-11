@@ -25,7 +25,8 @@ import {
 import { buildingCard, pinCard } from './building-popup.js';
 import {
   mountSelectedPin, sizeExpr, sizeAt, LABEL_MAX_EM,
-  AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE, SELECTED_W,
+  AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE,
+  growEase, swayAt, scaleStops, GROW_MS, SWAY_MS,
 } from './pin-select.js';
 import { createThemeControl, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
@@ -170,8 +171,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let campusPlaces = null;
   let campusLabels = null;
   let campusDirectory = null;
-  // The open building card, and which building it belongs to.
-  let openCard = null;
+  // Which building the outline in the directory layers belongs to. There was a
+  // second variable beside it holding the open card, back when the card was a
+  // Mapbox popup that had to be kept and removed; the card is the contents of
+  // #place-panel now, so the panel's own hidden state is the whole of it.
   let selectedBuilding = null;
 
   // State variables
@@ -209,9 +212,28 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const simulateBtn = document.getElementById('simulate-btn');
   const sidePanel = document.getElementById('side-panel');
   // Up here with the panel rather than down with the rest of the chrome,
-  // because campusPadding measures it and campusPadding runs before that
-  // block is reached — see the fitBounds a few lines below.
-  const legendSheet = document.getElementById('legend-sheet');
+  // because campusPadding measures all four and campusPadding runs before those
+  // blocks are reached — see the fitBounds a few lines below. A `const` read
+  // before its declaration is a TDZ throw, not an undefined.
+  const legendPanel = document.getElementById('legend-panel');
+  const placePanel = document.getElementById('place-panel');
+  const categoryPanel = document.getElementById('category-panel');
+  // Same reason, one step further out: setStatus opens the route panel to say
+  // anything that has gone wrong, and setStatus is reachable from the Google
+  // basemap's failure path — which can resolve before the chrome block below is
+  // ever reached.
+  const directionsBtn = document.getElementById('directions-btn');
+
+  // Below this width the left column becomes a bottom sheet and the legend
+  // becomes one too. Must match the media query in src/input.css.
+  const phone = window.matchMedia('(max-width: 640px)');
+  // ...and where the legend holds the right edge it is furniture, where it is a
+  // sheet over the map it is not, so on a phone it starts closed. Set here and
+  // not with the rest of the chrome because campusPadding measures this panel
+  // and the first fitBounds is a few lines below — closing it afterwards would
+  // frame the campus around a card that is not there. The button that re-opens
+  // it is told about this where it is declared.
+  if (phone.matches) legendPanel.classList.add('hidden');
   const navBanner = document.getElementById('nav-banner');
   const navFooter = document.getElementById('nav-footer');
   const navStack = document.getElementById('nav-stack');
@@ -223,20 +245,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * width of whatever is open fixes that, and it has to be measured rather than
    * hard-coded because both cards come and go.
    *
-   * Two cards, not one. The legend joined the panel here the moment its rows
-   * started outlining things on the map: it sits directly over the campus, and
-   * framing a highlight underneath the sheet that asked for it is the one place
-   * the camera can put something where it cannot be seen.
+   * Every card, not one. Three of them stack in the left column and the legend
+   * holds the right edge, and each is a strip of canvas the campus can be hidden
+   * under — framing a highlight beneath the legend row that asked for it is the
+   * one place the camera can put something where it cannot be seen.
    *
    * Mapbox throws if padding exceeds the canvas, so on a screen too narrow to
-   * hold both, fall back to an even margin and let the chrome overlap.
+   * hold both sides, fall back to an even margin and let the chrome overlap.
    */
   function campusPadding() {
     const even = { top: FIT_MARGIN, bottom: FIT_MARGIN, left: FIT_MARGIN, right: FIT_MARGIN };
     const canvas = map.getCanvas().getBoundingClientRect();
     if (!canvas.width) return even;
 
-    const boxes = [sidePanel, legendSheet]
+    const boxes = [placePanel, categoryPanel, sidePanel, legendPanel]
       .filter((card) => !card.classList.contains('hidden'))
       .map((card) => card.getBoundingClientRect())
       .filter((box) => box.width);
@@ -254,14 +276,19 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       return bottom + FIT_MARGIN < canvas.height ? { ...even, bottom } : even;
     }
 
+    // Both edges now. A card in the right half used to be skipped outright,
+    // because until the legend moved over there nothing was ever in it.
     let left = FIT_MARGIN;
+    let right = FIT_MARGIN;
     for (const box of boxes) {
-      // A card in the right half is not something a left margin can clear.
-      if (box.left - canvas.left > canvas.width / 2) continue;
-      left = Math.max(left, box.right - canvas.left + FIT_MARGIN);
+      if (box.left - canvas.left > canvas.width / 2) {
+        right = Math.max(right, canvas.right - box.left + FIT_MARGIN);
+      } else {
+        left = Math.max(left, box.right - canvas.left + FIT_MARGIN);
+      }
     }
-    if (left + FIT_MARGIN >= canvas.width) return even;
-    return { ...even, left };
+    if (left + right >= canvas.width) return even;
+    return { ...even, left, right };
   }
 
   // The constructor framed the campus before these element refs existed, so it
@@ -272,21 +299,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const navRemaining = document.getElementById('nav-remaining');
   const navEta = document.getElementById('nav-eta');
   const themeModes = document.getElementById('theme-modes');
-  const railTheme = document.getElementById('rail-theme');
-  const railThemeIcon = document.getElementById('rail-theme-icon');
-  const railThemeText = document.getElementById('rail-theme-text');
-  const railProvider = document.getElementById('rail-provider');
-  const railProviderIcon = document.getElementById('rail-provider-icon');
-  const railProviderText = document.getElementById('rail-provider-text');
   const basemapToggle = document.getElementById('basemap-toggle');
   const basemapIcon = document.getElementById('basemap-toggle-icon');
   const basemapLabel = document.getElementById('basemap-toggle-label');
   const providerToggle = document.getElementById('provider-toggle');
   const providerIcon = document.getElementById('provider-toggle-icon');
   const providerLabel = document.getElementById('provider-toggle-label');
-  const railSkin = document.getElementById('rail-skin');
-  const railSkinIcon = document.getElementById('rail-skin-icon');
-  const railSkinText = document.getElementById('rail-skin-text');
   const skinToggle = document.getElementById('skin-toggle');
   const skinIcon = document.getElementById('skin-toggle-icon');
   const skinLabel = document.getElementById('skin-toggle-label');
@@ -306,6 +324,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * show plainly — otherwise it looks like the buttons are simply broken.
    */
   function setStatus(message, isError = false) {
+    // The panel starts closed, so an error written into it is an error nobody
+    // sees. "Routing server unreachable" and "Google basemap unavailable" are
+    // both states where the app looks merely broken until the sentence
+    // explaining it is on screen.
+    if (isError) showRoutePanel();
     instructionText.textContent = message;
     // One class rather than the five Tailwind toggles this used to need. The
     // hint's normal and error colours are both stated in the stylesheet, so
@@ -334,8 +357,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
     map.getSource('route-legs')?.setData(EMPTY);
 
-    closeBuildingCard();
-    deselectPin();
+    clearSelection();
 
     // Reset UI. The search box is cleared too: leaving a destination showing
     // next to "Not set" is the kind of stale text people act on.
@@ -642,9 +664,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let legendAreas = [];
   /** category id -> { indices, points, counts }, computed once per load. */
   const legendHighlights = new Map();
-  /** The row that was clicked, and the row the pointer is over. */
+  /** The pressed category's outline, and the row the pointer is over. */
   let stickyRow = null;
   let hoverRow = null;
+  /** False until a file a category can be collected from has landed. */
+  let legendReady = false;
 
   /**
    * A hovered row wins over the selected one, and gives it back on the way out.
@@ -864,11 +888,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   // -------------------------------------------------------------------------
-  // Category chips
+  // Categories
   //
   // Google's chip strip filters the map to one kind of place and lists what it
   // found. Ours does the same over my campus's printed legend — see src/categories.js
   // for why those are the categories and not Restaurants/Hotels/Museums.
+  //
+  // The strip itself is gone: pressing a category is a legend row now, over on
+  // the right, and everything below is what that press *does*. See renderLegend
+  // for why the two lists became one.
   //
   // Two data sources, because the legend's symbols and my campus's directory are
   // separate files — a `kinds` category reads amenities.json and a `match` one
@@ -877,11 +905,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // paintCategory for why filtering the existing layer was not enough.
   // -------------------------------------------------------------------------
 
-  const chipStrip = document.getElementById('category-chips');
-  const chipScroller = document.getElementById('chip-scroller');
-  const chipsPrev = document.getElementById('chips-prev');
-  const chipsNext = document.getElementById('chips-next');
-  const categoryPanel = document.getElementById('category-panel');
+  // categoryPanel is declared up with the route panel — campusPadding measures it.
   const categoryTitle = document.getElementById('category-title');
   const categoryCount = document.getElementById('category-count');
   const categoryList = document.getElementById('category-list');
@@ -957,6 +981,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           'text-halo-width': 1.6,
           'icon-emissive-strength': 1,
           'text-emissive-strength': 1,
+          // The entrance drives this. Anchored to the VIEWPORT because the sway
+          // is a screen-space settle measured in screen pixels — left the
+          // default and it would be bearing-relative, so the same animation
+          // would swing along some compass direction on a rotated map.
+          'icon-translate': [0, 0],
+          'icon-translate-anchor': 'viewport',
         },
       });
       // A style swap can land between selecting a category and this resolving.
@@ -994,10 +1024,257 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       type: 'FeatureCollection',
       features: categoryHits.map((hit) => ({
         type: 'Feature',
-        properties: { icon: hit.icon, name: hit.labelled ? hit.name : '' },
+        properties: { icon: hit.icon, name: hit.name ?? '' },
         geometry: { type: 'Point', coordinates: hit.coords },
       })),
     } : EMPTY);
+
+    // The printed label pins go with them — same rule, different layers. Here
+    // rather than at the two call sites so a style swap, which rebuilds these
+    // from scratch, restores the same state this did.
+    paintLabels();
+  }
+
+  // -------------------------------------------------------------------------
+  // Clearing the map for an answer
+  //
+  // Pressing a chip is a question, and the map answers it by emptying itself
+  // first. Every pin on campus goes — the ambient pictograms and the 38 printed
+  // labels that carry a disc, names included — and then the category's own pins
+  // arrive on the lift's spring, so the thing you asked for is the only thing
+  // moving. Swapping the two sets in one frame, which is what this used to do,
+  // left the answer indistinguishable from the map it landed on: the restrooms
+  // appeared among forty markers that had not changed.
+  //
+  // The two halves are animated by different means, and deliberately:
+  //
+  //   OUT is opacity alone, across eight or nine layers. Opacity is a paint
+  //   property, so it costs a repaint and nothing else. Shrinking these would
+  //   mean pushing `icon-size` — a LAYOUT property — at every one of them every
+  //   frame, and re-laying out the whole printed label set to fade it is a bad
+  //   trade for a 170 ms move nobody is looking at.
+  //
+  //   IN is the real thing: size, the sideways settle, and the names. It is one
+  //   layer holding tens of features, which is what makes the per-frame layout
+  //   affordable here and not there.
+  // -------------------------------------------------------------------------
+
+  /** How long the campus takes to clear. Short: it is the throat-clearing. */
+  const PIN_FADE_MS = 170;
+
+  /**
+   * Where the arriving pins start, as a fraction of full size.
+   *
+   * The capture's own resting-to-settled ratio: Apple's marker is 23 px across
+   * before it is picked up and 65.9 px after. Pins that come from nothing rather
+   * than from a marker have no measured start of their own, so they borrow that
+   * one and grow through the same proportional range the lift does.
+   */
+  const ENTRANCE_START = 0.349;
+
+  /**
+   * Bumped to cancel whatever is mid-flight.
+   *
+   * Chips are a strip and people press along it. Without this the previous run's
+   * next frame lands after the new one has set up — pins at the old opacity, or
+   * an `icon-size` from a swap that is already over. A superseded run simply
+   * stops asking for frames; its promise is never resolved and nothing is
+   * waiting on it.
+   */
+  let choreography = 0;
+
+  /** Asked each time, so a preference changed mid-session takes effect at once. */
+  const prefersStill = () =>
+    Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+
+  /** Every layer that draws a pin, which is what a chip press has to clear. */
+  const pinLayers = () => ['campus-amenities', ...POI_LABEL_LAYERS]
+    .filter((layer) => map.getLayer(layer));
+
+  function setLayerFade(layers, value) {
+    for (const layer of layers) {
+      // A style swap can take these out from under a run in progress.
+      if (!map.getLayer(layer)) continue;
+      map.setPaintProperty(layer, 'icon-opacity', value);
+      map.setPaintProperty(layer, 'text-opacity', value);
+    }
+  }
+
+  /**
+   * What a layer is drawn at right now, so a fade can start from there.
+   *
+   * Chips get pressed in quick succession and the run underway is cancelled
+   * where it stands, which can be anywhere — pins at 0.4 through an entrance,
+   * say. Fading from a hard 1 would snap them to full first and then take them
+   * out, a flash in the one place this whole sequence exists to remove.
+   */
+  const fadeFrom = (layer) => {
+    const value = map.getPaintProperty(layer, 'icon-opacity');
+    return typeof value === 'number' ? value : 1;
+  };
+
+  /** Call `step(0..1)` once a frame for `ms`, unless something supersedes it. */
+  function overFrames(ms, step) {
+    const mine = choreography;
+    return new Promise((resolve) => {
+      const started = performance.now();
+      const tick = (now) => {
+        if (mine !== choreography) return;
+        const p = Math.min((now - started) / ms, 1);
+        step(p);
+        if (p < 1) requestAnimationFrame(tick);
+        else resolve();
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+
+  /**
+   * The category's pins arriving, on the same curve a tapped pin is lifted on.
+   *
+   * `icon-size` stays a zoom expression the whole way rather than becoming a
+   * plain number, because `frameCategory` is flying the camera over exactly
+   * these frames — a fixed size would be drawn at the wrong scale the moment the
+   * zoom moved under it. The growth is multiplied into the table's stops instead
+   * of wrapped around the finished expression; see `scaleStops` for why that is
+   * the only form Mapbox will accept.
+   *
+   * The sway rides `icon-translate`, which is paint and therefore does not enter
+   * collision: the settle moves drawn pixels only, and the labels stay where
+   * they were placed.
+   *
+   * A PIN AND ITS NAME COME UP TOGETHER, on one opacity ramp. They did not at
+   * first — the names were held back until the growth was nearly over, on the
+   * theory that fading them in over a still-changing `icon-size` would make them
+   * flicker as the collision boxes resized. That theory was wrong twice. The
+   * icons are `icon-allow-overlap`, so they are not in the collision index at
+   * all and their size cannot dislodge a label; and the delay was not the 335 ms
+   * it looked like on paper. Stacked on the 170 ms clear-out before it and
+   * Mapbox's own 300 ms fade for a newly placed symbol after it, the names
+   * landed nearly a second behind the discs — long enough to read as a second
+   * event rather than as the same one, which is exactly the disorientation the
+   * whole sequence is meant to prevent.
+   *
+   * Every pin swings together. There is no stagger here and it would be a lie if
+   * there were: the capture is one marker, so a per-pin delay would be invented
+   * rather than measured, and Mapbox cannot vary a layout property per feature
+   * without pushing new data on every frame anyway.
+   */
+  async function playCategoryEntrance() {
+    const layer = 'category-pins';
+    if (!map.getLayer(layer)) return;
+
+    const base = sizeExpr(CATEGORY_SIZE);
+    /** How long the pins and their names take to become visible at all. */
+    const APPEAR_MS = GROW_MS * 0.3;
+
+    const settle = () => {
+      if (!map.getLayer(layer)) return;
+      map.setLayoutProperty(layer, 'icon-size', base);
+      map.setPaintProperty(layer, 'icon-translate', [0, 0]);
+      map.setPaintProperty(layer, 'icon-opacity', 1);
+      map.setPaintProperty(layer, 'text-opacity', 1);
+    };
+    if (prefersStill()) { settle(); return; }
+
+    // Frame zero, set now rather than on the first callback. `paintCategory`
+    // has already pushed the data, so a rAF's worth of delay is a rAF of pins
+    // drawn full size — the pop the animation exists to replace.
+    map.setLayoutProperty(layer, 'icon-size', sizeExpr(scaleStops(CATEGORY_SIZE, ENTRANCE_START)));
+    map.setPaintProperty(layer, 'icon-opacity', 0);
+    map.setPaintProperty(layer, 'text-opacity', 0);
+
+    // The sway outlasts the growth by 780 ms, and for all of it the size is a
+    // settled 1.0. Pushing that unchanged value at a LAYOUT property anyway is
+    // ~47 pointless symbol re-layouts, so the growth stops writing when it stops
+    // changing and the rest of the run is paint alone.
+    let growing = true;
+
+    await overFrames(SWAY_MS, (p) => {
+      if (!map.getLayer(layer)) return;
+      const ms = p * SWAY_MS;
+
+      if (growing) {
+        const done = ms >= GROW_MS;
+        const grown = ENTRANCE_START + (1 - ENTRANCE_START) * growEase(Math.min(ms / GROW_MS, 1));
+        map.setLayoutProperty(layer, 'icon-size', done ? base
+          : sizeExpr(scaleStops(CATEGORY_SIZE, grown)));
+        growing = !done;
+      }
+
+      // Read per frame rather than captured: `frameCategory` is flying the
+      // camera through this, and the swing is a fraction of the pin's width at
+      // whatever zoom it is actually being drawn at.
+      const width = PIN_BASE_W * sizeAt(CATEGORY_SIZE, map.getZoom());
+      map.setPaintProperty(layer, 'icon-translate', [swayAt(ms, width), 0]);
+      // One ramp for both, so the pin and its name are one object arriving.
+      const appearing = Math.min(ms / APPEAR_MS, 1);
+      map.setPaintProperty(layer, 'icon-opacity', appearing);
+      map.setPaintProperty(layer, 'text-opacity', appearing);
+    });
+
+    // Back to the declarative values, so a later zoom is the expression's job
+    // again and nothing is left holding a frame's worth of state.
+    settle();
+  }
+
+  /**
+   * Clear the campus, apply the new selection, then play it in.
+   *
+   * `paintCategory` is the whole of the state change and stays that way; this
+   * only decides what is on screen either side of it. So a run that is cut off
+   * part way still leaves the map correct — the filters and the data are set in
+   * one go between the two halves, never spread across the animation.
+   */
+  async function playCategorySwap() {
+    choreography += 1;
+    const clearing = pinLayers();
+    const hadPins = Boolean(map.getLayer('category-pins'));
+    const wasAt = hadPins ? fadeFrom('category-pins') : 0;
+
+    if (!prefersStill()) {
+      await overFrames(PIN_FADE_MS, (p) => {
+        setLayerFade(clearing, 1 - p);
+        if (hadPins && map.getLayer('category-pins')) {
+          // A chip pressed while another is up: its pins are the ones on screen.
+          map.setPaintProperty('category-pins', 'icon-opacity', wasAt * (1 - p));
+          map.setPaintProperty('category-pins', 'text-opacity', wasAt * (1 - p));
+        }
+      });
+    }
+
+    paintCategory();
+    // Filtered out entirely now, so their opacity is only being made ready for
+    // whenever the chip is let go of.
+    setLayerFade(clearing, 1);
+    await playCategoryEntrance();
+  }
+
+  /** The way back: the answer goes, and the campus comes up behind it. */
+  async function playCategoryClear() {
+    choreography += 1;
+    const still = prefersStill();
+
+    if (!still && map.getLayer('category-pins')) {
+      const wasAt = fadeFrom('category-pins');
+      await overFrames(PIN_FADE_MS, (p) => {
+        if (!map.getLayer('category-pins')) return;
+        map.setPaintProperty('category-pins', 'icon-opacity', wasAt * (1 - p));
+        map.setPaintProperty('category-pins', 'text-opacity', wasAt * (1 - p));
+      });
+    }
+
+    paintCategory();
+
+    const returning = pinLayers();
+    if (!still) {
+      // Longer coming back than going, because this one has to re-place forty
+      // labels rather than take them away, and a campus that snaps back on is
+      // the jolt the fade out was avoiding.
+      setLayerFade(returning, 0);
+      await overFrames(PIN_FADE_MS * 1.6, (p) => setLayerFade(returning, p));
+    }
+    setLayerFade(returning, 1);
   }
 
   // -------------------------------------------------------------------------
@@ -1017,7 +1294,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /** `{ layer, id, coords, kind, name }` for the pin that is up, or null. */
   let selectedPin = null;
   let selectedMarker = null;
-  let pinPopup = null;
 
   /** The filter that hides the lifted pin from its own layer, or null. */
   const hiddenPin = (layer) =>
@@ -1065,8 +1341,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    */
   const POI_LABEL_LAYERS = [...POI_LABEL_KINDS].map((kind) => `campus-labels-${kind}`);
 
-  /** A label layer draws its own kind, minus whichever one has been lifted. */
+  /**
+   * A label layer draws its own kind, minus whichever one has been lifted.
+   *
+   * ...and minus all of them while a chip is up, for the kinds that carry a
+   * pictogram. Those 38 are pins — `pinAt` treats them as such and they lift
+   * like any other — so leaving them on screen while a category is showing puts
+   * the answer among forty markers that did not change. The kinds with no disc
+   * stay: they are place names, not markers, and a campus that loses its own
+   * names is harder to read, not clearer.
+   */
   const labelFilter = (kind) => {
+    if (activeCategory && POI_LABEL_KINDS.has(kind)) return ['boolean', false];
     const mine = ['==', ['get', 'kind'], kind];
     const hidden = hiddenPin(`campus-labels-${kind}`);
     return hidden ? ['all', mine, hidden] : mine;
@@ -1113,8 +1399,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     closeBuildingCard();
     const width = ambientWidth(selectedPin.layer);
     selectedPin = null;
-    pinPopup?.remove();
-    pinPopup = null;
     // The marker shrinks back before it goes, and the symbol underneath only
     // comes back once it has: unfilter first and there are two pins for a fifth
     // of a second, the small one sitting inside the shrinking large one.
@@ -1128,14 +1412,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * Lift a pin out of its layer.
    *
    * `card` is false when the caller has a better one to show. A building's
-   * pictogram is a pin like any other and lifts like one, but what belongs
-   * beside it is the building card — the floor area, what is inside it, the
+   * pictogram is a pin like any other and lifts like one, but what belongs in
+   * the panel is the building card — the floor area, what is inside it, the
    * entrance its Start and Destination buttons actually route from — not the
-   * two-line card a defibrillator gets.
+   * two-line card a defibrillator gets. Same panel either way; the caller
+   * fills it instead, immediately after this returns.
    */
   function selectPin(hit, { card = true } = {}) {
-    // Tapping the pin that is already up puts it back, the way tapping a
-    // pressed chip clears the category.
+    // Tapping the pin that is already up puts it back, the way pressing a lit
+    // legend row clears the category.
     if (selectedPin?.layer === hit.layer && selectedPin?.id === hit.id) {
       deselectPin();
       return;
@@ -1163,21 +1448,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     if (!card) return;
 
-    pinPopup = new mapboxgl.Popup({
-      closeButton: false,
-      closeOnClick: false,
-      offset: [0, -(SELECTED_W * 1.35)],
-      anchor: 'bottom',
-      className: 'pin-popup',
-      maxWidth: 'none',
-    })
-      .setLngLat(hit.coords)
-      .setDOMContent(pinCard(hit, {
-        onStart: (coords, name) => { deselectPin(); placeStart(coords, name); },
-        onEnd: (coords, name) => { deselectPin(); setDestination(coords, name); },
-        onClose: deselectPin,
-      }))
-      .addTo(map);
+    showPlaceCard(pinCard(hit, {
+      onStart: (coords, name) => { clearSelection(); placeStart(coords, name); },
+      onEnd: (coords, name) => { clearSelection(); setDestination(coords, name); },
+      onClose: clearSelection,
+    }));
   }
 
   /** Straight-line feet from wherever the user is measuring from. */
@@ -1242,7 +1517,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * moved to show them.
    */
   function frameCategory() {
-    frame(categoryHits.map((hit) => hit.coords));
+    if (categoryHits.length) { frame(categoryHits.map((hit) => hit.coords)); return; }
+    // No pins does not mean nothing to show. A category whose source file
+    // failed to load still outlines its buildings — the two halves degrade
+    // separately — and a press that lit up ground somewhere off screen while
+    // the camera sat still would read as a press that did nothing.
+    const highlight = legendHighlights.get(activeCategory);
+    if (highlight) frame(extentOf(legendAreas, highlight), { maxZoom: 17 });
   }
 
   /**
@@ -1279,78 +1560,67 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     activeCategory = id;
     const found = collect(category, { amenities: campusAmenities, places: campusPlaces });
 
-    // A pin gets its name written on the map only when that name identifies it.
-    // "Myrtle Parking Lot East" does; six pins all reading "All-gender restroom"
-    // are six copies of what the icon already said. Uniqueness within the
-    // category decides it, so no category has to declare which kind it is.
-    const seen = new Map();
-    for (const hit of found) seen.set(hit.name, (seen.get(hit.name) ?? 0) + 1);
-
+    // EVERY pin gets its name, including the six that all read "All-gender
+    // restroom". This used to print a name only where it identified one pin
+    // among the others — "Myrtle Parking Lot East" yes, six copies of one phrase
+    // no — on the grounds that repeating the icon's own meaning in type is
+    // noise.
+    //
+    // It is noise on a map you are reading and it is the answer on a map you
+    // have just questioned. Having pressed Defibrillators, the six discs are the
+    // result and the word under each is what says so; leaving them bare made the
+    // category read as a pictogram you still had to know. The names are also the
+    // point of the entrance — they arrive with the pins — and an entrance where
+    // most of the pins bring nothing looks half-finished.
+    //
+    // Collision still has the last word, because `text-optional` is set on the
+    // layer: names that cannot fit are dropped and their discs stay. That is the
+    // right place for the decision, since it depends on the zoom rather than on
+    // the wording.
     categoryHits = found
-      .map((hit) => ({ ...hit, feet: feetFrom(hit.coords), labelled: seen.get(hit.name) === 1 }))
+      .map((hit) => ({ ...hit, feet: feetFrom(hit.coords) }))
       .sort((a, b) => a.feet - b.feet);
 
-    for (const chip of chipStrip.children) {
-      chip.setAttribute('aria-pressed', String(chip.dataset.id === id));
-    }
+    // On a phone the legend is a full-width sheet over the map, so leaving it
+    // up would mean answering "where are the restrooms" with a card covering
+    // the restrooms. The pins and the results list are the answer; the list you
+    // asked from has done its job.
+    // Plain toggleSheet, not toggleLegendPanel: frameCategory a few lines below
+    // is about to move the camera anyway, and it reads campusPadding after this
+    // has run, so the sheet is already out of the reckoning.
+    if (phone.matches) toggleSheet(legendPanel, legendOpen, false);
+
+    // The pressed row, and the outline that goes with it. A category press now
+    // answers both halves of the question it was split across: the pins say
+    // where the things are, the outline says which buildings hold them.
+    stickyRow = id;
+    paintHighlight();
+    syncLegendRows();
+
     renderCategoryList(category);
-    paintCategory();
+    // The camera and the pins move together. Framing first and animating after
+    // would read as two separate events, and the fly is 700 ms of the 1324 the
+    // pins take anyway.
+    //
+    // The pins own the camera, not the outline: the pins ARE the answer and the
+    // outlined ground is context for it, and two fitBounds in one gesture is a
+    // flight that lands somewhere neither of them asked for.
     frameCategory();
+    playCategorySwap();
   }
 
   function clearCategory() {
     activeCategory = null;
     categoryHits = [];
-    for (const chip of chipStrip.children) chip.setAttribute('aria-pressed', 'false');
+    stickyRow = null;
+    paintHighlight();
+    syncLegendRows();
     categoryPanel.classList.add('hidden');
     categoryList.replaceChildren();
-    paintCategory();
+    playCategoryClear();
   }
 
-  function buildChips() {
-    chipStrip.replaceChildren(...CATEGORIES.map((category) => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'g-chip';
-      chip.dataset.id = category.id;
-      chip.setAttribute('aria-pressed', 'false');
-      chip.title = category.legend;
-      // Both data files are still in flight at this point, and a chip that
-      // silently reports "Nothing found" reads as broken rather than as early.
-      chip.disabled = true;
-
-      const glyph = document.createElement('span');
-      glyph.className = 'g-icon';
-      glyph.dataset.icon = category.glyph;
-      chip.append(glyph, document.createTextNode(category.label));
-
-      chip.addEventListener('click', () => selectCategory(category.id));
-      return chip;
-    }));
-    paintIcons(chipStrip);
-    updateChipArrows();
-  }
-
-  /** Show a scroll arrow only on the side there is more strip to reach. */
-  function updateChipArrows() {
-    const max = chipStrip.scrollWidth - chipStrip.clientWidth;
-    chipsPrev.classList.toggle('hidden', chipStrip.scrollLeft <= 4);
-    chipsNext.classList.toggle('hidden', chipStrip.scrollLeft >= max - 4);
-  }
-
-  const scrollChips = (by) => chipStrip.scrollBy({ left: by, behavior: 'smooth' });
-  chipsPrev.addEventListener('click', () => scrollChips(-220));
-  chipsNext.addEventListener('click', () => scrollChips(220));
-  chipStrip.addEventListener('scroll', updateChipArrows);
-  new ResizeObserver(updateChipArrows).observe(chipScroller);
   categoryClose.addEventListener('click', clearCategory);
-
-  /** Called once the overlays a chip reads from have actually arrived. */
-  function enableChips() {
-    for (const chip of chipStrip.children) chip.disabled = false;
-  }
-
-  buildChips();
 
   /**
    * The printed map's own labels.
@@ -1449,11 +1719,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * needs no feature ids and no promoteId, which a feature-state approach would.
    */
   const NOTHING_SELECTED = ['==', ['get', 'officialName'], '\u0000'];
-  // The side panel is w-72 at a 1rem inset, plus a margin; the card is w-72 too
-  // and centres on its anchor, so it needs half its own width of clearance as
-  // well before it stops reaching under the panel.
-  const SIDE_PANEL_WIDTH = 320;
-  const CARD_WIDTH = 288;
+  // Two constants used to live here — the widths a floating card had to clear
+  // before it stopped opening underneath the route panel. The card is IN the
+  // column with the route panel now rather than over the map, so there is
+  // nothing left for it to collide with and no arithmetic to get wrong.
 
   function addDirectoryLayers() {
     const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
@@ -1502,10 +1771,50 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
   }
 
+  /**
+   * Put a card in the left column, or take whatever is there away.
+   *
+   * One panel for both kinds — a building's card and a pin's — because from the
+   * map they are one gesture: you tapped a thing, and this is the thing. The
+   * two used to be separate Mapbox popups anchored to what they described,
+   * which is why opening the LRC covered the campus with a list of what is
+   * inside the LRC. The tie to the marker survives without the anchor: the pin
+   * itself is lifted and stays lifted for as long as this is up.
+   */
+  function showPlaceCard(card) {
+    const was = !placePanel.classList.contains('hidden');
+    placePanel.replaceChildren(card);
+    placePanel.classList.remove('hidden');
+    // Only when the column's width actually changed. Swapping one card for
+    // another is a repaint, not a new obstruction, and a camera that eased on
+    // every tap would drift across the campus a tap at a time.
+    if (!was) map.easeTo({ padding: campusPadding(), duration: 300 });
+  }
+
+  function closePlaceCard() {
+    if (placePanel.classList.contains('hidden')) return;
+    placePanel.classList.add('hidden');
+    placePanel.replaceChildren();
+    map.easeTo({ padding: campusPadding(), duration: 300 });
+  }
+
   function closeBuildingCard() {
-    if (openCard) openCard.remove();
-    openCard = null;
+    closePlaceCard();
     highlightBuilding(null);
+  }
+
+  /**
+   * Put everything the map is currently pointing at back down.
+   *
+   * Two states, and either can exist without the other: a lifted pin with no
+   * card (the building name pins, which hand their card to the building), and a
+   * card with no lifted pin (a tap on a footprint rather than on its label).
+   * `deselectPin` cannot do both — it calls closeBuildingCard itself and would
+   * recurse — so the pairing lives here, and every "never mind" goes through it.
+   */
+  function clearSelection() {
+    deselectPin();
+    closeBuildingCard();
   }
 
   /** The building under a click, or null. */
@@ -1515,8 +1824,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return hit?.properties ?? null;
   }
 
-  function showBuildingCard(lngLat, raw) {
-    closeBuildingCard();
+  function showBuildingCard(raw) {
     // Vector tiles hand nested properties back as JSON strings.
     const props = { ...raw };
     for (const key of ['contents', 'facilities', 'parts', 'entrance', 'anchor']) {
@@ -1525,50 +1833,26 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       }
     }
 
-    // Point at the building rather than at the tap, so the card lands in the
-    // same place each time the same building is opened.
-    const at = props.anchor ?? [lngLat.lng, lngLat.lat];
-
-    // The side panel is an HTML overlay, so Mapbox's own edge-flipping cannot
-    // see it and will happily open a card underneath it. Naming an anchor turns
-    // that flipping off entirely, though, so once the horizontal side is forced
-    // the vertical one has to be chosen too or a tall card runs off the top.
-    const screen = map.project(at);
-    const height = map.getCanvas().clientHeight;
-    const overPanel = screen.x < SIDE_PANEL_WIDTH + CARD_WIDTH / 2;
-    const vertical = screen.y < height / 3 ? 'top-' : screen.y > (height * 2) / 3 ? 'bottom-' : '';
-    const anchor = overPanel ? `${vertical}left` : undefined;
-
-    openCard = new mapboxgl.Popup({
-      closeButton: true,
-      closeOnClick: false,
-      maxWidth: 'none',
-      className: 'campus-popup',
-      offset: 10,
-      ...(anchor ? { anchor } : {}),
-    })
-      .setLngLat(at)
-      .setDOMContent(buildingCard(props, {
-        onStart: (coords, name) => {
-          if (startPoint && endPoint) resetMap();
-          closeBuildingCard();
-          placeStart(coords, name);
-          setStatus(`Start set at ${name}. Now pick a destination.`);
-        },
-        onEnd: async (coords, name) => {
-          closeBuildingCard();
-          if (!startPoint) {
-            pendingEnd = { coords, name };
-            setStatus(`${name} set as the destination. Click the map to set a start point.`);
-            return;
-          }
-          if (endPoint) resetMap0(coords, name);
-          else await placeEnd(coords, name);
-        },
-      }))
-      .addTo(map);
-
-    openCard.on('close', () => { openCard = null; highlightBuilding(null); });
+    showPlaceCard(buildingCard(props, {
+      onStart: (coords, name) => {
+        if (startPoint && endPoint) resetMap();
+        clearSelection();
+        placeStart(coords, name);
+        setStatus(`Start set at ${name}. Now pick a destination.`);
+      },
+      onEnd: async (coords, name) => {
+        clearSelection();
+        if (!startPoint) {
+          pendingEnd = { coords, name };
+          showRoutePanel();
+          setStatus(`${name} set as the destination. Click the map to set a start point.`);
+          return;
+        }
+        if (endPoint) resetMap0(coords, name);
+        else await placeEnd(coords, name);
+      },
+      onClose: clearSelection,
+    }));
     highlightBuilding(props.officialName);
   }
 
@@ -2375,9 +2659,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (map.getLayer('campus-buildings')) addBuildingsLayer();
   }
 
+  // No `cycle` any more: that was the rail's one-glyph version of this, which
+  // had to guess a next value because a rail button has room for one word. The
+  // layers menu asks the question outright, three buttons for three answers.
   createThemeControl({
     group: themeModes,
-    cycle: { button: railTheme, icon: railThemeIcon, text: railThemeText },
     onChange: (theme) => {
       currentTheme = theme;
       syncBasemapStyle();
@@ -2397,12 +2683,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // Last of the three, so that its initial onChange — which can start a session
   // request — runs after the theme and basemap have published their own state.
   providerControl = createProviderToggle({
-    // Two doors onto one setting: the layers menu, and the rail beside the
-    // appearance button. The rail is hidden below 640px, which is why the menu
-    // keeps its row rather than the rail taking the control over.
+    // One door now. `surfaces` stays a list because the control genuinely
+    // supports several and the second was the rail's; nothing about the state
+    // behind it changed when that went.
     surfaces: [
       { button: providerToggle, icon: providerIcon, label: providerLabel },
-      { button: railProvider, icon: railProviderIcon, label: railProviderText },
     ],
     onChange: (provider) => {
       currentProvider = provider;
@@ -2419,7 +2704,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   createSkinControl({
     surfaces: [
       { button: skinToggle, icon: skinIcon, label: skinLabel },
-      { button: railSkin, icon: railSkinIcon, label: railSkinText },
     ],
     onChange: (skin) => {
       currentSkin = skin;
@@ -2428,21 +2712,29 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   });
 
   // -------------------------------------------------------------------------
-  // Chrome: the rail, the layers switcher and the legend sheet
+  // Chrome: the layers switcher, the legend and the route panel
   //
   // Small, and none of it touches the map — it opens and closes things. Kept
   // together so the "what does this button do" question has one place to look.
+  //
+  //   the LEGEND holds the right edge and is open on arrival at desktop widths,
+  //   because it is the map's key and a key you have to go and find is not one.
+  //   Its close button and the layers-menu row are the two halves of a toggle
+  //   for the people who want the whole canvas, and on a phone — where a
+  //   right-hand column would be most of the screen — closed is where it starts.
+  //
+  //   the ROUTE PANEL is closed on arrival, and opens from the top bar's
+  //   directions button or from anything that actually sets an endpoint. See
+  //   showRoutePanel.
   // -------------------------------------------------------------------------
 
-  const railMenu = document.getElementById('rail-menu');
-  const railLegend = document.getElementById('rail-legend');
-  const railClear = document.getElementById('rail-clear');
   const layersBtn = document.getElementById('layers-btn');
   const layersMenu = document.getElementById('layers-menu');
-  // legendSheet is declared up with the side panel — campusPadding measures it.
+  // legendPanel is declared up with the side panel — campusPadding measures it.
   const legendList = document.getElementById('legend-list');
   const legendClose = document.getElementById('legend-close');
-  const directionsBtn = document.getElementById('directions-btn');
+  const legendOpen = document.getElementById('layers-legend');
+  // directionsBtn is declared up with the panels — setStatus can reach it first.
   const searchGo = document.getElementById('search-go');
 
   /** Show or hide a floating card, keeping the button that owns it in step. */
@@ -2453,45 +2745,77 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return open;
   }
 
-  railMenu.addEventListener('click', () => {
-    const open = toggleSheet(sidePanel, railMenu);
-    railMenu.setAttribute('aria-label', open ? 'Hide the route panel' : 'Show the route panel');
-    // The panel is what campusPadding reserves room for, so the campus has to
-    // be re-framed when it comes or goes or it ends up visibly off-centre.
-    map.easeTo({ padding: campusPadding(), duration: 300 });
-  });
+  /**
+   * Show or hide the route panel, and re-frame the campus behind it.
+   *
+   * The panel is what `campusPadding` reserves room for, so the map has to be
+   * re-centred when it comes or goes or the campus ends up visibly off to one
+   * side of the space left over. Only when it actually moved, though — every
+   * endpoint set calls showRoutePanel, and an easeTo per click on an already
+   * open panel is a camera that drifts while you are trying to use it.
+   */
+  function toggleRoutePanel(force) {
+    const was = !sidePanel.classList.contains('hidden');
+    const open = toggleSheet(sidePanel, directionsBtn, force);
+    directionsBtn.setAttribute('aria-label', open ? 'Hide directions' : 'Directions');
+    if (open !== was) map.easeTo({ padding: campusPadding(), duration: 300 });
+    return open;
+  }
 
-  railLegend.addEventListener('click', () => {
-    const open = toggleSheet(legendSheet, railLegend);
-    railLegend.setAttribute('aria-pressed', String(open));
-    // A highlight with its legend closed is a purple campus and nothing on
-    // screen saying why, so the outline goes when the sheet does.
-    if (!open) clearLegendHighlight();
-  });
-  // Below this width the stylesheet drops the rail and turns the column into a
-  // bottom sheet. Must match the media query in src/input.css.
-  const phone = window.matchMedia('(max-width: 640px)');
+  /**
+   * Bring the route panel up because something needs to be read in it.
+   *
+   * The panel starts closed, which means every message this app writes about a
+   * route — the distance, "Now click to set an end point", a routing server
+   * that is down — is being written into a hidden card. Anything that sets an
+   * endpoint or reports an error opens it first, so the panel appears at the
+   * moment it acquires something to say and not before.
+   */
+  function showRoutePanel() {
+    toggleRoutePanel(true);
+  }
+
+  /**
+   * Show or hide the legend, and re-frame the campus beside it.
+   *
+   * Same arrangement as the route panel and for the same reason, which this
+   * did not have while it was a sheet in the left column behind a menu row: it
+   * holds 320px of the right edge now, campusPadding reserves that width, and
+   * a close that did not re-frame left the camera keeping the campus out of a
+   * strip with nothing in it.
+   */
+  function toggleLegendPanel(force) {
+    const was = !legendPanel.classList.contains('hidden');
+    const open = toggleSheet(legendPanel, legendOpen, force);
+    if (open !== was) map.easeTo({ padding: campusPadding(), duration: 300 });
+    return open;
+  }
+
+  // `phone` and the legend's opening state are set up with the panels — see
+  // there for why. This is only the button catching up with what was decided.
+  legendOpen.setAttribute('aria-expanded', String(!legendPanel.classList.contains('hidden')));
 
   legendClose.addEventListener('click', () => {
-    toggleSheet(legendSheet, railLegend, false);
-    railLegend.setAttribute('aria-pressed', 'false');
-    if (phone.matches) toggleSheet(sidePanel, railMenu, true);
+    // The outline first, so the category's pins are already gone by the time
+    // the re-frame runs and the camera is not fitting a set of markers that is
+    // about to be taken off the map.
+    //
+    // A highlight with its legend closed is a purple campus and nothing on
+    // screen saying why, so the outline — and the category it belongs to — go
+    // when the panel does.
     clearLegendHighlight();
+    toggleLegendPanel(false);
   });
 
-  // The phone's way in, from the layers menu. Drives the same sheet and the
-  // same rail state, so the two doors cannot disagree about whether it is open.
-  document.getElementById('layers-legend').addEventListener('click', () => {
+  legendOpen.addEventListener('click', () => {
     toggleSheet(layersMenu, layersBtn, false);
-    toggleSheet(legendSheet, railLegend, true);
-    railLegend.setAttribute('aria-pressed', 'true');
-    // On the phone these two are alternatives, not a stack. Both at once is a
-    // sheet over two thirds of the screen with three legend rows showing, and
-    // a campus squeezed into the strip above it. The directions button in the
-    // top bar is what brings the route panel back.
-    if (phone.matches) toggleSheet(sidePanel, railMenu, false);
+    const open = toggleLegendPanel();
+    if (!open) { clearLegendHighlight(); return; }
+    // On the phone these two are alternatives, not a stack: both at once is a
+    // sheet over two thirds of the screen with three legend rows showing, and a
+    // campus squeezed into the strip above it.
+    if (phone.matches) toggleRoutePanel(false);
   });
-  railClear.addEventListener('click', resetMap);
 
   layersBtn.addEventListener('click', () => toggleSheet(layersMenu, layersBtn));
   // Click-away, the way every menu of this shape behaves. Bound on the document
@@ -2504,23 +2828,42 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
   const focusSearch = () => { searchInput.focus(); searchInput.select(); };
   searchGo.addEventListener('click', focusSearch);
+  // A toggle rather than an opener, which is what the rail's collapse button
+  // used to be for. Only focus the search when the panel is being SHOWN — a
+  // click that hides a card should not then put the caret in the field that
+  // went with it.
   directionsBtn.addEventListener('click', () => {
-    toggleSheet(sidePanel, railMenu, true);
-    focusSearch();
+    if (toggleRoutePanel()) focusSearch();
   });
 
   // -------------------------------------------------------------------------
-  // The legend, which is also a query
+  // The legend, which is also the query
   //
-  // Generated from the same list the chips are, so the two can never disagree
-  // about what this map's symbols mean. Unlike the chips, a row here does not
-  // change what is on the map — it points at what is already there. Hover to
-  // ask, click to keep the answer up.
+  // Generated from src/categories.js, so the key and what it finds cannot
+  // disagree about what this map's symbols mean.
   //
-  // Deliberately independent of the chip strip: a chip answers "where are the
-  // defibrillators", a legend row answers "which buildings have one". Both can
-  // be up at once and they do not fight, because one draws pins and the other
-  // outlines ground.
+  // This list and the chip strip used to be two controls. They were built from
+  // the same twelve rows in the same order with the same pictograms, and the
+  // only thing that distinguished them was which half of the question they
+  // answered — a chip answered "where are the defibrillators" with pins, a
+  // legend row answered "which buildings have one" with an outline. That is a
+  // distinction about the asking, not about the thing asked after, and paying
+  // for it in two pieces of chrome was the wrong trade.
+  //
+  // One list, two interactions, both of which a row already had:
+  //
+  //   POINT at a row (hover, or focus, so it works from the keyboard) and the
+  //   buildings and car parks holding that thing outline. Undoable — moving off
+  //   puts back whatever was selected — so running an eye down twelve rows
+  //   costs nothing.
+  //
+  //   PRESS a row and it becomes the category: its pins arrive with their names
+  //   over a cleared map, the results list opens on the left, the camera frames
+  //   them, and the outline stays up underneath. Press it again for the campus
+  //   back.
+  //
+  // The two do not fight — one paints ground, the other draws markers — which
+  // is what made merging them possible rather than merely tidy.
   // -------------------------------------------------------------------------
 
   /** "6 buildings", "1 building · 22 zones · 5 outdoors", or nothing at all. */
@@ -2536,8 +2879,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   function renderLegend() {
-    const ready = legendAreas.length > 0;
-
     legendList.replaceChildren(...CATEGORIES.map((category) => {
       const highlight = legendHighlights.get(category.id);
       const li = document.createElement('li');
@@ -2548,11 +2889,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       row.dataset.id = category.id;
       // A toggle, not a radio: the pressed row is a thing you turn off again,
       // and there is no fourth state for "none of them" to occupy.
-      row.setAttribute('aria-pressed', String(stickyRow === category.id));
-      // Until the overlays land there is nothing to outline and a row that
-      // silently did nothing would read as broken rather than as early — the
-      // same reason the chips start disabled.
-      row.disabled = !ready;
+      row.setAttribute('aria-pressed', String(activeCategory === category.id));
+      // Both data files are still in flight at this point, and a row that
+      // silently reports "Nothing found" reads as broken rather than as early.
+      row.disabled = !legendReady;
 
       const glyph = document.createElement('span');
       glyph.className = 'g-icon g-legend-glyph';
@@ -2562,9 +2902,17 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       text.className = 'g-legend-text';
       const name = document.createElement('span');
       name.className = 'g-legend-name';
-      name.textContent = category.legend;
+      // The category's own short label rather than the printed wording. This
+      // row is a control now — the thing you press to find restrooms — and
+      // "Restrooms" is what a control is called; the sheet's full phrasing
+      // ("All-gender restroom") is the title, where it reads as a gloss.
+      name.textContent = category.label;
       text.append(name);
+      row.title = category.legend;
 
+      // What the outline will do, printed before you ask for it. Absent until
+      // the join has run, which is the only thing `highlight` being missing
+      // ever means.
       if (highlight) {
         const count = document.createElement('span');
         count.className = 'g-legend-count';
@@ -2573,9 +2921,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       }
 
       row.append(glyph, text);
-      row.addEventListener('click', () => {
-        selectLegendRow(stickyRow === category.id ? null : category.id);
-      });
+      row.addEventListener('click', () => selectCategory(category.id));
       // Focus counts as hover, so the whole thing works from the keyboard.
       row.addEventListener('mouseenter', () => previewLegendRow(category.id));
       row.addEventListener('focus', () => previewLegendRow(category.id));
@@ -2588,6 +2934,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     paintIcons(legendList);
   }
 
+  /** The pressed state alone, for the paths that already redrew everything else. */
+  function syncLegendRows() {
+    for (const li of legendList.children) {
+      const row = li.firstElementChild;
+      row?.setAttribute('aria-pressed', String(row.dataset.id === activeCategory));
+    }
+  }
+
+  /** Called once the overlays a category reads from have actually arrived. */
+  function enableLegend() {
+    legendReady = true;
+    renderLegend();
+  }
+
   function previewLegendRow(id) {
     if (hoverRow === id) return;
     hoverRow = id;
@@ -2597,22 +2957,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /** Both halves of the state, for the places the legend itself goes away. */
   function clearLegendHighlight() {
     hoverRow = null;
-    selectLegendRow(null);
-    paintHighlight();
-  }
-
-  function selectLegendRow(id) {
-    if (stickyRow === id) return;
-    stickyRow = id;
-    for (const li of legendList.children) {
-      li.firstElementChild?.setAttribute('aria-pressed', String(li.firstElementChild.dataset.id === id));
-    }
-    paintHighlight();
-
-    // Framed on the click only. A camera that moved on hover would make
-    // running an eye down twelve rows into twelve flights.
-    const highlight = id ? legendHighlights.get(id) : null;
-    if (highlight) frame(extentOf(legendAreas, highlight), { maxZoom: 17 });
+    if (activeCategory) clearCategory();
+    else { stickyRow = null; paintHighlight(); }
   }
 
   /**
@@ -2650,11 +2996,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       trackUserLocation: true,
       showUserHeading: true,
     });
-    // Bottom-right, which is where Google keeps locate, zoom and the scale bar.
-    // Order matters: controls stack upward from the corner in the order added,
-    // so locate ends up above the zoom pair, as it is on their map.
-    map.addControl(geolocate, 'bottom-right');
+    // Bottom-right, which is where Google keeps locate, zoom and the scale bar,
+    // and in that order up the stack: scale on top, then locate, then the zoom
+    // pair, with the credit line under all three.
+    //
+    // Which means adding them in the opposite order to the one they appear in.
+    // `addControl` APPENDS for a top corner and PREPENDS for a bottom one —
+    // `-1 !== position.indexOf('bottom') ? insertBefore(el, firstChild) : ...`
+    // — so a bottom stack reads bottom-up in the order it was written. This
+    // used to read geolocate, navigation, scale under a comment claiming that
+    // put locate above the zoom pair "as it is on their map"; it put it below.
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+    map.addControl(geolocate, 'bottom-right');
     map.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-right');
     geolocate.on('geolocate', (e) => {
       onUserMoved([e.coords.longitude, e.coords.latitude], { duration: 1000 });
@@ -2723,7 +3076,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // a category over the surviving file is still a working category.
     if (campusAmenities || campusPlaces) {
       addCategoryLayer();
-      enableChips();
+      enableLegend();
     }
 
     if (directory.status === 'fulfilled') {
@@ -2791,6 +3144,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let pendingEnd = null;
 
   function placeStart(coords, label) {
+    showRoutePanel();
     startPoint = point(coords);
     startMarker?.remove();
     startMarker = new mapboxgl.Marker({
@@ -2804,6 +3158,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   async function placeEnd(coords, label) {
+    showRoutePanel();
     endPoint = point(coords);
     endMarker?.remove();
     endMarker = new mapboxgl.Marker({
@@ -2875,6 +3230,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   async function setDestination(coords, name) {
     // Both ends already set: start over rather than accumulating markers.
     if (startPoint && endPoint) resetMap();
+    // Before the flyTo below, so the camera is framing the space the panel has
+    // already taken rather than the space it is about to.
+    showRoutePanel();
 
     if (!startPoint) {
       // Nothing to route yet, so the destination is the only thing worth
@@ -2883,7 +3241,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // the destination at z17, then test the route against the view it had
       // *before* the flight, decide it was already visible, and leave half the
       // walk off the top of the screen. Which is exactly what it did.
-      map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 17), duration: 900 });
+      // Padding stated rather than inherited: showRoutePanel above started a
+      // 300 ms padding ease, and a flight that did not carry its own would
+      // interrupt that ease and keep whatever partial value it had reached.
+      map.flyTo({
+        center: coords,
+        zoom: Math.max(map.getZoom(), 17),
+        padding: campusPadding(),
+        duration: 900,
+      });
       pendingEnd = { coords, name };
       endMarker?.remove();
       endMarker = new mapboxgl.Marker({
@@ -2913,10 +3279,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     map.getCanvas().style.cursor = over ? 'pointer' : 'crosshair';
   });
 
-  // Esc puts a selection back, which is the one thing every floating card on
-  // every map agrees on.
+  // Esc puts a selection back, which is the one thing every card on every map
+  // agrees on. Both halves of it: a tap on a footprint opens a card without
+  // lifting anything, so an Esc that only put pins down would leave that one up.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') deselectPin();
+    if (e.key === 'Escape') clearSelection();
   });
 
   map.on('click', async (e) => {
@@ -2933,17 +3300,31 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (pin) {
       const named = pin.text ? buildingAt(e.point) : null;
       selectPin(pin, { card: !named });
-      if (named) showBuildingCard(e.lngLat, named);
+      if (named) showBuildingCard(named);
       return;
     }
-    deselectPin();
+    clearSelection();
+
+    // Anywhere else on the map puts the campus back.
+    //
+    // Pressing the lit legend row again already does this, but that row is over
+    // on the right and the thing you want to dismiss is under your finger.
+    // Tapping away is what people try first, and until it was handled here it
+    // fell through to the router and dropped a start point on the map instead.
+    //
+    // CONSUMED, not passed on: this returns rather than carrying on to the
+    // building card and the route below. One tap should do one thing, and a tap
+    // that both cleared the restrooms and opened whatever building was behind
+    // them would leave the map in a state nobody asked for. The second tap gets
+    // the building.
+    if (activeCategory) { clearCategory(); return; }
 
     // A tap on a building asks what it is rather than dropping a pin on it.
     // The card's own buttons then set a start or destination, and they do it at
     // the entrance node rather than wherever the finger landed.
     const building = buildingAt(e.point);
     if (building) {
-      showBuildingCard(e.lngLat, building);
+      showBuildingCard(building);
       return;
     }
     closeBuildingCard();

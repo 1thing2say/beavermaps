@@ -58,17 +58,31 @@
     --g-shadow: 0 1px 2px rgba(60, 64, 67, 0.3), 0 2px 6px 2px rgba(60, 64, 67, 0.15);
     --g-shadow-sm: 0 1px 2px rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
 
-    /* The rail's width, and the gutter the floating column keeps from it.
-       Referenced by the column, the layers switcher and the legend sheet, so
-       widening the rail moves all three together. */
-    --g-rail-w: 56px;
+    /* The gutter every floating thing keeps from the edge and from its
+       neighbour. There used to be a --g-rail-w beside this, the width of the
+       left rail, and the column, the layers switcher and the attribution all
+       measured from it. The rail is gone and so is the variable: they measure
+       from the edge now. */
     --g-gap: 10px;
     --g-col-w: 400px;
+    /* The legend on the right. Narrower than the left column because its rows
+       are a name and a count, not a directory listing. */
+    --g-legend-w: 280px;
 
-    /* The strip along the bottom of the screen that belongs to the map credits.
-       Only the phone layout claims it back, because only there does the panel
-       span the full width and cover them. */
+    /* The strip along the bottom of the screen that belongs to the map credits:
+       Mapbox's wordmark on one side, whoever's copyright line on the other.
+       Nothing else is allowed into it — attribution is a licence term, not
+       decoration, and everything that used to sit in that band now measures
+       itself up from --g-credit-h instead. */
     --g-credit-h: 22px;
+
+    /* ...and how much of the bottom-right corner the map's own controls claim
+       above it: the scale bar, the zoom pair and the locate button, with a gap
+       between each. Stated rather than measured because the legend column has
+       to stop short of it, and a column cannot ask how tall the thing below it
+       is without a layout pass it does not get. Keep in step with the sizes in
+       "Mapbox's own controls" below. */
+    --g-hud-h: 200px;
 
     /* --- what the two looks disagree about --------------------------------
        Everything below is overridden wholesale by the Apple skin further down.
@@ -418,42 +432,15 @@
     }
 }
 
-/* Mapbox's popup chrome gets out of the way; the card in src/building-popup.js
-   brings its own surface, border and shadow so it can follow the theme. */
-.campus-popup .mapboxgl-popup-content {
-    padding: 0;
-    background: transparent;
-    box-shadow: none;
-    border-radius: 0.5rem;
-}
+/* Two blocks of popup chrome used to sit here, one for the building card and
+   one for the smaller card a lifted pin opened: Mapbox's own padding and
+   background zeroed out, its close button restyled, its tip repainted in each
+   theme so the little triangle matched the card above it.
 
-.campus-popup .mapboxgl-popup-close-button {
-    width: 1.75rem;
-    height: 1.75rem;
-    font-size: 1.1rem;
-    line-height: 1;
-    color: #9ca3af;
-}
-
-.campus-popup .mapboxgl-popup-close-button:hover {
-    background: transparent;
-    color: #374151;
-}
-
-[data-theme="dark"] .campus-popup .mapboxgl-popup-close-button:hover {
-    color: #e5e7eb;
-}
-
-/* The tip is drawn from the popup's own background, which is now transparent. */
-.campus-popup .mapboxgl-popup-tip {
-    border-top-color: #ffffff;
-    border-bottom-color: #ffffff;
-}
-
-[data-theme="dark"] .campus-popup .mapboxgl-popup-tip {
-    border-top-color: #262626;
-    border-bottom-color: #262626;
-}
+   Both cards are panel contents now — see #place-panel — so there is no popup,
+   no tip and no anchoring. What replaced these is `.g-place*` further down,
+   which is a card in the left column that follows the tokens like every other.
+*/
 
 /* --- the selected pin ------------------------------------------------------
    The balloon a tap lifts out of the symbol layer. The curve and the timings
@@ -469,6 +456,16 @@
     cursor: pointer;
     /* Above the ambient symbols in the canvas, below the chrome. */
     z-index: 5;
+}
+
+/* The sideways settle, wrapped around the head rather than applied to it. The
+   grow is a transition and the sway is a keyframe animation, and a running
+   animation beats a transition on the same property outright — sharing one
+   `transform` would drop the growth for as long as the swing lasted, not blend
+   them. Nothing is declared here: the keyframes are generated in pin-select.js,
+   from the fit, at the marker's own width. */
+.pin-selected-sway {
+    will-change: transform;
 }
 
 .pin-selected-scale {
@@ -546,18 +543,6 @@
     opacity: 1;
 }
 
-/* The pin's own card. Same surface as the building card, narrower, and with no
-   tip — the balloon underneath is already pointing at the place. */
-.pin-popup .mapboxgl-popup-content {
-    padding: 0;
-    background: transparent;
-    box-shadow: none;
-}
-
-.pin-popup .mapboxgl-popup-tip {
-    display: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
 
     /* The spring is the feature, so what is left when it is refused is the
@@ -572,8 +557,8 @@
    Google-style chrome
    ===========================================================================
    Written as plain CSS rather than Tailwind utilities in the markup, because
-   the same six shapes (card, chip, rail button, icon button, pill button, list
-   row) appear a dozen times each. Class-per-shape means one edit changes all
+   the same five shapes (card, chip, icon button, pill button, list row) appear
+   a dozen times each. Class-per-shape means one edit changes all
    of them, and the HTML stays readable enough to see the structure.
    =========================================================================== */
 
@@ -621,7 +606,6 @@ body.navigating .app-chrome {
 .g-panel.hidden,
 .g-legend.hidden,
 .g-layers-menu.hidden,
-.g-chip-arrow.hidden,
 .g-search-clear.hidden,
 .g-results.hidden {
     display: none;
@@ -670,67 +654,12 @@ body.navigating .app-chrome {
     color: var(--g-text);
 }
 
-/* --- far-left rail --------------------------------------------------------- */
-
-.g-rail {
-    position: absolute;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    z-index: 20;
-    width: var(--g-rail-w);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    padding: 8px 0;
-    background: var(--g-surface);
-    border-right: 1px solid var(--g-line);
-}
-
-.g-rail-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    width: 48px;
-    padding: 8px 0;
-    border: 0;
-    border-radius: var(--g-radius-sm);
-    background: transparent;
-    color: var(--g-text-dim);
-    cursor: pointer;
-    transition: background-color 120ms ease, color 120ms ease;
-}
-
-.g-rail-btn:hover {
-    background: var(--g-hover);
-    color: var(--g-text);
-}
-
-.g-rail-btn[aria-pressed="true"] {
-    color: var(--g-blue);
-}
-
-.g-rail-icon {
-    display: block;
-    width: 22px;
-    height: 22px;
-}
-
-.g-rail-text {
-    font-size: 10px;
-    line-height: 1.2;
-    letter-spacing: 0.2px;
-}
-
 /* --- the floating column: search, chips, panels ---------------------------- */
 
 .g-topbar {
     position: absolute;
     top: var(--g-gap);
-    left: calc(var(--g-rail-w) + var(--g-gap));
+    left: var(--g-gap);
     right: var(--g-gap);
     /* Above the column below it, so the search suggestions overlap the panels
        rather than being covered by them. */
@@ -745,13 +674,15 @@ body.navigating .app-chrome {
     position: absolute;
     /* Clears the top bar: 48px of search field plus both gutters. */
     top: calc(var(--g-gap) * 2 + 48px);
-    left: calc(var(--g-rail-w) + var(--g-gap));
+    left: var(--g-gap);
     z-index: 20;
     width: var(--g-col-w);
-    max-width: calc(100vw - var(--g-rail-w) - var(--g-gap) * 2);
+    max-width: calc(100vw - var(--g-gap) * 2);
     /* Bounded so a long results list scrolls inside its card instead of running
-       off the bottom of the viewport. */
-    max-height: calc(100dvh - var(--g-gap) * 3 - 48px);
+       off the bottom of the viewport — and specifically so it stops short of
+       the layers switcher and the credit strip in the corner below, which it
+       would otherwise reach right over once all three of its cards are open. */
+    max-height: calc(100dvh - var(--g-gap) * 4 - 48px - 64px - var(--g-credit-h));
     display: flex;
     flex-direction: column;
     gap: var(--g-gap);
@@ -760,7 +691,27 @@ body.navigating .app-chrome {
     pointer-events: none;
 }
 
+/* The legend's column, holding the right edge. Bounded away from the control
+   stack in the bottom-right corner for the same reason the left one is bounded
+   away from the layers switcher: twelve rows plus a head is taller than a short
+   window, and a key that runs under the zoom buttons is a key with rows you
+   cannot read. */
+.g-right {
+    position: absolute;
+    top: var(--g-gap);
+    right: var(--g-gap);
+    z-index: 20;
+    width: var(--g-legend-w);
+    max-width: calc(100vw - var(--g-gap) * 2);
+    max-height: calc(100dvh - var(--g-gap) * 2 - var(--g-hud-h));
+    display: flex;
+    flex-direction: column;
+    gap: var(--g-gap);
+    pointer-events: none;
+}
+
 .g-topleft > *,
+.g-right > *,
 .g-topbar > * {
     pointer-events: auto;
 }
@@ -910,119 +861,18 @@ body.navigating .app-chrome {
     overflow: hidden;
 }
 
-/* --- category chips -------------------------------------------------------- */
+/* A horizontal chip strip lived here — twelve pill buttons scrolling sideways
+   through a slot in the top bar, with an arrow button at each end. It is the
+   legend now, and the rules it needed went with it: the overflow container, the
+   hidden scrollbar, the two absolutely positioned arrows, and the pressed-state
+   specificity fix that a `:hover:not(:disabled)` at 0-3-0 forced on it.
 
-.g-chips-wrap {
-    position: relative;
-    /* Takes the rest of the bar. min-width:0 is what actually lets it shrink —
-       a flex item's default min-width:auto would let the chip strip's content
-       push the search field off the screen instead of scrolling. */
-    flex: 1;
-    min-width: 0;
-}
-
-.g-chips {
-    display: flex;
-    gap: 8px;
-    overflow-x: auto;
-    /* The chips are the one strip allowed to overflow sideways; the scrollbar
-       is hidden because the arrow buttons are the affordance. */
-    scrollbar-width: none;
-    scroll-behavior: smooth;
-    padding: 2px 0;
-}
-
-.g-chips::-webkit-scrollbar {
-    display: none;
-}
-
-.g-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 32px;
-    padding: 0 12px;
-    flex: none;
-    border: 0;
-    border-radius: 9999px;
-    background: var(--g-surface);
-    color: var(--g-text);
-    box-shadow: var(--g-shadow-sm);
-    font-size: 14px;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background-color 120ms ease, color 120ms ease;
-}
-
-/* The pressed state has to be excluded here rather than relying on source
-   order: `:hover:not(:disabled)` is 0-3-0 and `[aria-pressed="true"]` only
-   0-2-0, so hovering a selected chip repainted it white — and since the pressed
-   rule's white text still applied, the chip went blank. */
-.g-chip:hover:not(:disabled):not([aria-pressed="true"]) {
-    background: var(--g-surface-2);
-}
-
-.g-chip:disabled {
-    opacity: 0.5;
-    cursor: default;
-}
-
-.g-chip .g-icon {
-    width: 16px;
-    height: 16px;
-    color: var(--g-text-dim);
-}
-
-/* Selected reads as filled blue, the way Google's do — the chip strip is the
-   only place on the map where a control announces a live filter. */
-.g-chip[aria-pressed="true"] {
-    background: var(--g-blue);
-    color: var(--g-on-blue);
-}
-
-.g-chip[aria-pressed="true"]:hover {
-    filter: brightness(1.08);
-}
-
-.g-chip[aria-pressed="true"] .g-icon {
-    color: var(--g-on-blue);
-}
-
-.g-chip-count {
-    font-size: 12px;
-    opacity: 0.75;
-}
-
-.g-chip-arrow {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 2;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: 0;
-    border-radius: 9999px;
-    background: var(--g-surface);
-    color: var(--g-text-dim);
-    box-shadow: var(--g-shadow-sm);
-    cursor: pointer;
-}
-
-#chips-prev {
-    left: -4px;
-}
-
-#chips-next {
-    right: -4px;
-}
-
-.g-chip-arrow .g-icon {
-    width: 16px;
-    height: 16px;
-}
+   The pills themselves are the one loss worth naming. A filled blue chip is
+   Google's own way of saying "a filter is live", and it announced itself from
+   across the screen; a pressed legend row is quieter than that. It is also in a
+   list that is always on screen and always says what the map's symbols mean,
+   which the strip could not be — twelve categories in a slot four wide is a
+   control you have to scroll to read. */
 
 /* --- panels ---------------------------------------------------------------- */
 
@@ -1080,6 +930,115 @@ body.navigating .app-chrome {
 
 #side-panel {
     flex: none;
+}
+
+/* --- the selected place ----------------------------------------------------
+   What a tap on the map opens: a building's card, or the thinner one a lone pin
+   gets. They were floating popups anchored to the thing they described, which
+   is the one card on this map that could not be — a building card is as wide as
+   the column and as tall as its directory, so opening the LRC put a list of
+   what is inside the LRC over the middle of the campus.
+
+   Sharing the column with the results and the route means sharing their
+   scrolling arrangement too: the head and the actions hold their height, the
+   directory in the middle gives up whatever the column has left. */
+
+/* Sized by its card and no more. Deliberately without the min-height its
+   neighbour has: a pin's card is a title and two buttons, and a floor set under
+   it would be dead space inside the surface rather than room for another row. */
+#place-panel {
+    flex: 0 1 auto;
+}
+
+/* Shrinkable, so a squeezed column reaches the scroll container inside rather
+   than stopping at the card. min-height:0 is the whole of what makes that work
+   — a flex item's automatic minimum is its content. */
+.g-place {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* The head's own text, which the close button sits beside. Needed because the
+   heading now carries up to four lines under it — my campus name, the floor area,
+   the parts it was folded from — and they all belong left of the ×. */
+.g-place-head-text {
+    min-width: 0;
+    flex: 1;
+}
+
+.g-place-facts {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: var(--g-text-dim);
+}
+
+.g-place-body {
+    padding: 8px 16px 4px;
+    border-top: 1px solid var(--g-head-rule);
+    /* The part that absorbs the column's leftover height, the way the results
+       list and the legend list do. */
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.g-place-kicker {
+    margin: 0 0 6px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--g-text-dim);
+}
+
+.g-place-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.g-place-item-name {
+    display: block;
+    font-size: 13px;
+    line-height: 1.35;
+    color: var(--g-text);
+}
+
+.g-place-item-sub {
+    display: block;
+    margin-top: 1px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--g-text-dim);
+}
+
+.g-place-facilities {
+    margin: 0;
+    flex: none;
+    padding: 8px 16px;
+    border-top: 1px solid var(--g-head-rule);
+    font-size: 12px;
+    color: var(--g-text-dim);
+}
+
+.g-place-actions {
+    display: flex;
+    gap: 8px;
+    flex: none;
+    padding: 10px 16px 12px;
+    border-top: 1px solid var(--g-head-rule);
+}
+
+/* Both buttons split the row. The route panel's actions sit at their natural
+   width because there are three of them and one is primary; here there are two
+   and neither is the obvious default. */
+.g-place-actions .g-btn {
+    flex: 1;
 }
 
 .g-row {
@@ -1308,13 +1267,22 @@ body.navigating .app-chrome {
 
 /* --- layers switcher, bottom-left ------------------------------------------ */
 
-/* Clear of the floating column, not under it. The column can run the full
-   height of the viewport once a category list is open, and at 900px it was
-   landing on top of this. */
+/* In the corner, which is where Google keeps it and where it was not.
+   It used to be pushed a whole column's width to the right — `left: gap*2 +
+   col-w` — to get clear of a floating column that could run the full height of
+   the viewport. That left it stranded in the middle of the bottom edge, next to
+   nothing, which is most of what made the bottom of this map read as scattered:
+   a wordmark hard against one corner, a 64px thumbnail 420px along from it, and
+   the scale bar and the zoom stack somewhere off to the right at three
+   different heights.
+
+   The column yields instead. It is bounded to stop above this — see the
+   max-height on .g-topleft — so the two no longer have to be kept apart by
+   distance. Sits above the credit strip, not in it. */
 .g-layers {
     position: absolute;
-    left: calc(var(--g-rail-w) + var(--g-gap) * 2 + var(--g-col-w));
-    bottom: 24px;
+    left: var(--g-gap);
+    bottom: calc(var(--g-gap) * 2 + var(--g-credit-h));
     z-index: 20;
     display: flex;
     flex-direction: column;
@@ -1391,13 +1359,6 @@ body.navigating .app-chrome {
 .g-layers-row {
     display: flex;
     gap: 8px;
-}
-
-/* Things the rail already carries at this width, and only it carries below it.
-   Hidden by default rather than shown, so the desktop never has two doors onto
-   one sheet. */
-.g-phone-only {
-    display: none;
 }
 
 .g-layer-btn--wide {
@@ -1558,6 +1519,48 @@ body.navigating .app-chrome {
 
 /* --- Mapbox's own controls, restyled to match ------------------------------ */
 
+/* One column in one corner, evenly spaced.
+ *
+ * Mapbox stacks these with `float: right` and `clear: both`, and gives each one
+ * `margin: 0 10px 10px 0`. Floats cannot be spaced by their container, so the
+ * gaps were whatever each control's own margins happened to add up to next to
+ * its neighbour's — the scale bar sat a clear 25px off the zoom buttons while
+ * those two were flush against each other, and the whole stack read as four
+ * separately placed things rather than one.
+ *
+ * Flex instead, which is what makes `gap` mean anything. Nothing else about the
+ * layout changes: the container is already `position: absolute; bottom: 0;
+ * right: 0` with an auto width, so it still shrinks to its widest child and
+ * still grows upward from the corner, and DOM order still runs top to bottom.
+ * `float` is simply ignored on a flex item.
+ *
+ * The bottom padding rather than a margin is deliberate: the last child is the
+ * attribution, and 10px of padding puts it exactly level with the Mapbox
+ * wordmark in the opposite corner, which carries a 10px margin of its own. The
+ * bottom of the screen is one credit band across both corners.
+ *
+ * Keep the heights here in step with --g-hud-h, which is how much of this
+ * corner the legend column has been told to stay out of. */
+.mapboxgl-ctrl-bottom-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    padding: 0 var(--g-gap) var(--g-gap) 0;
+    gap: 8px;
+}
+
+/* Written through .mapboxgl-control-container purely to reach 0-3-0. Mapbox's
+   own `.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl { margin: 0 10px 10px 0 }` is
+   0-2-0, and mapbox-gl.css is imported from main.js — so it is injected as a
+   <style> AFTER this file's <link> and wins every tie. At 0-2-0 this rule did
+   nothing: the stack kept its 10px bottom margins on top of the 8px gap, which
+   is the uneven spacing the gap was added to fix, and sat 10px further from the
+   right edge than the credit line below it. Same reason the attribution colours
+   further down are !important. */
+.mapboxgl-control-container .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl {
+    margin: 0;
+}
+
 .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
     background: var(--g-surface);
     border-radius: var(--g-radius-sm);
@@ -1582,18 +1585,23 @@ body.navigating .app-chrome {
     filter: invert(1) brightness(1.4);
 }
 
-/* Mapbox pins its wordmark to the canvas's own bottom-left corner, which is
-   underneath the rail: the rail is opaque and sits at z-index 20, so it covered
-   the first 56 px of the logo and the credit arrived on screen reading "pbox".
-   Attribution is a licence term, not decoration, so it moves clear of the rail
-   rather than being restyled around it.
+/* The wordmark keeps Mapbox's own bottom-left corner. The layers switcher sits
+   a credit strip's height above it rather than beside it, so nothing covers it
+   — which a left rail used to, clipping the first 56px and putting the credit
+   on screen reading "pbox".
 
-   Qualified by #map, and that is not decoration either. mapbox-gl.css is
-   imported from JS and lands after this file, so its own
-   `.mapboxgl-ctrl-bottom-left { left: 0 }` is the same 0-1-0 specificity and
-   later in the document — it wins a tie. The id takes it out of the tie. */
-#map .mapboxgl-ctrl-bottom-left {
-    left: var(--g-rail-w);
+   Hidden when Google is drawing the ground, and only then. That is not a
+   cosmetic call: under Google the Mapbox style is BLANK — `sources: {}`,
+   `layers: []`, see BLANK_STYLE in src/palette.js — and every road, label and
+   photograph on screen came from Google's Map Tiles API, which supplies its own
+   required copyright line in the opposite corner. A wordmark next to it credits
+   a supplier whose data is not being shown. The one thing still coming from
+   Mapbox on this path is the glyph endpoint the campus labels are set from, so
+   whether their terms want the mark up regardless is a judgment about the
+   licence rather than about the layout; flip this rule off if the answer is
+   that they do. Under the Mapbox provider it is never hidden. */
+[data-provider="google"] .mapboxgl-ctrl-logo {
+    display: none;
 }
 
 .mapboxgl-ctrl-attrib,
@@ -1627,7 +1635,6 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
    handful of places where the two looks disagree about the *shape* of a control
    rather than its colour, and each of these is a single idea:
 
-     - the rail is a floating stack of glyphs, not an edge-to-edge bar
      - a card titles itself in the centre, in bold, with no rule under it
      - the layers switcher is a glyph, not a picture of a map
      - the turn-by-turn sign is a card like every other card
@@ -1636,45 +1643,11 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
    no rule below has to be undone by anything above it.
    =========================================================================== */
 
-/* Apple has no left rail; the nearest thing in their own Maps is the floating
-   control stack in the top-right corner, so that is what this becomes. It keeps
-   the rail's reserved width rather than reclaiming it, because the column, the
-   layers switcher and the attribution all measure from --g-rail-w and the point
-   here is a restyle, not a relayout. */
-[data-skin="apple"] .g-rail {
-    top: var(--g-gap);
-    bottom: auto;
-    left: var(--g-gap);
-    width: 44px;
-    padding: 4px;
-    gap: 2px;
-    border-right: 0;
-    border-radius: var(--g-radius);
-    background: var(--g-card-bg);
-    -webkit-backdrop-filter: var(--g-card-filter);
-    backdrop-filter: var(--g-card-filter);
-    box-shadow: var(--g-shadow);
-}
-
-/* Icon-only, like the stack it is modelled on. The captions were the label for
-   a control whose meaning changes — Auto/Light/Dark, Mapbox/Google, Apple/
-   Classic — so they are hidden rather than removed: every one of those controls
-   also writes the same words into its button's aria-label, and a screen reader
-   still gets them. */
-[data-skin="apple"] .g-rail-btn {
-    width: 36px;
-    height: 36px;
-    padding: 0;
-}
-
-[data-skin="apple"] .g-rail-text {
-    display: none;
-}
-
-[data-skin="apple"] .g-rail-icon {
-    width: 20px;
-    height: 20px;
-}
+/* The Apple look used to restyle the rail here — Apple has no left rail, so it
+   became the floating control stack their own Maps keeps in a corner. Both the
+   rail and its restyle are gone. The two looks now differ over the cards, the
+   layers switcher and the turn-by-turn sign, and no longer over a piece of
+   chrome that only one of them had a model for. */
 
 /* Apple centres a place card's name and sets it large and bold, with the
    category underneath in grey — see the Seely Park card. The close button
@@ -1708,20 +1681,11 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     background: var(--g-surface-2);
 }
 
-/* Chips are the one floating control that is not a .g-card, so it needs the
-   material said again rather than inherited. */
-[data-skin="apple"] .g-chip,
-[data-skin="apple"] .g-chip-arrow {
-    background: var(--g-card-bg);
-    -webkit-backdrop-filter: var(--g-card-filter);
-    backdrop-filter: var(--g-card-filter);
-}
-
-/* ...and therefore its own hover, since the classic one resolves to an opaque
-   colour that would cancel the material on the way past. */
-[data-skin="apple"] .g-chip:hover:not(:disabled):not([aria-pressed="true"]) {
-    background: color-mix(in srgb, var(--g-blue) 12%, var(--g-card-bg));
-}
+/* Two rules for the chip strip lived here: it was the one floating control that
+   was not a .g-card, so Apple's material had to be restated on it and then its
+   hover restated again on top, since the classic hover resolves to an opaque
+   colour that cancelled the blur on the way past. The legend rows that replaced
+   the chips are inside a .g-card, so they inherit both and need neither. */
 
 /* Bigger and heavier: Apple's actions are 40px capsules with semibold labels,
    which is what lets the primary one carry a glyph and a word at this size. */
@@ -1797,60 +1761,38 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
 
 /* --- narrow screens -------------------------------------------------------- */
 /*
-   Below this the rail costs more than it carries, so it goes and the floating
-   column takes the full width — which is what Google does on a phone, minus
-   the bottom sheet.
+   Two columns hold the edges down to 900px, one to 640px, and below that the
+   left one becomes a bottom sheet — which is what Google does on a phone.
 */
-/* Two chips and a search field is not a bar. Below this the two stack, and the
-   column drops to clear both rows. */
+
+/* This breakpoint used to wrap the top bar onto two rows, because a 400px search
+   field and a chip strip could not share one at this width, and drop the left
+   column 90px to clear both. There is no strip in the bar any more and both
+   rules went with it.
+
+   What is left is the collision the legend brought: the search field is 400px
+   and the legend 280px, so somewhere below 900 they stop fitting side by side
+   and the legend lands on the field. It drops under the bar instead — the bar
+   is one row now, so that costs 58px and no wrapping. */
 @media (max-width: 900px) {
-    .g-topbar {
-        flex-wrap: wrap;
-    }
-
-    .g-search {
-        width: 100%;
-    }
-
-    .g-topleft {
-        top: calc(var(--g-gap) * 2 + 90px);
-        max-height: calc(100dvh - var(--g-gap) * 3 - 90px);
+    .g-right {
+        top: calc(var(--g-gap) * 2 + 48px);
+        max-height: calc(100dvh - var(--g-gap) * 3 - 48px - var(--g-hud-h));
     }
 }
 
 /*
- * Phone. The rail costs more than it carries, and the panels become a bottom
- * sheet — Google's own mobile pattern, and the fix for two things at once: the
- * panel is no longer sitting on top of the campus, and it no longer needs the
- * rail's collapse button, which is exactly what this breakpoint removes.
+ * Phone. The panels become a bottom sheet — Google's own mobile pattern, and
+ * the fix for the panel sitting on top of the campus.
  *
- * The layers switcher moves to the top-right for the same reason: the corner it
- * lives in on a desktop is now the sheet.
+ * This breakpoint used to do more: it dropped the left rail, revealed the
+ * phone-only doors onto whatever the rail alone could reach, and freed the
+ * bottom-left corner the rail was covering. All three are now true at every
+ * width, so what is left here is the sheet, the legend giving up the right
+ * edge, and the layers switcher moving to the top-right — the corner it lives
+ * in on a desktop is now the sheet.
  */
 @media (max-width: 640px) {
-    .g-rail {
-        display: none;
-    }
-
-    /* ...so whatever only the rail could reach needs somewhere else to be. */
-    .g-phone-only {
-        display: block;
-    }
-
-    .g-layers-row.g-phone-only {
-        display: flex;
-    }
-
-    /* ...so there is nothing left for the wordmark to hide behind. */
-    #map .mapboxgl-ctrl-bottom-left {
-        left: 0;
-    }
-
-    .g-topbar,
-    .g-topleft {
-        left: var(--g-gap);
-    }
-
     .g-topleft {
         top: auto;
         /* Clear of the credit strip. The sheet spans the full width here and was
@@ -1865,6 +1807,22 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
         justify-content: flex-end;
     }
 
+    /* The legend becomes a sheet in the same slot, and takes the layer above:
+       there is one place on a phone for a full-width card and both columns want
+       it. main.js starts the legend closed here and closes it again the moment
+       a row is pressed, so the two are only ever both up for the length of a
+       tap — and while they are, the one you just opened is the one on top. */
+    .g-right {
+        top: auto;
+        left: var(--g-gap);
+        bottom: calc(var(--g-gap) + var(--g-credit-h));
+        width: auto;
+        max-width: none;
+        max-height: 62dvh;
+        justify-content: flex-end;
+        z-index: 22;
+    }
+
     .g-layers {
         left: auto;
         right: var(--g-gap);
@@ -1876,9 +1834,6 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
         order: 1;
     }
 
-    /* The legend rides the column here, which on this width is the bottom
-       sheet — so it needs no rule of its own beyond giving up more height than
-       it does on a desktop, where there is room for all twelve rows. */
     .g-legend {
         min-height: 96px;
     }

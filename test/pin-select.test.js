@@ -13,6 +13,8 @@ import {
   sizeExpr, sizeAt, AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE, SELECTED_W,
   GROW_MS, GROW_EASE, SHRINK_MS, SHRINK_EASE,
   LABEL_START_SCALE, LABEL_RISE, LABEL_INK_DELAY, LABEL_INK_SPAN, SYMBOL_FADE_MS,
+  swayAt, swayKeyframes, SWAY_AMP, SWAY_DECAY_MS, SWAY_PERIOD_MS, SWAY_DELAY_MS,
+  SWAY_MS, SWAY_DIR, SWAY_STEP_MS, cubicBezier, growEase, scaleStops,
 } from '../src/pin-select.js';
 import {
   PIN_BASE_W, PIN_BOX, PIN_RING, PIN_ASPECT, LIFT_RING, LIFT_ASPECT, LIFT_DOT, LIFT_HEAD,
@@ -219,6 +221,235 @@ test('the caption is lifted with the pin, not faded in beside it', () => {
   assert.ok(rule, '.pin-selected-label has no rule at all');
   assert.match(rule[1], /--pin-label-rise/, 'the caption no longer reads its rise');
   assert.doesNotMatch(rule[1], /transition/, 'the timing belongs to mountSelectedPin');
+});
+
+/**
+ * The sideways settle, straight off the capture.
+ *
+ * Whole-marker silhouette centroid, in pixels, against a settled marker 65.91 px
+ * wide; positive is right; t=0 is the first frame that moves. The rows are every
+ * third frame of the 30 fps source, which is enough of them to pin the shape
+ * without pasting fifty lines in. See the block above SWAY_AMP for how they were
+ * taken and for why the map underneath is known to be still.
+ */
+const CAPTURE_W = 65.91;
+const CAPTURE_SWAY = [
+  [0, -0.46], [100, -0.19], [200, -1.50], [300, -4.96], [333, -5.64],
+  [400, -4.50], [500, -2.49], [600, 0.97], [700, 1.51], [733, 1.63],
+  [800, 1.22], [900, 0.21], [1000, -0.73], [1100, -0.75], [1200, -0.55],
+  [1300, -0.22],
+];
+
+test('the pin bobbles sideways the way the capture does', () => {
+  // Replayed at the capture's own marker width, so this compares the curve and
+  // not the size we happen to draw pins at. The fit's own residual over all 51
+  // frames is 0.27 px rms; a third of a pixel per sampled row is inside that.
+  let worst = 0;
+  for (const [ms, dx] of CAPTURE_SWAY) {
+    worst = Math.max(worst, Math.abs(swayAt(ms, CAPTURE_W) - dx));
+  }
+  assert.ok(worst < 0.75, `the sway is ${worst.toFixed(2)}px off the capture at its worst row`);
+
+  // The three peaks, which are the shape anyone actually watches: it goes out
+  // furthest first, comes back a third as far, and the third swing is a twitch.
+  const trace = Array.from({ length: SWAY_MS + 1 }, (_, ms) => swayAt(ms, CAPTURE_W));
+  const first = Math.min(...trace);
+  const second = Math.max(...trace.slice(500, 950));
+  const third = Math.min(...trace.slice(950, 1300));
+  assert.ok(Math.abs(first / CAPTURE_W + 0.079) < 0.006, `first peak ${first / CAPTURE_W}`);
+  assert.ok(Math.abs(second / CAPTURE_W - 0.026) < 0.006, `second peak ${second / CAPTURE_W}`);
+  assert.ok(Math.abs(third / CAPTURE_W + 0.009) < 0.006, `third peak ${third / CAPTURE_W}`);
+  // Damped, not driven: each swing has to be smaller than the one before it.
+  assert.ok(Math.abs(second) < Math.abs(first) && Math.abs(third) < Math.abs(second));
+  assert.equal(SWAY_DIR, -1, 'the capture goes left first');
+
+  // Pinned like the easings above: these are a measurement, and changing one
+  // should mean having re-measured.
+  assert.equal(SWAY_DECAY_MS, 344);
+  assert.equal(SWAY_PERIOD_MS, 758);
+  assert.equal(SWAY_DELAY_MS, 187);
+  assert.ok(Math.abs(SWAY_AMP - 0.1297) < 1e-9);
+});
+
+test('the sway starts late and outlives the grow', () => {
+  // It does not begin with the growth. The pin is a third of the way up before
+  // it moves sideways at all — start the two together and the pin reads as
+  // thrown rather than as settling.
+  assert.ok(swayAt(0) === 0 && swayAt(SWAY_DELAY_MS) === 0, 'it moves before its delay');
+  assert.ok(swayAt(SWAY_DELAY_MS + 1) !== 0, 'it never starts');
+  assert.ok(SWAY_DELAY_MS > GROW_MS * 0.25 && SWAY_DELAY_MS < GROW_MS * 0.5,
+    `the sway starts ${(SWAY_DELAY_MS / GROW_MS).toFixed(2)} of the way through the grow`);
+  // And it is still going after the pin has finished growing, which is the whole
+  // reason it cannot be a third axis on the grow's own transition.
+  assert.ok(SWAY_MS > GROW_MS * 2, `sway ${SWAY_MS}ms against a ${GROW_MS}ms grow`);
+
+  // A settle, not a lurch: at our own size the furthest it travels is a few
+  // pixels, well under a tenth of the marker.
+  const peak = Math.min(...Array.from({ length: SWAY_MS + 1 }, (_, ms) => swayAt(ms)));
+  assert.ok(Math.abs(peak) / SELECTED_W < 0.1, `it swings ${Math.abs(peak) / SELECTED_W} of its width`);
+  assert.ok(Math.abs(peak) > 2, `${Math.abs(peak)}px of travel is not going to be visible`);
+});
+
+test('the sway keyframes are a faithful sampling of the curve', () => {
+  const frames = swayKeyframes(CAPTURE_W);
+  const px = (k) => Number(/-?[\d.]+/.exec(k.transform)[0]);
+
+  // WAAPI requires ascending offsets, and silently animates nonsense otherwise.
+  assert.ok(frames.every((k, i) => i === 0 || k.offset > frames[i - 1].offset),
+    'the keyframe offsets are not ascending');
+  assert.equal(frames[0].offset, 0);
+  assert.equal(frames.at(-1).offset, 1);
+
+  // It has to start and end at rest, or mounting the pin snaps it sideways and
+  // removing it snaps it back. The end is exact because SWAY_MS lands on a zero
+  // of the sine rather than on a round number.
+  assert.equal(px(frames[0]), 0);
+  assert.equal(px(frames.at(-1)), 0);
+  assert.ok(Math.abs(swayAt(SWAY_MS, CAPTURE_W)) < 1e-9,
+    'SWAY_MS is no longer at a zero crossing, so the last keyframe is a jump');
+
+  // The corner where the flat lead-in meets the sine needs a keyframe on it.
+  // Without one the grid steps across it and cuts it off, which slides the pin a
+  // third of a pixel before the motion is meant to have started.
+  assert.ok(frames.some((k) => Math.abs(k.offset * SWAY_MS - SWAY_DELAY_MS) < 1e-9),
+    'nothing is anchored at the delay');
+
+  // The browser draws straight lines between these, so the straight lines are
+  // what has to match the curve — not the samples, which match by construction.
+  let worst = 0;
+  for (let ms = 0; ms <= SWAY_MS; ms += 0.5) {
+    const f = ms / SWAY_MS;
+    let i = 0;
+    while (i < frames.length - 2 && frames[i + 1].offset < f) i += 1;
+    const [a, b] = [frames[i], frames[i + 1]];
+    const u = (f - a.offset) / (b.offset - a.offset);
+    worst = Math.max(worst, Math.abs(px(a) + u * (px(b) - px(a)) - swayAt(ms, CAPTURE_W)));
+  }
+  assert.ok(worst < 0.05, `linear interpolation is ${worst.toFixed(3)}px off the curve`);
+  assert.ok(frames.length < 60, `${frames.length} keyframes is more than this curve needs`);
+  assert.ok(SWAY_STEP_MS > 0);
+});
+
+test('the sway is wrapped around the head, not applied to it', () => {
+  // The grow is a CSS transition on `transform` and the sway is a WAAPI
+  // animation on `transform`; a running animation beats a transition outright,
+  // so putting them on one element would delete the growth for the length of the
+  // swing rather than blending the two. Hence a wrapper — and hence a rule for
+  // it, which is where the compositor hint lives.
+  const css = readFileSync(path.join(root, 'src', 'input.css'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const sway = /\.pin-selected-sway\s*\{([^}]*)\}/.exec(css);
+  const scale = /\.pin-selected-scale\s*\{([^}]*)\}/.exec(css);
+  assert.ok(sway, '.pin-selected-sway has no rule, so the wrapper is unstyled');
+  assert.match(sway[1], /will-change:\s*transform/);
+  // The two must stay separate elements. A transform declared on the scaler
+  // would be overwritten by mountSelectedPin anyway; one here would be
+  // overwritten by the animation.
+  assert.doesNotMatch(sway[1], /transform:/, 'the sway transform comes from the keyframes');
+  assert.ok(scale, '.pin-selected-scale has gone');
+  assert.doesNotMatch(scale[1], /animation:/, 'the sway has landed on the growing element');
+});
+
+test('the bezier solver agrees with the browser that runs the other copy', () => {
+  // The lift hands GROW_EASE to CSS and a whole category of arriving pins is
+  // driven by evaluating the same string here. Two implementations of one curve,
+  // so the risk is that they quietly differ and the two motions stop matching.
+
+  // cubic-bezier(1/3, 1/3, 2/3, 2/3) IS the identity, exactly, and any error in
+  // the root-finding shows up against it immediately.
+  const linear = cubicBezier(1 / 3, 1 / 3, 2 / 3, 2 / 3);
+  for (let i = 0; i <= 1000; i += 1) {
+    assert.ok(Math.abs(linear(i / 1000) - i / 1000) < 1e-6, `linear at ${i / 1000}`);
+  }
+
+  // CSS `ease`, whose midpoint is a published number.
+  assert.ok(Math.abs(cubicBezier(0.25, 0.1, 0.25, 1)(0.5) - 0.8024) < 1e-3);
+  // ...and `ease-in-out`, which is symmetric about its own middle.
+  const easeInOut = cubicBezier(0.42, 0, 0.58, 1);
+  assert.ok(Math.abs(easeInOut(0.5) - 0.5) < 1e-6);
+  for (const x of [0.1, 0.25, 0.4]) {
+    assert.ok(Math.abs(easeInOut(x) + easeInOut(1 - x) - 1) < 1e-6, `asymmetric at ${x}`);
+  }
+
+  // The ends are pinned, or a pin starts or finishes at the wrong size.
+  for (const ease of [linear, growEase, easeInOut]) {
+    assert.equal(ease(0), 0);
+    assert.equal(ease(1), 1);
+    assert.equal(ease(-5), 0, 'clamped below');
+    assert.equal(ease(5), 1, 'clamped above');
+  }
+});
+
+test('the grow curve keeps its overshoot when read as a function', () => {
+  // The whole character of the lift is that it goes PAST the size it is heading
+  // for. A solver that clamped y to [0,1] — which is a reasonable-looking thing
+  // to write — would return a curve that fits every other test here and has no
+  // bounce at all, and the pins would read as resizing.
+  let peak = 0;
+  let peakAt = 0;
+  for (let i = 0; i <= 1000; i += 1) {
+    const v = growEase(i / 1000);
+    if (v > peak) { peak = v; peakAt = (i / 1000) * GROW_MS; }
+  }
+  assert.ok(peak > 1.05, `the grow curve peaks at ${peak.toFixed(4)} and should overshoot`);
+  assert.ok(peakAt > GROW_MS * 0.45 && peakAt < GROW_MS * 0.7,
+    `it peaks ${peakAt.toFixed(0)}ms into a ${GROW_MS}ms run`);
+
+  // It comes back down and stays down: one overshoot, not a wobble. The sway is
+  // where the oscillation lives, and it is a different axis.
+  let crossed = 0;
+  for (let i = 1; i <= 1000; i += 1) {
+    const [a, b] = [growEase((i - 1) / 1000), growEase(i / 1000)];
+    if ((a - 1) * (b - 1) < 0) crossed += 1;
+  }
+  assert.equal(crossed, 1, `the grow crosses its destination ${crossed} times`);
+
+  // And it is the string, not a second copy of the numbers.
+  const control = GROW_EASE.match(/-?[\d.]+/g).map(Number);
+  const rebuilt = cubicBezier(...control);
+  for (let i = 0; i <= 100; i += 1) {
+    assert.ok(Math.abs(rebuilt(i / 100) - growEase(i / 100)) < 1e-12);
+  }
+});
+
+test('a growing layer scales its stops, not the finished expression', () => {
+  // Mapbox permits `['zoom']` only as the direct input to a TOP-LEVEL step or
+  // interpolate. `['*', sizeExpr(...), grown]` — the obvious way to animate a
+  // layer's size — buries it under an operator and is rejected outright, which
+  // shows up as pins that simply never grow rather than as an error anyone sees.
+  for (const factor of [0.349, 0.7, 1.0568]) {
+    const expr = sizeExpr(scaleStops(CATEGORY_SIZE, factor));
+    assert.deepEqual(expr.slice(0, 3), ['interpolate', ['linear'], ['zoom']],
+      'the zoom input is no longer at the top level');
+
+    // And it has to MEAN the same thing: scaling the stops of a linear
+    // interpolation is scaling its result, at every zoom including the clamped
+    // ends outside the table.
+    for (let zoom = 10; zoom <= 22; zoom += 0.1) {
+      const scaled = sizeAt(scaleStops(CATEGORY_SIZE, factor), zoom);
+      assert.ok(Math.abs(scaled - sizeAt(CATEGORY_SIZE, zoom) * factor) < 1e-12,
+        `z${zoom.toFixed(1)} at x${factor}`);
+    }
+  }
+  // The stops themselves are untouched — this returns a new table each time, and
+  // a version that mutated would permanently shrink the layer it animated.
+  assert.deepEqual(CATEGORY_SIZE, { 14: 0.72, 19: 0.92 });
+  assert.notEqual(scaleStops(CATEGORY_SIZE, 1), CATEGORY_SIZE);
+});
+
+test('an arriving category of pins sways in screen space', () => {
+  // `icon-translate` defaults to a MAP anchor, which is bearing-relative: the
+  // same animation would settle along a compass direction rather than sideways
+  // once the map is rotated. Nothing catches that but looking at a rotated map
+  // during the one second the pins arrive.
+  const main = readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
+  assert.match(main, /'icon-translate-anchor':\s*'viewport'/,
+    'the category pins sway with the compass rather than with the screen');
+  // The entrance drives icon-translate; a layer that declares one without the
+  // anchor beside it is the bug above waiting to happen.
+  const translates = main.match(/'icon-translate':/g) ?? [];
+  const anchors = main.match(/'icon-translate-anchor':/g) ?? [];
+  assert.ok(anchors.length >= 1 && translates.length >= 1);
 });
 
 test('every layer that draws a pin has a size table', () => {

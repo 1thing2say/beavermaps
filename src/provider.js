@@ -66,6 +66,14 @@ export function createProviderToggle({ surfaces, onChange }) {
 
   /** Every surface says what pressing it will DO, not what is on screen. */
   function paint() {
+    // Published the way the theme and the skin are, and for a reason the other
+    // two do not have: under Google the Mapbox style is BLANK — no sources, no
+    // layers, nothing of theirs drawn — so the wordmark their control pins to
+    // the corner is crediting data that is not on the map, next to Google's own
+    // required copyright line for the data that is. The stylesheet hides it on
+    // this attribute. See the note beside that rule before changing either.
+    document.documentElement.dataset.provider = provider;
+
     const target = provider === 'google' ? 'mapbox' : 'google';
     for (const { button, icon, label } of surfaces) {
       icon.innerHTML = ICONS[target];

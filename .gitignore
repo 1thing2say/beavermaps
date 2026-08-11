@@ -7,6 +7,11 @@ dist/
 # System files
 .DS_Store
 Thumbs.db
+# AppleDouble sidecars. macOS writes one of these beside every file when the
+# volume cannot hold a resource fork itself — copying this tree through exFAT or
+# a network share leaves a ._<name> next to every real name, including inside
+# .git. They carry nothing this project needs.
+._*
 
 # Logs
 npm-debug.log*

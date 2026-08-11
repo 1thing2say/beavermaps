@@ -46,6 +46,9 @@
  * Deselecting is not the same curve backwards. Nothing is being picked up on the
  * way out, so it is shorter and has no bounce — a pin that sprang on the way
  * down would look like it had been dropped rather than put back.
+ *
+ * The capture also has a SIDEWAYS settle, which the block below covers. The
+ * first pass through it measured only width and height and so never saw it.
  */
 
 import {
@@ -58,8 +61,187 @@ export const GROW_EASE = 'cubic-bezier(0.5, 1.525, 0.5, 1)';
 export const SHRINK_MS = 190;
 export const SHRINK_EASE = 'cubic-bezier(0.4, 0, 0.7, 1)';
 
+/**
+ * `cubic-bezier(x1, y1, x2, y2)` evaluated in JS, the way the browser does it.
+ *
+ * The lift hands its curve to CSS as a string and never needs this. A symbol
+ * LAYER cannot be handed a string: a whole category of pins arriving at once is
+ * animated by pushing `icon-size` at Mapbox frame by frame, and that needs the
+ * curve as a number. Both read GROW_EASE, so the two motions cannot drift.
+ *
+ * The parameterisation is the standard one — control points at (0,0), (x1,y1),
+ * (x2,y2), (1,1), with x solved for t and y read off. Newton converges in three
+ * or four passes over most of the range; the bisection after it is for the ends,
+ * where the curve is flat enough in x that Newton's step overshoots the unit
+ * interval. Note that y is deliberately NOT clamped: y1 > 1 is what makes this
+ * spring overshoot, and clamping it here would quietly delete the bounce.
+ */
+export function cubicBezier(x1, y1, x2, y2) {
+  const cx = 3 * x1;
+  const bx = 3 * (x2 - x1) - cx;
+  const ax = 1 - cx - bx;
+  const cy = 3 * y1;
+  const by = 3 * (y2 - y1) - cy;
+  const ay = 1 - cy - by;
+  const xAt = (t) => ((ax * t + bx) * t + cx) * t;
+  const yAt = (t) => ((ay * t + by) * t + cy) * t;
+  const dxAt = (t) => (3 * ax * t + 2 * bx) * t + cx;
+
+  return (x) => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+
+    let t = x;
+    for (let i = 0; i < 8; i += 1) {
+      const err = xAt(t) - x;
+      if (Math.abs(err) < 1e-7) return yAt(t);
+      const slope = dxAt(t);
+      if (Math.abs(slope) < 1e-7) break;
+      t -= err / slope;
+    }
+
+    let lo = 0;
+    let hi = 1;
+    t = x;
+    for (let i = 0; i < 40; i += 1) {
+      const err = xAt(t) - x;
+      if (Math.abs(err) < 1e-7) break;
+      if (err > 0) hi = t; else lo = t;
+      t = (lo + hi) / 2;
+    }
+    return yAt(t);
+  };
+}
+
+/** GROW_EASE as a function. Parsed from the string so there is one of it. */
+export const growEase = cubicBezier(...GROW_EASE.match(/-?[\d.]+/g).map(Number));
+
 /** The lifted head's width in CSS pixels, ring included. */
 export const SELECTED_W = 42;
+
+/**
+ * The bobble — the part of the capture the size fit above walked straight past.
+ *
+ * Apple's marker does not only grow. Once it is most of the way up it slides
+ * SIDEWAYS and settles, two or three visible swings of it, and that is what
+ * sells the thing as having been picked up rather than scaled. The size fit
+ * measured widths and heights, both of which are blind to a horizontal
+ * translation, so a run that swings a twelfth of its own width across the screen
+ * came back as a clean spring.
+ *
+ * Re-measured off the same capture, which turns out to be 30 fps and not the 60
+ * the table above assumed — `r_frame_rate` says 60/1 but only 129 of the 261
+ * slots hold a distinct frame. The durations there survive that (they were fitted
+ * against a curve, not counted in frames) but nothing else here should be read
+ * as a frame count.
+ *
+ * FINDING IT MEANT RULING OUT THE OBVIOUS EXPLANATION FIRST, because the info
+ * panel slides in from the left over exactly these frames and a map that
+ * recentred under a stationary pin would look identical. It does not: sub-pixel
+ * phase correlation on a textured patch of map holds at 0.00 px for every frame
+ * of the selection, and Apple's own anchor dot sits at x=188.50 without moving
+ * once. The head slides over its own dot.
+ *
+ *   ms      0  100  200  300  333  400  500  600  715  800 1000 1094 1250
+ *   dx      0    0 -1.4 -5.0 -5.2 -4.4 -2.4 +1.0 +1.7 +1.2 -0.7 -0.6    0
+ *   (px, whole-marker silhouette, + is right, settled width 65.9 px)
+ *
+ * It is a SLIDE, not a tilt, which is worth stating because a marker on a stalk
+ * is the thing that looks like it ought to swing from its base. Taking the
+ * per-row centroid of the blob at the extreme frame, every row from the crown of
+ * the head to the tip of the tail is offset by the same -5.5 px; a pivot at the
+ * dot would have left a gradient down the stalk. The tail leaves the dot behind
+ * and comes back to it.
+ *
+ * A damped sinusoid fits it to 0.27 px rms over 51 frames, which is inside the
+ * measurement's own noise:
+ *
+ *     dx(t) = -0.1297 * W * exp(-(t - 187) / 344) * sin(2*pi*(t - 187) / 758)
+ *
+ * — a damping ratio of 0.331 and a natural period of 715 ms. The peaks land at
+ * -7.9% of the marker's width at 336 ms, +2.6% at 715 ms, and -0.9% at 1094 ms.
+ *
+ * THE DELAY IS THE POINT and is why this cannot be folded into the grow curve as
+ * a third axis. The sway does not start until 187 ms in, a third of the way
+ * through the growth, so the pin is already near full size and most of the way
+ * up before it moves sideways at all. Start the two together and it reads as the
+ * pin being thrown rather than settling.
+ *
+ * Neither the anchor dot nor the caption moves — both were tracked through the
+ * same frames, the dot to 0.00 px and the caption dead still at 188.88 while the
+ * head was still swinging +/-2 px past it. So the sway goes on the head and its
+ * tail alone, which is a third element for the same reason the dot is a second
+ * one.
+ *
+ * The direction is left, and one capture cannot say whether that is Apple's rule
+ * or Apple's coin toss — there is a single selection in the footage. Fixed here,
+ * with the sign broken out, on the grounds that a marker that picked its own
+ * direction per tap would be the more surprising claim to make from one sample.
+ */
+export const SWAY_AMP = 0.1297;
+export const SWAY_DECAY_MS = 344;
+export const SWAY_PERIOD_MS = 758;
+export const SWAY_DELAY_MS = 187;
+/**
+ * Stopped after a swing and a half, at the sine's third zero.
+ *
+ * The envelope is down to 3.7% of where it started by then — a tenth of a pixel
+ * at the size this map draws a pin — so the cut is inaudible. It has to be taken
+ * AT A ZERO, though, rather than at a round number of milliseconds: the last
+ * keyframe is the resting position by definition, and ending anywhere else means
+ * a final segment that ramps whatever the curve was still worth back to nothing.
+ * At 1250 ms that was a fifth of a pixel travelled in the last twelve.
+ */
+export const SWAY_MS = Math.round(SWAY_DELAY_MS + 1.5 * SWAY_PERIOD_MS);
+/** Left, as captured. */
+export const SWAY_DIR = -1;
+
+/**
+ * The fitted curve, in CSS pixels, for a marker `width` wide.
+ *
+ * Flat until the delay is up rather than starting from zero and easing in — the
+ * capture is flat there too, within a quarter pixel, and the sine's own value at
+ * t=0 is exactly zero anyway.
+ */
+export function swayAt(ms, width = SELECTED_W) {
+  const t = ms - SWAY_DELAY_MS;
+  if (t <= 0) return 0;
+  return SWAY_DIR * SWAY_AMP * width * Math.exp(-t / SWAY_DECAY_MS)
+    * Math.sin((2 * Math.PI * t) / SWAY_PERIOD_MS);
+}
+
+/**
+ * ...sampled into keyframes, because no cubic-bezier can do this.
+ *
+ * An easing function is one curve between one pair of values; this crosses its
+ * own resting position three times. So it is handed to the Web Animations API as
+ * points and linearly interpolated between them, at a step fine enough that the
+ * straight lines between them cost under a twentieth of a pixel.
+ *
+ * THE SAMPLING STARTS AT THE DELAY, not at zero, and that is worth a line
+ * because it was worth 0.42 px when it did not. The curve has a corner in it
+ * where the flat part meets the sine — the only corner it has — and a sample
+ * grid that steps over that corner cuts it off, which drags the pin a third of a
+ * pixel sideways before the motion is supposed to have begun. So the delay gets
+ * a keyframe of its own and the rest are measured from it. Everything after that
+ * is smooth and the step size is all that matters.
+ */
+export const SWAY_STEP_MS = 25;
+
+export function swayKeyframes(width = SELECTED_W) {
+  const at = (ms) => ({
+    offset: ms / SWAY_MS,
+    transform: `translateX(${swayAt(ms, width).toFixed(3)}px)`,
+  });
+
+  const frames = [at(0), at(SWAY_DELAY_MS)];
+  for (let ms = SWAY_DELAY_MS + SWAY_STEP_MS; ms < SWAY_MS; ms += SWAY_STEP_MS) {
+    frames.push(at(ms));
+  }
+  // Landed exactly, rather than wherever the last sample fell.
+  frames.push({ offset: 1, transform: 'translateX(0px)' });
+  return frames;
+}
 
 /**
  * How wide a pin's name may get before it wraps — in EMS, which is Mapbox's
@@ -151,6 +333,25 @@ export const CATEGORY_SIZE = { 14: 0.72, 19: 0.92 };
  */
 export const LABEL_SIZE = { 15: 0.58, 19: 0.72 };
 
+/**
+ * The same stops with every size multiplied.
+ *
+ * For animating a layer's `icon-size` — a category of pins growing in on the
+ * lift's spring pushes one of these per frame.
+ *
+ * IT HAS TO BE DONE HERE, inside the table, rather than by wrapping the finished
+ * expression in an `['*', expr, factor]`. Mapbox only allows `['zoom']` as the
+ * direct input to a TOP-LEVEL `step` or `interpolate`; buried under an
+ * arithmetic operator it is rejected outright, and the layer keeps whatever size
+ * it had. Scaling the stops leaves the interpolate exactly where the validator
+ * needs it and means the same thing.
+ */
+export function scaleStops(stops, factor) {
+  return Object.fromEntries(
+    Object.entries(stops).map(([zoom, size]) => [zoom, size * factor]),
+  );
+}
+
 /** The stops as a Mapbox `interpolate` expression. */
 export function sizeExpr(stops) {
   return ['interpolate', ['linear'], ['zoom'], ...Object.entries(stops).flatMap(
@@ -200,6 +401,12 @@ export function sizeAt(stops, zoom) {
  *   disc was — on the place — and lifts it to where a lifted head belongs. Both
  *   sit in one transform, so one timing function drives them and the rise
  *   springs with the growth instead of racing it.
+ *
+ *   the SWAY is a wrapper around the head, and has to be, for a duller reason
+ *   than the dot's: it is a keyframe animation and the grow is a transition, and
+ *   they would be competing for the same `transform`. A running WAAPI animation
+ *   wins that outright, so sharing the property would not blend the two — it
+ *   would delete the growth for the duration of the swing.
  */
 export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink, from }) {
   const el = document.createElement('div');
@@ -223,7 +430,11 @@ export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink
     `translateY(${((LIFT_DOT.y - LIFT_HEAD) * height * scale).toFixed(2)}px) scale(${scale})`;
   const LIFTED = 'translateY(0px) scale(1)';
   scaler.style.transform = resting(start);
-  el.append(scaler);
+
+  const sway = document.createElement('div');
+  sway.className = 'pin-selected-sway';
+  sway.append(scaler);
+  el.append(sway);
 
   // The dot: placed once, at the place, and left alone.
   const dot = document.createElement('div');
@@ -286,10 +497,23 @@ export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink
   }
   el.classList.add('is-in');
 
+  // The bobble. Asked for at mount rather than read once at module load, so a
+  // preference changed mid-session is honoured on the next tap; the CSS block
+  // for `prefers-reduced-motion` cannot reach a WAAPI animation to do this.
+  const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const swaying = still ? null : sway.animate(
+    swayKeyframes(SELECTED_W),
+    { duration: SWAY_MS, easing: 'linear' },
+  );
+
   return {
     element: el,
     /** Shrink back to the ambient size, then take the marker down. */
     remove(to = from) {
+      // Dropped rather than run out. A pin put back down while still swinging
+      // should shrink from where it is on the way to the place, not carry a
+      // sideways wobble down into a marker that has stopped being selected.
+      swaying?.cancel();
       scaler.style.transition = `transform ${SHRINK_MS}ms ${SHRINK_EASE}`;
       scaler.style.transform = resting(to / SELECTED_W);
       el.classList.remove('is-in');
