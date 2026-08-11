@@ -1075,11 +1075,27 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /**
    * Bumped to cancel whatever is mid-flight.
    *
-   * Chips are a strip and people press along it. Without this the previous run's
-   * next frame lands after the new one has set up — pins at the old opacity, or
-   * an `icon-size` from a swap that is already over. A superseded run simply
-   * stops asking for frames; its promise is never resolved and nothing is
-   * waiting on it.
+   * Legend rows are a column and people press down it. Without this the previous
+   * run's next frame lands after the new one has set up — pins at the old
+   * opacity, or an `icon-size` from a swap that is already over.
+   *
+   * A superseded run stops asking for frames and NEVER SETTLES its promise, so
+   * the `playCategory*` that awaited it stays suspended for the life of the
+   * page. That is deliberate and it is safe, but only for a reason worth
+   * stating, because it is a reason a later edit can take away:
+   *
+   *   the suspended async frame holds the pending promise, the promise holds the
+   *   frame's continuation, and — because BOTH call sites launch these
+   *   fire-and-forget, awaiting nothing and storing nothing — no root holds
+   *   either. An unreachable cycle is a thing a mark-and-sweep collector takes,
+   *   so the pair goes at the next GC.
+   *
+   * `await playCategorySwap()` from anywhere reachable, or parking the returned
+   * promise in a variable that outlives the run, roots the cycle and turns this
+   * into one leaked frame per press. If a caller ever needs to know when the
+   * pins have landed, give the cancelled path a settle — resolve it with a
+   * `superseded` flag rather than dropping it on the floor — instead of rooting
+   * the promise as it stands.
    */
   let choreography = 0;
 
@@ -1295,6 +1311,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let selectedPin = null;
   let selectedMarker = null;
 
+  /**
+   * The queued restore of the symbol under a marker that is shrinking away.
+   *
+   * Held so it can be cancelled. Both painters read the CURRENT selection rather
+   * than one captured when the timer was set, so a stale one was never wrong —
+   * it just re-painted every pin layer to the state they were already in. But
+   * people tap along a row of pins faster than the 190 ms this waits, and each
+   * tap was leaving another one behind: a filter rebuild and a repaint per pin
+   * layer, for an answer that had been on screen since the tap before.
+   */
+  let restorePins = null;
+
   /** The filter that hides the lifted pin from its own layer, or null. */
   const hiddenPin = (layer) =>
     (selectedPin?.layer === layer ? ['!=', ['id'], selectedPin.id] : null);
@@ -1405,7 +1433,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const marker = selectedMarker;
     selectedMarker = null;
     marker?.remove(width);
-    setTimeout(() => { paintCategory(); paintLabels(); }, 190);
+    clearTimeout(restorePins);
+    restorePins = setTimeout(() => { paintCategory(); paintLabels(); }, 190);
   }
 
   /**
@@ -1431,6 +1460,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const from = ambientWidth(hit.layer);
     selectedPin = hit;
     // Filter first, so the symbol is gone by the time its replacement appears.
+    // This pair IS the restore the deselect above queued, arriving 190 ms early
+    // and with the new selection already filtered out — so drop the timer rather
+    // than let it repeat the work once the marker has finished shrinking.
+    clearTimeout(restorePins);
     paintCategory();
     paintLabels();
 

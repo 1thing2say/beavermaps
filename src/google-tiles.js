@@ -232,8 +232,16 @@ async function mintSession(key, mapType, theme, skin) {
   return payload;
 }
 
+/**
+ * What makes one session distinct from another, and the key both caches use.
+ *
+ * A finite set — two map types over two themes over two skins — which is the
+ * property the attribution cache below leans on to stay bounded.
+ */
+const sessionId = (mapType, theme, skin) => `${mapType}:${theme}:${skin}`;
+
 function session(key, mapType, theme, skin) {
-  const id = `${mapType}:${theme}:${skin}`;
+  const id = sessionId(mapType, theme, skin);
   const cached = sessions.get(id);
   // `expiry` is a unix timestamp in seconds, as a string. A minute of slack, so
   // a session cannot expire between this check and the tile requests it feeds.
@@ -263,14 +271,30 @@ function session(key, mapType, theme, skin) {
  * a basemap that will not draw because its attribution string is late is a
  * worse outcome than a slightly generic attribution.
  */
-// Keyed on the session, because the copyright is a property of what that
-// session serves. Without this every provider toggle paid a second round trip
-// for a string that had not changed since the first one.
+// Cached because the copyright is a property of what a session serves, and
+// without this every provider toggle paid a second round trip for a string that
+// had not changed since the first one.
+//
+// Keyed on the session ID and holding the token it was fetched under, rather
+// than keyed on the token itself. Those are the same cache while a session
+// lasts; they differ when one is re-minted, because a token is a fresh opaque
+// string every time. Keyed on the token, a re-mint added a row and orphaned the
+// old one — unbounded in principle, and only bounded in practice by sessions
+// outliving the tab. Keyed this way it replaces its own row, so the map holds
+// at most one entry per mapType/theme/skin and a stale copyright cannot survive
+// the session it described.
 const attributions = new Map();
 
-async function attribution(key, token, bounds, zoom) {
-  if (!attributions.has(token)) attributions.set(token, fetchAttribution(key, token, bounds, zoom));
-  return attributions.get(token);
+async function attribution(key, id, token, bounds, zoom) {
+  const cached = attributions.get(id);
+  if (cached?.token === token) return cached.promise;
+
+  // Safe to cache before it settles: fetchAttribution resolves to the fallback
+  // on every failure path rather than rejecting, so there is no rejected promise
+  // to get stuck in here.
+  const promise = fetchAttribution(key, token, bounds, zoom);
+  attributions.set(id, { token, promise });
+  return promise;
 }
 
 async function fetchAttribution(key, token, [[west, south], [east, north]], zoom) {
@@ -311,6 +335,7 @@ export async function googleGround({ key, basemap, theme, skin, bounds }) {
   if (!key) throw new Error('No Google Maps API key — set VITE_GOOGLE_MAPS_KEY in .env');
 
   const mapType = GOOGLE_MAP_TYPE[basemap] ?? GOOGLE_MAP_TYPE.map;
+  const id = sessionId(mapType, theme, skin);
   const { session: token } = await session(key, mapType, theme, skin);
   const auth = `session=${encodeURIComponent(token)}&key=${encodeURIComponent(key)}`;
 
@@ -326,6 +351,6 @@ export async function googleGround({ key, basemap, theme, skin, bounds }) {
     // Setting this short is not free — Mapbox would oversample the last level
     // it thinks exists and blur the deepest navigation zooms.
     maxzoom: 22,
-    attribution: await attribution(key, token, bounds, 17),
+    attribution: await attribution(key, id, token, bounds, 17),
   };
 }
