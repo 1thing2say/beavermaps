@@ -21,6 +21,7 @@ import {
 import { maneuverIcon } from './nav-icons.js';
 import {
   loadAmenityIcons, routePin, liftedOffset, ROUTE_PIN_W, PIN_BASE_W, AMENITY_KINDS, pinInk,
+  hatchSvg, loadSvgImage,
 } from './map-images.js';
 import { buildingCard, pinCard } from './building-popup.js';
 import {
@@ -556,7 +557,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       return;
     }
 
-    const fillColour = sheetPaint(land, 'fill');
+    // `closed` takes the BUILDING grey rather than the one the land table holds
+    // for it. The two are near-neighbours in every look but not the same — in
+    // the classic light table it is a neutral #e4e4e4 against the buildings'
+    // warm #e8e0cd — and a closed building should sit in the row of buildings
+    // it belongs to, differing by the red over it and by nothing else.
+    const fillColour = sheetPaint(land, 'fill', { closed: land.building });
     // Strokes that are ground read as ground; the rest keep my campus's ink. Building
     // outlines follow the theme so they agree with the footprints drawn on top.
     const lineColour = sheetPaint(
@@ -612,6 +618,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       ['!', ['to-boolean', ['get', 'hidden']]],
       ['match', ['get', 'kind'], REDRAWN, false, true],
     ];
+    // The closed block keeps its FILL here and loses its stroke: it is a
+    // building, so it needs the same solid grey every other building has under
+    // it, and addClosedLayers puts the red wash, the hatch and the outline on
+    // top of that. Drawn on nothing but ground it read as a tinted patch of
+    // lawn — which is exactly what it is not.
+    const visibleLines = ['all', visible, ['!=', ['get', 'kind'], CLOSED_KIND]];
     // Under the legend's outlines when they exist, and this is not optional.
     // The sheet arrives from the server, so on a cold load the highlight layers
     // are already standing when it lands; anchoring both to the network alone
@@ -641,12 +653,158 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       type: 'line',
       source: 'campus-sheet',
       slot: 'middle',
-      filter: ['all', visible, ['has', 'stroke']],
+      filter: ['all', visibleLines, ['has', 'stroke']],
       layout: { 'line-sort-key': ['get', 'i'], 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': lineColour,
         'line-width': groundWidth(0.4),
         'line-opacity': ['coalesce', ['get', 'opacity'], 1],
+        'line-emissive-strength': 1,
+      },
+    }, anchor);
+  }
+
+  // -------------------------------------------------------------------------
+  // The closed building
+  //
+  // One shape on the sheet carries `kind: "closed"` — the fenced-off block in
+  // the middle of the campus — and one label reads "Closed" over the top of it.
+  // my campus prints both in the same grey as everything else, which makes the one
+  // place on this map you cannot go look exactly like the places you can.
+  //
+  // So it is taken out of the sheet layers and drawn again in red: a wash, a
+  // hatch over the wash, a hard outline, and the word itself. Four passes
+  // rather than a colour change, because "shut" is not a shade of a building —
+  // hatching is what says a shape is excluded rather than merely different, and
+  // it survives being seen at a glance and in greyscale.
+  // -------------------------------------------------------------------------
+
+  const CLOSED_KIND = 'closed';
+  const CLOSED_TEXT = 'Closed';
+  const CLOSED_HATCH = 'closed-hatch';
+
+  /**
+   * One red for the marks, two for the word.
+   *
+   * The wash, hatch and outline are the same hue at three opacities, so the
+   * shape reads as one object rather than three annotations that happen to
+   * agree. The text cannot join them: it is the only part that has to stay
+   * legible as TYPE, so it takes the ramp's dark end on light ground and its
+   * light end on dark, the way pinInk does for a marker's name.
+   */
+  const CLOSED_RED = '#ea4335';
+  const CLOSED_INK = { light: '#c5221f', dark: '#f28b82' };
+
+  /**
+   * Which way the closed block actually lies, in degrees clockwise from east.
+   *
+   * my campus drew it on the diagonal and the word over it was setting horizontally,
+   * so the label crossed two of its edges and sat half on the tarmac outside.
+   * Measured off the geometry rather than typed in as a number: the shape comes
+   * from a generated artifact, and a rebuild that nudged it would leave a
+   * hard-coded angle quietly wrong.
+   *
+   * The longest edge is the one that decides it — the block is a quadrilateral,
+   * so its long side IS its grain — and longitude is scaled by cos(latitude)
+   * first, without which the angle is off by the map's own aspect.
+   */
+  function closedBearing(basemap) {
+    const shape = basemap?.features?.find((f) => f.properties.kind === CLOSED_KIND);
+    const ring = shape?.geometry?.coordinates?.[0];
+    if (!ring || ring.length < 3) return 0;
+
+    const scale = Math.cos((ring[0][1] * Math.PI) / 180);
+    let best = { length: -1, angle: 0 };
+    for (let i = 0; i < ring.length - 1; i += 1) {
+      const dx = (ring[i + 1][0] - ring[i][0]) * scale;
+      const dy = ring[i + 1][1] - ring[i][1];
+      const length = Math.hypot(dx, dy);
+      if (length <= best.length) continue;
+      // Normalised to the half-turn that reads left-to-right, so the word is
+      // never upside down whichever way round the ring was wound.
+      const east = dx >= 0 ? [dx, dy] : [-dx, -dy];
+      best = { length, angle: -(Math.atan2(east[1], east[0]) * 180) / Math.PI };
+    }
+    return best.angle;
+  }
+
+  /**
+   * The wash, the hatch and the outline. The word is a label layer — it lives
+   * with the other labels in buildLabelLayers, above the pins rather than under
+   * them.
+   *
+   * Rebuilt on every style swap and recoloured in place on a theme change, the
+   * same shape as every other builder here.
+   */
+  function addClosedLayers() {
+    if (!palette(currentProvider, currentBasemap, currentTheme, currentSkin).land) {
+      // Over imagery the sheet is not drawn at all, so neither is this.
+      for (const id of ['campus-closed-line', 'campus-closed-hatch', 'campus-closed-fill']) {
+        if (map.getLayer(id)) map.removeLayer(id);
+      }
+      return;
+    }
+    // Nothing here is theme-dependent — one red in both looks, because a
+    // closure is not a mood — so an existing set needs no repaint.
+    if (map.getLayer('campus-closed-fill')) return;
+    if (!campusBasemap || !map.getSource('campus-sheet')) return;
+
+    // The pattern first, every time. Images do not survive setStyle and this
+    // runs on style.load, so a hatch registered at startup is already gone by
+    // the second call — and a `fill-pattern` naming an image that is not there
+    // draws nothing at all, silently.
+    loadSvgImage(map, CLOSED_HATCH, hatchSvg(CLOSED_RED))
+      .then(placeClosedLayers)
+      .catch((error) => console.error('closed hatch unavailable:', error));
+  }
+
+  function placeClosedLayers() {
+    // A style swap can land between the image resolving and this running.
+    if (map.getLayer('campus-closed-fill') || !map.getSource('campus-sheet')) return;
+
+    const only = ['==', ['get', 'kind'], CLOSED_KIND];
+    const anchor = map.getLayer('highlight-fill') ? 'highlight-fill' : belowNetwork();
+
+    map.addLayer({
+      id: 'campus-closed-fill',
+      type: 'fill',
+      source: 'campus-sheet',
+      slot: 'middle',
+      filter: only,
+      paint: {
+        'fill-color': CLOSED_RED,
+        // Low enough that the hatch on top is what carries the message and the
+        // wash only tints the ground it crosses.
+        'fill-opacity': 0.14,
+        'fill-emissive-strength': 1,
+      },
+    }, anchor);
+
+    map.addLayer({
+      id: 'campus-closed-hatch',
+      type: 'fill',
+      source: 'campus-sheet',
+      slot: 'middle',
+      filter: only,
+      paint: {
+        'fill-pattern': CLOSED_HATCH,
+        'fill-opacity': 0.55,
+        'fill-emissive-strength': 1,
+      },
+    }, anchor);
+
+    map.addLayer({
+      id: 'campus-closed-line',
+      type: 'line',
+      source: 'campus-sheet',
+      slot: 'middle',
+      filter: only,
+      layout: { 'line-join': 'round' },
+      paint: {
+        'line-color': CLOSED_RED,
+        // Thicker than the sheet's 0.4: this is the one edge on the map that is
+        // a boundary rather than a drawn line.
+        'line-width': groundWidth(1.4),
         'line-emissive-strength': 1,
       },
     }, anchor);
@@ -1427,7 +1585,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    */
   const labelFilter = (kind) => {
     if (shownCategory() && POI_LABEL_KINDS.has(kind)) return ['boolean', false];
-    const mine = ['==', ['get', 'kind'], kind];
+    // "Closed" is a building-kind label and it is drawn by campus-labels-closed
+    // instead, which is the only layer here that can be rotated onto the shape
+    // it annotates. Excluded rather than left to draw twice.
+    const mine = kind === 'building'
+      ? ['all', ['==', ['get', 'kind'], kind], ['!=', ['get', 'text'], CLOSED_TEXT]]
+      : ['==', ['get', 'kind'], kind];
     const hidden = hiddenPin(`campus-labels-${kind}`);
     return hidden ? ['all', mine, hidden] : mine;
   };
@@ -1968,6 +2131,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         map.setPaintProperty(`campus-labels-${kind}`, 'text-color', labelPaint(kind, colors));
         map.setPaintProperty(`campus-labels-${kind}`, 'text-halo-color', colors.labelHalo);
       }
+      // Not in the loop above: the closed label is not one of LABEL_KINDS and
+      // its red comes from its own two-value ramp rather than from the palette.
+      if (map.getLayer('campus-labels-closed')) {
+        map.setPaintProperty('campus-labels-closed', 'text-color',
+          CLOSED_INK[currentTheme === 'dark' ? 'dark' : 'light']);
+        map.setPaintProperty('campus-labels-closed', 'text-halo-color', colors.labelHalo);
+      }
       return;
     }
     if (!campusLabels) return;
@@ -2088,6 +2258,48 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         },
       });
     }
+
+    /**
+     * "Closed", set on the block's own diagonal and in the red the shape is
+     * drawn in.
+     *
+     * Its own layer rather than a `case` inside the building names, and for one
+     * reason that could not be expressed there: `text-rotation-alignment` is a
+     * LAYOUT property of the whole layer, not a per-feature one. This word has
+     * to stay glued to the shape when the map is turned, and the other 39 names
+     * have to stay upright — so they cannot share a layer, whatever else they
+     * have in common.
+     *
+     * `symbol-placement: point` with map-aligned rotation, not `line` placement
+     * along the edge: the word belongs in the middle of the block saying what
+     * the block is, not run along its boundary like a street name.
+     */
+    map.addLayer({
+      ...common,
+      id: 'campus-labels-closed',
+      filter: ['==', ['get', 'text'], CLOSED_TEXT],
+      layout: {
+        'text-field': ['get', 'text'],
+        'text-font': mapFont().medium,
+        'text-size': labelSize(1),
+        'text-letter-spacing': 0.06,
+        'text-rotation-alignment': 'map',
+        'text-rotate': closedBearing(campusBasemap),
+        // Nothing gets to push this one out of the way. It is the only label on
+        // the map that is a warning rather than a name, and a collision solver
+        // that dropped it would leave a red hatched shape with nothing saying
+        // why. Everything else still avoids IT, because they are collidable.
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': CLOSED_INK[currentTheme === 'dark' ? 'dark' : 'light'],
+        'text-halo-color': colors.labelHalo,
+        'text-halo-width': 1.4,
+        'text-halo-blur': 0.4,
+        'text-emissive-strength': 1,
+      },
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -2288,6 +2500,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     addCampusMask();
     addBasemapLayers();
+    // Straight after the sheet, because it replaces one of the sheet's shapes.
+    addClosedLayers();
     // Above the sheet it annotates, below the network added further down.
     addHighlightLayers();
 
@@ -2939,7 +3153,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // disagree about what this map's symbols mean.
   //
   // This list and the chip strip used to be two controls. They were built from
-  // the same twelve rows in the same order with the same pictograms, and the
+  // the same eleven rows in the same order with the same pictograms, and the
   // only thing that distinguished them was which half of the question they
   // answered — a chip answered "where are the defibrillators" with pins, a
   // legend row answered "which buildings have one" with an outline. That is a
@@ -2950,7 +3164,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   //
   //   POINT at a row (hover, or focus, so it works from the keyboard) and the
   //   buildings and car parks holding that thing outline. Undoable — moving off
-  //   puts back whatever was selected — so running an eye down twelve rows
+  //   puts back whatever was selected — so running an eye down eleven rows
   //   costs nothing.
   //
   //   PRESS a row and it becomes the category: its pins arrive with their names
@@ -3051,7 +3265,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * the parts that commit: the campus empties, the row's pins arrive on the
    * lift's spring with their names, and the whole thing is undone the moment the
    * pointer leaves. No results list, no camera move — a preview that flew the
-   * map somewhere would make running an eye down twelve rows unusable, and the
+   * map somewhere would make running an eye down eleven rows unusable, and the
    * pins land wherever they are, in view or not.
    *
    * Every row behaves this way, parking included. Its 22 outlined car parks were
@@ -3062,7 +3276,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * The reversal is the reason this is cheap enough to fire on mouseenter:
    * `choreography` cancels whatever is mid-flight and `fadeFrom` picks up the
    * opacity where the cancelled run left it, so dragging the pointer down the
-   * column dissolves one set into the next instead of restarting twelve times.
+   * column dissolves one set into the next instead of restarting eleven times.
    */
   function previewLegendRow(id) {
     if (hoverRow === id) return;
@@ -3102,7 +3316,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    *
    * Every row is resolved up front rather than on first hover: the answer is
    * what the row prints under its caption, so it has to exist before anything
-   * is pointed at, and twelve categories over 90 areas is a few milliseconds.
+   * is pointed at, and eleven categories over 90 areas is a few milliseconds.
    */
   function buildLegendIndex() {
     legendAreas = buildAreas({
@@ -3180,6 +3394,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // src/campus-clip.js.
       campusBasemap = trimToCampus(basemap.value, CAMPUS_RING);
       addBasemapLayers();
+      // The sheet arriving is what this was waiting for — the closed block is
+      // one of its shapes, so on a cold load style.load has already been and
+      // gone with nothing for addClosedLayers to draw.
+      addClosedLayers();
     } else {
       console.error(basemap.reason);
     }

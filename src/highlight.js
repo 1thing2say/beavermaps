@@ -1,7 +1,7 @@
 /**
  * Which shapes on the map are "the ones with a defibrillator in them".
  *
- * The legend used to be a key: twelve rows of glyph-and-caption telling you what
+ * The legend used to be a key: eleven rows of glyph-and-caption telling you what
  * a symbol means and nothing about where those symbols are. This turns each row
  * into a query — hover "Defibrillator" and the six buildings holding one light
  * up, hover "Parking" and the tarmac does — which is the one question a printed

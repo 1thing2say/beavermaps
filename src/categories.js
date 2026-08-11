@@ -35,31 +35,37 @@ export const CATEGORIES = [
   },
   {
     id: 'parking',
-    label: 'Parking',
+    label: 'Parking & drop-off',
     glyph: 'parking',
     icon: 'parking',
     // Their lot names all end in "Parking Lot", "Parking Garage" or name the
     // metered lot. These are the pins that carry a real name — "Myrtle Parking
     // Lot East" — which is what somebody asking about parking is looking for.
     match: (name) => /parking (lot|garage)|metered parking/i.test(name),
-    // ...and the ten machines you buy the permit from, which is the other half
-    // of the same question: knowing which lot to use is no help without knowing
-    // where to pay. They keep their own row on the key as well — the printed
-    // legend lists them separately and this is not the place to overrule it —
-    // but a row about parking that omitted them was answering half.
+    // ...the ten machines you buy the permit from, and the two drop-off points.
     //
-    // Drawn in `parking_meter` rather than in their own `parking_permit` disc,
-    // which is the same pictogram in a lighter azure. Both sets arrive together
-    // here and Google's single blue made twenty-odd pins one undifferentiated
-    // field; on the map at rest, and under Permit machines, a machine is still
-    // blue. See the note beside the colour in src/map-images.js.
-    kinds: ['parking_permit'],
+    // All three are one errand. Knowing which lot to use is no help without
+    // knowing where to pay, and someone who is being dropped off rather than
+    // parking is asking the same question — where does the car stop — from the
+    // passenger seat. Drop-off had its own row and it was a row of two pins
+    // answering a question nobody asks separately from this one.
+    //
+    // The machines keep their own row on the key as well: the printed legend
+    // lists them separately and this is not the place to overrule my campus's sheet.
+    // Drop-off does not, because it has been folded in here.
+    kinds: ['parking_permit', 'drop_off'],
+    // Three sets arriving together need three colours, and only the machines
+    // needed moving: the lots wear the category's own blue disc and drop-off
+    // keeps the transit pink it has everywhere else, but a machine in the same
+    // Google blue as the lot it stands in made twenty-odd identical pins. So
+    // for this row only it is drawn in `parking_meter` — the same pictogram, in
+    // orange. See the note beside the colour in src/map-images.js.
     kindIcons: { parking_permit: 'parking_meter' },
     // The one row that also names a class of the printed sheet, so PRESSING it
     // outlines all 22 car parks under the pins. Hovering does not — a hover
     // previews objects now, on every row including this one. See previewLegendRow.
     zones: 'parking',
-    legend: 'Parking lots, garage and permit machines',
+    legend: 'Lots, garage, permit machines and student drop-off',
   },
   {
     id: 'food',
@@ -109,13 +115,10 @@ export const CATEGORIES = [
     kinds: ['health_centre'],
     legend: 'Health & Wellness Center',
   },
-  {
-    id: 'dropoff',
-    label: 'Drop-off',
-    glyph: 'drop_off',
-    kinds: ['drop_off'],
-    legend: 'Student Drop-Off',
-  },
+  // Student Drop-Off had a row of its own here. It is part of Parking now — see
+  // the note on `kinds` up there — because where the car stops is one question
+  // whether you are the one parking or the one being dropped off. Its pictogram
+  // and its pink are untouched; only the row it answers from has moved.
   {
     id: 'motorcycle',
     label: 'Motorcycle parking',

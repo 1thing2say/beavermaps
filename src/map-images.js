@@ -134,24 +134,27 @@ const COLOURS = {
 
   // The one place the parking family is deliberately split.
   //
-  // Hovering Parking answers with two sets at once — the named lots, and the
-  // ten machines you buy the permit from — and in Google's single blue those
-  // are one undifferentiated field of pins. So the machines get their own disc
-  // for that view: the same pictogram, a lighter azure.
+  // Pointing at Parking answers with three sets at once — the named lots, the
+  // ten machines you buy the permit from, and the two drop-off points — and in
+  // Google's single blue the first two were one undifferentiated field. So the
+  // machines get their own disc for that view: the same pictogram, in orange.
   //
-  // Lightness rather than a new hue, and that is the whole argument. A machine
-  // is not a different errand from the lot it stands in, so a genuinely foreign
-  // colour would say something untrue; the wheel is also full, since ten hues
-  // already sit dE 31 apart at the tightest and every gap wide enough for an
-  // eleventh is a neon nobody would ship. A big step down the same hue reads as
-  // "same errand, different object", which is exactly the relationship.
+  // This orange, and not one of its own, because the wheel is full. Ten hues
+  // already sit dE 31 apart at the tightest, and #e8710a owns the whole orange
+  // wedge: #ff6d00 is dE 12 from it, #e65100 is dE 15, and the nearest thing
+  // that clears the separation floor is a dark ochre that reads as mustard. A
+  // hue this table already trusts beats a near-miss of it that the floor would
+  // have to be lowered to admit.
   //
-  // dE 39.7 from #0b57d0 at its nearest, so it clears the separation floor with
-  // room, and 3.46:1 against a white glyph, so it keeps the white one every
-  // other disc in this family has. The ambient `parking_permit` pictogram is
-  // untouched — on the map at rest, and under its own Permit machines row,
-  // a machine is still Google blue.
-  parking_meter: '#1490de',
+  // Sharing is the established answer here anyway — defibrillators and the
+  // health centre share red, bus stops and drop-off share pink — and the
+  // sharing costs nothing where it lands: a category clears the campus before
+  // its own pins arrive, so the vending machines that also wear this orange are
+  // never on screen at the same time as these.
+  //
+  // The ambient `parking_permit` pictogram is untouched. On the map at rest,
+  // and under its own Permit machines row, a machine is still Google blue.
+  parking_meter: '#e8710a',
 
   // Building POI discs, one per class in src/poi.js. These are the ones that
   // sit on the map all the time, beside my campus's printed building names, and the
@@ -535,6 +538,50 @@ export function routePin(colour, { title = '' } = {}) {
  * marker, and taking the whole overlay down for it would be a worse trade.
  * Images do not survive setStyle, hence hasImage rather than a load-once flag.
  */
+/**
+ * A tileable 45-degree hatch, for the one area on this map that is fenced off.
+ *
+ * Three segments rather than one, and that is what makes it seam-free: a single
+ * corner-to-corner stroke leaves the two half-diagonals at the opposite corners
+ * unpainted, so the tiles meet in a visible dotted line. The short pair at
+ * (-1,1)-(1,-1) and (N-1,N+1)-(N+1,N-1) fill exactly those, and every stroke
+ * runs past the edge so the joins land outside the tile instead of on it.
+ *
+ * Drawn on transparent ground: the wash underneath is its own fill layer, so
+ * the tint can be a real colour at a real opacity rather than whatever survives
+ * being baked into a pattern bitmap.
+ */
+export function hatchSvg(colour, { size = 16, width = 2 } = {}) {
+  const line = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"`
+    + ` viewBox="0 0 ${size} ${size}">`
+    + `<g stroke="${colour}" stroke-width="${width}" stroke-linecap="square">`
+    + line(-1, 1, 1, -1)
+    + line(-1, size + 1, size + 1, -1)
+    + line(size - 1, size + 1, size + 1, size - 1)
+    + '</g></svg>';
+}
+
+/**
+ * Register one SVG string as a map image under `name`.
+ *
+ * Resolves rather than rejects on a decode failure, for the same reason
+ * loadAmenityIcons does: a missing pattern costs a hatch, and taking the layer
+ * that wanted it off the map would cost the whole annotation.
+ */
+export function loadSvgImage(map, name, svg, { pixelRatio = 2, width, height } = {}) {
+  return new Promise((resolve) => {
+    if (map.hasImage(name)) { resolve(); return; }
+    const image = new Image(width, height);
+    image.onload = () => {
+      if (!map.hasImage(name)) map.addImage(name, image, { pixelRatio });
+      resolve();
+    };
+    image.onerror = () => resolve();
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+}
+
 export function loadAmenityIcons(map) {
   return Promise.all(AMENITY_KINDS.map((kind) => new Promise((resolve) => {
     if (map.hasImage(kind)) {

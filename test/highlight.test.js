@@ -96,8 +96,14 @@ test('parking paints the ground, not the nine points my campus lists', () => {
   // Every car park on the sheet plus the garage, which is a building. Without
   // `zones` this row would outline the seven lots that happen to hold one of
   // my campus's destination nodes and leave fifteen car parks unmarked.
+  //
+  // The loose one is a student drop-off, which this row now covers as well. It
+  // is outside every shape because a drop-off IS a kerb — there is no footprint
+  // for it to be inside — so it is reported rather than attached, which is what
+  // `outside` is for. The permit machines that came with it all stand in a car
+  // park and are absorbed by the zones above.
   const { counts } = of('parking');
-  assert.deepEqual(counts, { buildings: 1, zones: 22, outside: 0 });
+  assert.deepEqual(counts, { buildings: 1, zones: 22, outside: 1 });
 });
 
 const gapTo = (coords) => Math.min(...areas.map((a) => metresToArea(coords, a)));
@@ -134,8 +140,18 @@ test('a directory row attaches to the shape it was placed against', () => {
   // The garage's node is one of the three, and the reach has to put it on the
   // garage rather than on the tarmac the garage stands in. Without it this row
   // outlines no building at all.
-  const { indices, counts } = of('parking');
-  assert.equal(counts.outside, 0);
+  const { indices, points } = of('parking');
+
+  // Every one of the nine attached to something, which is what the reach is
+  // for. Asserted over the lots themselves rather than over `counts.outside`,
+  // which this used to read: the row also carries permit machines and a
+  // drop-off now, and the drop-off is legitimately loose, so a bare count of
+  // the row's strays no longer says anything about the lots.
+  const loose = new Set(points.map(String));
+  for (const lot of lots) {
+    assert.ok(!loose.has(String(lot.geometry.coordinates)),
+      `${lot.properties.name} never found its shape`);
+  }
   const [onlyBuilding] = indices.filter((i) => areas[i].kind === 'building');
   assert.equal(areas[onlyBuilding].name, 'Parking Garage');
 });
