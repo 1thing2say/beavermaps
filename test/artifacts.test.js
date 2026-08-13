@@ -246,10 +246,13 @@ test('the ambient amenity layer is thinned, and by the right half', () => {
   }
 
   // The point of the split, asserted as a count rather than described: at the
-  // zoom the whole campus fits, two thirds of the markers are not drawn.
+  // zoom the whole campus fits, half the markers are not drawn. It was two
+  // thirds until the ten permit machines moved up to 16 — you go looking for
+  // the machine you have to pay at before you can leave the car, which puts
+  // them on the destination side of the line the split is drawn on.
   const at = (zoom) => amenities.features.filter((f) => AMENITY_ZOOM[f.properties.kind] <= zoom);
   assert.equal(amenities.features.length, 84);
-  assert.equal(at(16).length, 31);
+  assert.equal(at(16).length, 41);
   assert.equal(at(18).length, 84);
 });
 

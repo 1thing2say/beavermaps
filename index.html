@@ -22,6 +22,13 @@
   The legend down the right edge is neither company's — Google has no such panel
   and Apple's is a filter sheet — and it is here because this map has a printed
   key to be faithful to and they do not.
+
+  One piece of the markup below is shaped by the OTHER look rather than this
+  one: the search field is inside the left column instead of in a bar above it.
+  Google's arrangement renders the same either way, and it is the only structure
+  the Apple look can draw its sidebar from — one panel, field at the top of it —
+  because two translucent cards cannot be joined into one surface with CSS. See
+  the sidebar block in src/input.css.
 -->
 
 <body class="g-body">
@@ -42,34 +49,52 @@
              directions button — a toggle rather than an opener. -->
 
 
-        <!-- The top bar. Only the search field now: the category strip that used
-             to take the rest of the bar is the legend on the right, where eleven
-             categories can be read down a column instead of scrolled through a
-             slot four at a time. -->
-        <div class="g-topbar app-chrome">
+        <!-- The left column: the search field, then what you tapped, then the
+             category results, then the route.
+             ===================================================================
+             The field used to be a separate floating bar of its own, in its own
+             card, above this column — Google's arrangement, where the bar spans
+             the window and the cards hang under one end of it. It is inside the
+             column now, which is what lets the Apple look draw all of this as
+             ONE panel: a sidebar is a single material with a field at the top
+             of it, and two backdrop-filtered cards abutting cannot be that
+             however carefully they are placed, because the blur runs twice at
+             the seam and each brings its own shadow.
+
+             Under the classic look nothing moved. The bar was the width of this
+             column and held nothing but the field, so being the column's first
+             row instead of a strip above it renders identically. -->
+        <div id="top-left" class="g-topleft app-chrome">
+
+            <!-- Three boxes for one field, and each earns its place across the
+                 two looks: .g-search is the surface (a floating pill under
+                 classic, the sidebar's head under Apple), .g-search-row is the
+                 line the field and the directions button share, and
+                 .g-search-field is the part Apple fills and rounds — the button
+                 sits outside that fill, the way a control beside a field does,
+                 rather than inside the box you type into. -->
             <div class="g-search g-card">
-                <label for="place-search" class="sr-only">Search for a destination</label>
-                <input id="place-search" type="text" role="combobox" autocomplete="off" aria-expanded="false"
-                    aria-controls="place-results" aria-autocomplete="list" placeholder="Search my campus"
-                    disabled class="g-search-input">
-                <button id="place-clear" type="button" aria-label="Clear search" class="g-search-clear hidden">
-                    <span class="g-icon" data-icon="close"></span>
-                </button>
-                <span class="g-search-sep" aria-hidden="true"></span>
-                <button id="search-go" type="button" class="g-search-icon" aria-label="Search">
-                    <span class="g-icon" data-icon="search"></span>
-                </button>
-                <button id="directions-btn" type="button" class="g-directions" aria-label="Directions"
-                    aria-expanded="false">
-                    <span class="g-icon" data-icon="directions"></span>
-                </button>
+                <div class="g-search-row">
+                    <div class="g-search-field">
+                        <label for="place-search" class="sr-only">Search for a destination</label>
+                        <input id="place-search" type="text" role="combobox" autocomplete="off" aria-expanded="false"
+                            aria-controls="place-results" aria-autocomplete="list"
+                            placeholder="Search my campus" disabled class="g-search-input">
+                        <button id="place-clear" type="button" aria-label="Clear search" class="g-search-clear hidden">
+                            <span class="g-icon" data-icon="close"></span>
+                        </button>
+                        <span class="g-search-sep" aria-hidden="true"></span>
+                        <button id="search-go" type="button" class="g-search-icon" aria-label="Search">
+                            <span class="g-icon" data-icon="search"></span>
+                        </button>
+                    </div>
+                    <button id="directions-btn" type="button" class="g-directions" aria-label="Directions"
+                        aria-expanded="false">
+                        <span class="g-icon" data-icon="directions"></span>
+                    </button>
+                </div>
                 <ul id="place-results" role="listbox" aria-label="Matching destinations" class="g-results hidden"></ul>
             </div>
-        </div>
-
-        <!-- The column that hangs under the search box: what you tapped, then
-             the category results, then the route. -->
-        <div id="top-left" class="g-topleft app-chrome">
 
             <!-- Whatever is selected on the map — a building, or one of the
                  pins that is not part of a building — writes its card in here.
@@ -83,7 +108,7 @@
 
             <!-- The category results list, in the slot Google gives its own. -->
             <div id="category-panel" class="g-card g-panel hidden">
-                <div class="g-panel-head">
+                <div class="g-panel-head g-panel-head--section">
                     <div>
                         <h2 id="category-title" class="g-panel-title">Results</h2>
                         <p id="category-count" class="g-panel-sub"></p>
@@ -143,37 +168,53 @@
                 </div>
             </div>
 
-        </div>
+            <!-- The campus directory, and the sidebar's resting content.
+                 ===========================================================
+                 Apple's sidebar is never empty — theirs holds Recents, and
+                 that is what makes it a sidebar rather than a search box with
+                 a shadow. This map has something better than a history to put
+                 there: the thirty buildings in src/directory.json, which is
+                 the same feature-per-building file the map itself is tapped
+                 through, so a row here and a tap on the footprint open exactly
+                 the same card.
 
-        <!-- The legend, docked right, and the only list of the eleven
-             categories there is now.
-             ===================================================================
-             There used to be two. A chip strip across the top asked "where are
-             the defibrillators" and dropped pins; this sheet, buried behind a
-             row in the layers menu, asked "which buildings have one" and
-             outlined them. Both were built from src/categories.js, both showed
-             the same eleven rows in the same order with the same pictograms,
-             and the split between them was a distinction about the question
-             rather than about the thing being asked after.
+                 Every building, not a chosen few. A directory that stops at
+                 the ten someone decided were the interesting ones is a
+                 directory you cannot trust to answer "is Raef Hall on this
+                 map", and thirty rows is a short scroll, not a wall. -->
+            <div id="buildings-panel" class="g-card g-panel">
+                <div class="g-panel-head g-panel-head--section">
+                    <div>
+                        <h2 class="g-panel-title">Buildings</h2>
+                        <p id="buildings-count" class="g-panel-sub"></p>
+                    </div>
+                </div>
+                <ul id="buildings-list" class="g-panel-list"></ul>
+            </div>
 
-             So one list, and one answer on both of a row's interactions: POINT
-             at a row and its pins arrive over an emptied campus, with their
-             names; PRESS it and they stay, the results list opens beside them
-             and the camera goes to them.
+            <!-- The legend, and the only list of the eleven categories there
+                 is now.
+                 ===========================================================
+                 There used to be two. A chip strip across the top asked "where
+                 are the defibrillators" and dropped pins; a sheet buried behind
+                 a row in the layers menu asked "which buildings have one" and
+                 outlined them. Both were built from src/categories.js, both
+                 showed the same eleven rows in the same order with the same
+                 pictograms, and the split between them was a distinction about
+                 the question rather than about the thing being asked after.
 
-             Pointing used to outline the buildings holding the thing instead.
-             It does not any more — tinting ground purple under the pins said
-             two things about one question, and "where are the defibrillators"
-             is answered by six discs, not by shading the buildings they hang
-             in. The outline survives on the press, where there is room for
-             context underneath a committed answer.
+                 So one list, and one answer on both of a row's interactions:
+                 POINT at a row and its pins arrive over an emptied campus, with
+                 their names; PRESS it and they stay, the results list opens
+                 above and the camera goes to them.
 
-             On the right because it is a key: it says what the map's symbols
-             mean, so it belongs beside the map rather than on top of it, and
-             the left column is already three cards deep. -->
-        <div class="g-right app-chrome">
+                 It held the right edge in its own column until this. Two
+                 columns is Google's habit, not Apple's — Apple has one sidebar
+                 and everything that is not the map goes in it — and a key is
+                 reference rather than navigation, so it sits at the foot of
+                 the column under the directory. -->
             <div id="legend-panel" class="g-card g-panel g-legend" role="region" aria-label="Map legend">
-                <div class="g-panel-head">
+                <div class="g-panel-head g-panel-head--section">
                     <div>
                         <h2 class="g-panel-title">Legend</h2>
                         <p class="g-panel-sub">Point to preview · press to keep</p>
@@ -185,10 +226,20 @@
                 <ul id="legend-list" class="g-legend-list"></ul>
                 <p class="g-legend-note">From the printed campus map, Ver. 3/2026.</p>
             </div>
+
         </div>
 
-        <!-- Bottom-left layers switcher: an imagery thumbnail that opens the
-             three basemap controls, which is where Google keeps the same idea. -->
+        <!-- The layers switcher: an imagery thumbnail that opens the three
+             basemap controls.
+             ===================================================================
+             It held the bottom-LEFT corner, which is where Google keeps the
+             same idea and where it had the whole corner to itself. It is a
+             member of the bottom-right stack now, above the scale bar and the
+             zoom and locate buttons — main.js hands this element to
+             map.addControl rather than the markup placing it, so its spacing
+             is the stack's own `gap` and cannot drift out of step with it.
+             There is nothing in the bottom-left corner now but Mapbox's
+             wordmark, which is the one thing there that has to be. -->
         <div class="g-layers app-chrome">
             <div id="layers-menu" class="g-card g-layers-menu hidden" role="menu" aria-label="Map layers">
                 <p class="g-layers-heading">Map type</p>
@@ -258,6 +309,75 @@
                     Layers
                 </span>
             </button>
+        </div>
+
+        <!-- The debug menu. Opened by ?debug, #debug or Ctrl/Cmd+Shift+D, and
+             hidden the rest of the time.
+             ===================================================================
+             The top-RIGHT corner, which is the only one genuinely free — the
+             sidebar owns the entire left edge, top to bottom, and the control
+             stack owns the bottom right.
+
+             Deliberately NOT a section of the layers menu. Half of what is in
+             here is a lie told to the app, and a lie sitting in the same card
+             as Light/Dark/Auto is one a visitor will eventually press. See
+             src/debug.js for the rule that keeps the two apart. -->
+        <div id="debug-panel" class="g-card g-debug hidden app-chrome" role="region" aria-label="Debug menu"
+            aria-hidden="true">
+            <div class="g-panel-head g-panel-head--section">
+                <div>
+                    <h2 class="g-panel-title">Debug</h2>
+                    <p class="g-panel-sub">Not part of the map</p>
+                </div>
+                <button id="debug-close" type="button" class="g-icon-btn" aria-label="Close debug menu">
+                    <span class="g-icon" data-icon="close"></span>
+                </button>
+            </div>
+
+            <!-- The same three controls the layers menu carries, registered as
+                 second surfaces on the controls that already own the state.
+                 See createDebugMenu — nothing here holds a value. -->
+            <p class="g-layers-heading">Map type</p>
+            <div class="g-layers-row">
+                <button id="debug-basemap" type="button" class="g-layer-btn">
+                    <span id="debug-basemap-icon" class="g-layer-icon"></span>
+                    <span id="debug-basemap-label">Satellite</span>
+                </button>
+                <button id="debug-provider" type="button" class="g-layer-btn">
+                    <span id="debug-provider-icon" class="g-layer-icon"></span>
+                    <span id="debug-provider-label">Google</span>
+                </button>
+            </div>
+
+            <p class="g-layers-heading g-layers-heading--split">Look</p>
+            <div class="g-layers-row">
+                <button id="debug-skin" type="button" class="g-layer-btn g-layer-btn--wide">
+                    <span id="debug-skin-icon" class="g-layer-icon"></span>
+                    <span id="debug-skin-label">Classic</span>
+                </button>
+                <button id="debug-legend" type="button" class="g-layer-btn g-layer-btn--wide">
+                    <span class="g-layer-icon" data-icon="legend"></span>
+                    Legend
+                </button>
+            </div>
+
+            <!-- The two lies. Switches rather than buttons, because these are
+                 states the app is being held in rather than actions taken. -->
+            <p class="g-layers-heading g-layers-heading--split">Pretend</p>
+            <label class="g-debug-row" for="debug-routing">
+                <span class="g-debug-text">
+                    <span class="g-debug-name">Start / destination GUI</span>
+                    <span class="g-debug-hint">The directions button, the route card and the two pins</span>
+                </span>
+                <input id="debug-routing" type="checkbox" class="g-switch">
+            </label>
+            <label class="g-debug-row" for="debug-gps">
+                <span class="g-debug-text">
+                    <span class="g-debug-name">Virtual location</span>
+                    <span class="g-debug-hint">A fixed GPS fix at the centre of the campus</span>
+                </span>
+                <input id="debug-gps" type="checkbox" class="g-switch">
+            </label>
         </div>
 
         <!-- Turn-by-turn banner. Hidden until navigation starts. During a

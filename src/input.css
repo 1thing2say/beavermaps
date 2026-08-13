@@ -27,6 +27,14 @@
     /* Light: white sign, grid drawn darker than the background. */
     --sign-bg: #ffffff;
     --sign-grid: rgba(75, 90, 116, 0.14);
+    /* The same ruling with the alpha resolved instead of applied — the exact
+       colour `--sign-grid` composites to over `--sign-bg`, written as a flat
+       value. The simulated walk uses this one; see "the simulated walk". It has
+       to exist separately because the sign is NOT always `--sign-bg` behind it:
+       under the Apple skin the card is translucent with a backdrop blur, so a
+       translucent ruling on top of it is transparent twice over and the map
+       shows through the lines themselves. */
+    --sign-grid-solid: #e6e8ec;
     --sign-ring: rgba(75, 90, 116, 0.4);
     --sign-text: #1f2937;
     --sign-text-dim: rgba(31, 41, 55, 0.7);
@@ -48,6 +56,12 @@
     --g-line: #dadce0;
     --g-blue: #1a73e8;
     --g-on-blue: #ffffff;
+    /* A switch that is on. Google's is the primary colour — a Material switch
+       is the same accent as every other control it sits beside — where Apple's
+       is a green that appears nowhere else in their interface. The two looks
+       genuinely disagree here, which is why this is a token and not a literal
+       in the switch rule. */
+    --g-switch-on: var(--g-blue);
     /* The legend's colour, and the map's: a pressed legend row and the shapes
        it just outlined have to be the same purple or they read as two separate
        things happening at once. Kept in step with `highlight` in the THEMES
@@ -65,9 +79,9 @@
        from the edge now. */
     --g-gap: 10px;
     --g-col-w: 400px;
-    /* The legend on the right. Narrower than the left column because its rows
-       are a name and a count, not a directory listing. */
-    --g-legend-w: 280px;
+    /* A --g-legend-w sat beside these, the width of a second column down the
+       right edge that held nothing but the legend. The legend is a section of
+       the one column now and there is no second width to state. */
 
     /* The strip along the bottom of the screen that belongs to the map credits:
        Mapbox's wordmark on one side, whoever's copyright line on the other.
@@ -76,13 +90,11 @@
        itself up from --g-credit-h instead. */
     --g-credit-h: 22px;
 
-    /* ...and how much of the bottom-right corner the map's own controls claim
-       above it: the scale bar, the zoom pair and the locate button, with a gap
-       between each. Stated rather than measured because the legend column has
-       to stop short of it, and a column cannot ask how tall the thing below it
-       is without a layout pass it does not get. Keep in step with the sizes in
-       "Mapbox's own controls" below. */
-    --g-hud-h: 200px;
+    /* A --g-hud-h went with the legend column: 200px, a guess at how much of
+       the bottom-right corner the scale bar and the zoom and locate buttons
+       claim, which that column had to stop short of. Nothing is beside that
+       stack any more, and the one control that joined it is IN it — spaced by
+       its flex `gap` rather than by an estimate of its height. */
 
     /* --- what the two looks disagree about --------------------------------
        Everything below is overridden wholesale by the Apple skin further down.
@@ -115,6 +127,28 @@
     /* The rule under a panel heading. Apple separates with weight and space
        instead, so it sets this transparent rather than restyling four heads. */
     --g-head-rule: var(--g-line);
+
+    /* --- Liquid Glass ------------------------------------------------------
+       The two things that separate iOS 26's material from plain translucency,
+       as tokens so every control can wear them from one definition.
+
+       A blurred fill is a frosted pane; glass is a solid with EDGES, and the
+       edges are the whole effect. Real glass gathers light along its rim and
+       carries a specular highlight down from the top face — so:
+
+         --g-rim   the gathered edge, as inset shadows. Brightest along the top
+                   where a lens would catch the light, a trace along the sides,
+                   nearly nothing underneath.
+         --g-sheen the specular fall, a gradient laid over the fill rather than
+                   a pseudo-element, so it costs no extra box on any control.
+
+       Classic states the no-ops rather than leaving them undefined: a Google
+       card is opaque and a rim on it would be a bevel, which is a different
+       decade's idea. They are written as a transparent shadow and a
+       transparent gradient so they can sit in a comma list and a background
+       shorthand without a second rule to switch them off. */
+    --g-rim: 0 0 0 0 rgba(0, 0, 0, 0);
+    --g-sheen: linear-gradient(rgba(255, 255, 255, 0) 0 100%);
 }
 
 :root[data-theme="dark"] {
@@ -208,6 +242,8 @@
 
     --g-blue: #007aff;
     --g-on-blue: #ffffff;
+    /* systemGreen, light. */
+    --g-switch-on: #34c759;
     --g-highlight: #af52de;
     --g-highlight-soft: rgba(175, 82, 222, 0.14);
     --g-hover: rgba(120, 120, 128, 0.12);
@@ -222,6 +258,22 @@
     --g-tint: color-mix(in srgb, var(--g-blue) 15%, transparent);
     --g-tint-line: transparent;
     --g-head-rule: transparent;
+
+    /* Liquid Glass, light. The top edge is the bright one; the sides carry a
+       trace and the bottom almost nothing, which is what stops it reading as a
+       1990s bevel. Half-pixel insets so the rim stays a hairline on a retina
+       screen instead of a drawn border. */
+    --g-rim:
+        inset 0 0.5px 0 rgba(255, 255, 255, 0.62),
+        inset 0.5px 0 0 rgba(255, 255, 255, 0.20),
+        inset -0.5px 0 0 rgba(255, 255, 255, 0.20),
+        inset 0 -0.5px 0 rgba(255, 255, 255, 0.10);
+    /* Falls off inside the top third. Any further and it stops being a
+       highlight and becomes a two-tone fill. */
+    --g-sheen: linear-gradient(
+        rgba(255, 255, 255, 0.22) 0,
+        rgba(255, 255, 255, 0.06) 34%,
+        rgba(255, 255, 255, 0) 62%);
 
     /* Measured, and not white: #fefdf6 is a warm off-white. */
     --g-label-halo: #fefdf6;
@@ -239,6 +291,9 @@
 
     --g-blue: #0a84ff;
     --g-on-blue: #ffffff;
+    /* systemGreen, dark — Apple lifts it rather than reusing the light value,
+       the same way every other system colour moves between the two. */
+    --g-switch-on: #30d158;
     --g-highlight: #bf5af2;
     --g-highlight-soft: rgba(191, 90, 242, 0.18);
     --g-hover: rgba(120, 120, 128, 0.24);
@@ -246,14 +301,32 @@
     --g-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 8px 28px rgba(0, 0, 0, 0.5);
     --g-shadow-sm: 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 2px 10px rgba(0, 0, 0, 0.4);
 
-    /* The dark map's halo, from the same palette the symbol labels use. */
-    --g-label-halo: #1e1e1b;
+    /* Liquid Glass, dark. Same geometry, roughly half the light: a dark pane
+       gathers less along its edge, and at the light values it reads as a white
+       outline drawn around the control rather than as glass. */
+    --g-rim:
+        inset 0 0.5px 0 rgba(255, 255, 255, 0.30),
+        inset 0.5px 0 0 rgba(255, 255, 255, 0.10),
+        inset -0.5px 0 0 rgba(255, 255, 255, 0.10),
+        inset 0 -0.5px 0 rgba(255, 255, 255, 0.05);
+    --g-sheen: linear-gradient(
+        rgba(255, 255, 255, 0.10) 0,
+        rgba(255, 255, 255, 0.03) 34%,
+        rgba(255, 255, 255, 0) 62%);
+
+    /* The dark map's halo, from the same palette the symbol labels use — and
+       kept in step with APPLE.dark.labelHalo by a test, because the DOM caption
+       on a lifted pin and the symbol labels around it are the same halo drawn
+       on opposite sides of the renderer. It moved from a warm #1e1e1b to this
+       when the night ground went cool. */
+    --g-label-halo: #20242e;
 }
 
 :root[data-theme="dark"] {
     /* Dark: charcoal sign, grid drawn lighter than the background. */
     --sign-bg: #292929;
     --sign-grid: rgba(75, 90, 116, 0.35);
+    --sign-grid-solid: #353a43;
     --sign-ring: rgba(75, 90, 116, 0.85);
     --sign-text: #f5f5f5;
     --sign-text-dim: rgba(245, 245, 245, 0.75);
@@ -359,6 +432,10 @@
         from { transform: translate3d(0, 0, 0); }
         to   { transform: translate3d(var(--grid-cell), calc(var(--grid-cell) * -1), 0); }
     }
+
+    /* The simulated walk's two grids are NOT here — they are unlayered, down
+       with the Apple skin's rules. See "the simulated walk" near the end of the
+       file for why they have to be. */
 
     /* An absolutely positioned ::before paints above static in-flow siblings, so
        the sign's contents have to be lifted back over the grid. */
@@ -606,6 +683,7 @@ body.navigating .app-chrome {
 .g-panel.hidden,
 .g-legend.hidden,
 .g-layers-menu.hidden,
+.g-debug.hidden,
 .g-search-clear.hidden,
 .g-results.hidden {
     display: none;
@@ -626,12 +704,16 @@ body.navigating .app-chrome {
  * and the filter is `none`. Written once here, so a card, a menu, a suggestion
  * list and a popup are one surface in both looks and cannot drift apart. */
 .g-card {
-    background: var(--g-card-bg);
+    /* background-color and background-image separately, not the shorthand: the
+       sheen is an image laid over the fill, and `background:` would have each
+       one clobber the other. */
+    background-color: var(--g-card-bg);
+    background-image: var(--g-sheen);
     -webkit-backdrop-filter: var(--g-card-filter);
     backdrop-filter: var(--g-card-filter);
     color: var(--g-text);
     border-radius: var(--g-radius);
-    box-shadow: var(--g-shadow);
+    box-shadow: var(--g-shadow), var(--g-rim);
 }
 
 .g-icon-btn {
@@ -654,65 +736,44 @@ body.navigating .app-chrome {
     color: var(--g-text);
 }
 
-/* --- the floating column: search, chips, panels ---------------------------- */
+/* --- the floating column: search, panels ----------------------------------- */
 
-.g-topbar {
-    position: absolute;
-    top: var(--g-gap);
-    left: var(--g-gap);
-    right: var(--g-gap);
-    /* Above the column below it, so the search suggestions overlap the panels
-       rather than being covered by them. */
-    z-index: 21;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    pointer-events: none;
-}
+/* A .g-topbar lived here: an absolutely positioned strip across the top of the
+   window, at z-index 21 so the search suggestions cleared the column below it.
+   The field is the column's first row now, so there is no strip to place and no
+   second stacking order to keep in step — .g-search lifts itself instead, which
+   is the same one line of intent written where the thing being lifted is. */
 
 .g-topleft {
     position: absolute;
-    /* Clears the top bar: 48px of search field plus both gutters. */
-    top: calc(var(--g-gap) * 2 + 48px);
+    top: var(--g-gap);
     left: var(--g-gap);
     z-index: 20;
     width: var(--g-col-w);
     max-width: calc(100vw - var(--g-gap) * 2);
-    /* Bounded so a long results list scrolls inside its card instead of running
-       off the bottom of the viewport — and specifically so it stops short of
-       the layers switcher and the credit strip in the corner below, which it
-       would otherwise reach right over once all three of its cards are open. */
-    max-height: calc(100dvh - var(--g-gap) * 4 - 48px - 64px - var(--g-credit-h));
+    /* Bounded so a long list scrolls inside the column instead of running off
+       the bottom of the viewport, and so it stops short of the credit strip in
+       the corner below — attribution is a licence term, not decoration.
+       It used to have to clear a 64px layers switcher down there as well. That
+       control is in the bottom-right stack now, so the column gets the height
+       back. */
+    max-height: calc(100dvh - var(--g-gap) * 3 - var(--g-credit-h));
     display: flex;
     flex-direction: column;
     gap: var(--g-gap);
     /* These columns span the map; only their cards should swallow clicks, or
-       the transparent gaps between them would block panning. */
+       the transparent gaps between them would block panning. Under Apple the
+       column is itself the card and takes this back — see the sidebar block. */
     pointer-events: none;
 }
 
-/* The legend's column, holding the right edge. Bounded away from the control
-   stack in the bottom-right corner for the same reason the left one is bounded
-   away from the layers switcher: twelve rows plus a head is taller than a short
-   window, and a key that runs under the zoom buttons is a key with rows you
-   cannot read. */
-.g-right {
-    position: absolute;
-    top: var(--g-gap);
-    right: var(--g-gap);
-    z-index: 20;
-    width: var(--g-legend-w);
-    max-width: calc(100vw - var(--g-gap) * 2);
-    max-height: calc(100dvh - var(--g-gap) * 2 - var(--g-hud-h));
-    display: flex;
-    flex-direction: column;
-    gap: var(--g-gap);
-    pointer-events: none;
-}
+/* A .g-right column held the right edge, and the legend was the only thing in
+   it. Two columns is Google's habit — Apple has one sidebar and everything that
+   is not the map lives in it — so the legend moved into the left column under
+   the directory, and the column that existed only to hold it went with it. The
+   right edge is the map's again, apart from the control stack in the corner. */
 
-.g-topleft > *,
-.g-right > *,
-.g-topbar > * {
+.g-topleft > * {
     pointer-events: auto;
 }
 
@@ -720,13 +781,45 @@ body.navigating .app-chrome {
 
 .g-search {
     position: relative;
+    /* Lifted over the panels below it in the column, so the suggestion list
+       hangs across them instead of being painted under the next card. It has to
+       be a z-index rather than DOM order: every one of these is a .g-card, and
+       under Apple a card carries a backdrop-filter, which makes each one its own
+       stacking context painted in source order. The bar used to win this by
+       being a separate element at z-index 21. */
+    z-index: 5;
     display: flex;
     align-items: center;
     height: 48px;
     padding: 0 8px 0 16px;
     border-radius: var(--g-radius-search);
     width: var(--g-col-w);
+    /* The column is narrower than 400px on a small phone, and a fixed width with
+       `flex: none` does not shrink to it — the field ran off the right edge of a
+       375px screen by 45px. */
+    max-width: 100%;
     flex: none;
+}
+
+/* The line the field and the directions button share. Under classic it is the
+   whole of the pill's interior; under Apple it is the top row of the sidebar. */
+.g-search-row {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+}
+
+/* The part you type into: input, clear, rule, magnifier. Nothing of its own to
+   say under classic — the pill around it is the shape — but it is what Apple
+   fills and rounds, which is why it is a box at all. */
+.g-search-field {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
 }
 
 .g-search-input {
@@ -932,6 +1025,17 @@ body.navigating .app-chrome {
     flex: none;
 }
 
+/* The directory is the section that gives up height, and it is the right one to
+   ask: thirty rows is the longest thing in the column and it is a list you
+   scroll rather than read whole, so a squeeze costs it nothing a scroll does
+   not already cost. `1 1` rather than `0 1` so it also takes the SLACK on a
+   tall window — an empty strip under the last building with the legend floating
+   below it would read as a gap in the panel rather than the end of a list. */
+#buildings-panel {
+    flex: 1 1 auto;
+    min-height: 200px;
+}
+
 /* --- the selected place ----------------------------------------------------
    What a tap on the map opens: a building's card, or the thinner one a lone pin
    gets. They were floating popups anchored to the thing they described, which
@@ -945,9 +1049,25 @@ body.navigating .app-chrome {
 
 /* Sized by its card and no more. Deliberately without the min-height its
    neighbour has: a pin's card is a title and two buttons, and a floor set under
-   it would be dead space inside the surface rather than room for another row. */
+   it would be dead space inside the surface rather than room for another row.
+   Which leaves nothing to stop it being squeezed — so it does not shrink at
+   all.
+   `0 1 auto` was survivable while everything under it came and went. It is not
+   now the column always ends in a directory and a legend: two sections that are
+   always open, always long, and between them took the whole column, leaving the
+   card at 36px — its title, and its facts, contents and both buttons clipped
+   off by .g-place's own overflow. The card is what you just tapped; it is the
+   last thing in the column that should give up room, not the first. If the
+   column overflows with it open, the sidebar scrolls. */
 #place-panel {
-    flex: 0 1 auto;
+    flex: 0 0 auto;
+}
+
+/* ...and the one part of it that can be arbitrarily long is bounded, so a
+   building with a forty-row directory scrolls inside its own card rather than
+   pushing the legend off the bottom of a short window. */
+.g-place-body {
+    max-height: 38dvh;
 }
 
 /* Shrinkable, so a squeezed column reaches the scroll container inside rather
@@ -1080,7 +1200,14 @@ body.navigating .app-chrome {
     flex: 1;
 }
 
+/* Blocks, not the inline spans they are in the markup. The name and the line
+   under it are two lines; left inline they set as one run of text and a
+   directory row read "Admin Bldg.5 destinations inside". It went unnoticed
+   while the only list using these was the category results, where most hits
+   carry no sub at all — so the bug needed a row that always has one to show
+   itself. */
 .g-row-name {
+    display: block;
     font-size: 14px;
     line-height: 1.3;
     overflow: hidden;
@@ -1089,6 +1216,7 @@ body.navigating .app-chrome {
 }
 
 .g-row-sub {
+    display: block;
     margin-top: 1px;
     font-size: 12px;
     color: var(--g-text-dim);
@@ -1279,15 +1407,34 @@ body.navigating .app-chrome {
    The column yields instead. It is bounded to stop above this — see the
    max-height on .g-topleft — so the two no longer have to be kept apart by
    distance. Sits above the credit strip, not in it. */
+/* A member of the bottom-right control stack, not a thing placed in a corner.
+   main.js hands this element to map.addControl (see the layers switcher there),
+   so it is a flex item in .mapboxgl-ctrl-bottom-right and the 8px between it
+   and the scale bar is that container's own `gap`.
+
+   `position: relative` for the menu below, which hangs off it rather than
+   sitting above it in the stack — a menu that took part in the column would
+   shove the zoom buttons down the screen every time it opened.
+
+   pointer-events because Mapbox's corner containers are `pointer-events: none`
+   and hand `auto` back to `.mapboxgl-ctrl` alone; this is not one of those, so
+   without this the button is visible and dead. */
 .g-layers {
-    position: absolute;
-    left: var(--g-gap);
-    bottom: calc(var(--g-gap) * 2 + var(--g-credit-h));
-    z-index: 20;
+    position: relative;
+    pointer-events: auto;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
+    align-items: flex-end;
+}
+
+/* To the LEFT of the button and level with its bottom, because the button is
+   hard against the right edge of the window and a menu opening rightwards has
+   nowhere to go. */
+.g-layers-menu {
+    position: absolute;
+    right: calc(100% + 8px);
+    bottom: 0;
+    width: 260px;
 }
 
 .g-layers-btn {
@@ -1424,9 +1571,17 @@ body.navigating .app-chrome {
    Shrinks rather than pushing: the route panel refuses to give up height, so
    when the column runs out the list inside here scrolls. Two rows' worth is
    kept whatever happens, for the same reason the results panel keeps a couple. */
+/* Floored a good deal higher than the panels above it, and this floor is doing
+   real work rather than guarding an edge case.
+   Two long lists share the column now — thirty buildings and eleven categories
+   — and neither fits whole, so the only question is how the squeeze is split.
+   Proportional shrink gives it to the longer list and left the legend at four
+   rows with its provenance note sitting on top of them. So the legend states a
+   floor it will not go under, the directory above takes whatever is left, and
+   both scroll inside their own section with their headings still in view. */
 .g-legend {
     flex: 0 1 auto;
-    min-height: 128px;
+    min-height: 264px;
 }
 
 .g-legend-list {
@@ -1539,8 +1694,8 @@ body.navigating .app-chrome {
  * wordmark in the opposite corner, which carries a 10px margin of its own. The
  * bottom of the screen is one credit band across both corners.
  *
- * Keep the heights here in step with --g-hud-h, which is how much of this
- * corner the legend column has been told to stay out of. */
+ * The layers switcher is a member of this stack too, added from main.js rather
+ * than placed by this file, so it is spaced by the same `gap` as the rest. */
 .mapboxgl-ctrl-bottom-right {
     display: flex;
     flex-direction: column;
@@ -1649,6 +1804,151 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
    layers switcher and the turn-by-turn sign, and no longer over a piece of
    chrome that only one of them had a model for. */
 
+/* --- the sidebar ----------------------------------------------------------
+   Apple's left column is one panel, not a stack of them: a single translucent
+   material running down the window with the search field at the top of it and
+   everything else listed underneath, divided by hairlines. Google's is the
+   opposite idea on purpose — separate cards floating over the map with map
+   showing between them — so this is a difference about the shape of the chrome
+   rather than its colour, and it lives here with the other three.
+
+   Nothing is rebuilt to do it. The column was already a flex stack of cards;
+   this hands the card *down* to it, closes the gaps and takes the paint off the
+   children, so one surface is drawn where four used to be.
+
+   Desktop only. Below 640px the column is a bottom sheet and the field is
+   pinned to the top of the screen away from it, which is not a sidebar in
+   either look — see the phone block at the end of the file.
+
+   What is deliberately NOT copied from Apple's sidebar is its contents: no
+   Pinned, Saved Places, Guides, Routes or Recently Added, no Recents list, no
+   Terms & Conditions. This map has none of those things, and a section header
+   over an empty list is furniture pretending to be a feature. Nor is the panel
+   given Apple's full window height: theirs is full height because Recents keeps
+   it full, and an empty 800px pane over this campus is the exact complaint that
+   moved the place card off the map to begin with. It is as tall as what is in
+   it. */
+@media (min-width: 641px) {
+    [data-skin="apple"] .g-topleft {
+        gap: 0;
+        background-color: var(--g-card-bg);
+        background-image: var(--g-sheen);
+        -webkit-backdrop-filter: var(--g-card-filter);
+        backdrop-filter: var(--g-card-filter);
+        border-radius: var(--g-radius);
+        box-shadow: var(--g-shadow), var(--g-rim);
+        /* The column stops being a spacer between cards and becomes the surface
+           itself, so it has to swallow its own clicks. */
+        pointer-events: auto;
+        /* Clips the children to the corner radius — which is all it normally
+           does, since they paint nothing. `auto` rather than `hidden` on the
+           vertical for the one case flex cannot absorb: on a short window with
+           the place card, the results and the route all open, the panels' own
+           minimums add up past the column's max-height, and a sidebar that
+           scrolls is recoverable where one that cuts its last card in half is
+           not. */
+        overflow: hidden auto;
+    }
+
+    /* One material. The children keep their padding and their type and give up
+       being surfaces. */
+    [data-skin="apple"] .g-topleft > .g-card {
+        background-color: transparent;
+        /* The sheen goes too. One pane of glass has one specular fall down its
+           top edge; four stacked sections each with their own would be four
+           panes in a sleeve, which is the arrangement this merge exists to
+           stop looking like. */
+        background-image: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
+        border-radius: 0;
+    }
+
+    /* The divider belongs to the section below it rather than the one above,
+       which is what keeps the bottom edge of the sidebar clean whichever card
+       happens to be last. The field is always first and always present, so
+       every panel that is showing has something above it to be divided from. */
+    [data-skin="apple"] .g-topleft > .g-panel {
+        border-top: 1px solid var(--g-line);
+    }
+
+    /* The head of the sidebar: a field inset in the material, not a pill
+       floating over the map. Column, because the suggestions drop into the flow
+       underneath it here rather than hanging off it. */
+    [data-skin="apple"] .g-search {
+        flex-direction: column;
+        align-items: stretch;
+        width: auto;
+        height: auto;
+        padding: 10px;
+        border-radius: 0;
+        /* Never shrinks. It was `0 1 auto` so the suggestion list under it could
+           give up height in a squeeze — but the list already caps itself at
+           300px, and letting the whole head shrink meant that once the column
+           was full the FIELD went first: 20px tall, the box you type in
+           flattened to a line while a legend nobody was looking at kept its
+           264. The one control that is always the answer to "now what" holds
+           its size; the lists below it are what bend. */
+        flex: none;
+    }
+
+    [data-skin="apple"] .g-search-row {
+        height: 36px;
+        flex: none;
+        gap: 8px;
+    }
+
+    /* Apple's field is a filled capsule inside the panel — the one place in
+       this look where a control is drawn ON the material rather than as one.
+       Filled with the translucent grey rather than --g-surface-2, and that is
+       the whole reason this is not the obvious token: an opaque fill inside a
+       translucent panel is a solid rectangle punched through the blur, and at
+       #f2f2f7 over a white-ish campus it was also invisible. A translucent fill
+       darkens whatever the panel is over, so the field reads as a field on a
+       photograph and on a road map alike. */
+    [data-skin="apple"] .g-search-field {
+        padding: 0 6px 0 8px;
+        border-radius: var(--g-radius-sm);
+        background: var(--g-hover);
+    }
+
+    [data-skin="apple"] .g-search-input {
+        font-size: 14px;
+    }
+
+    [data-skin="apple"] .g-directions {
+        width: 32px;
+        height: 32px;
+        margin: 0;
+    }
+
+    /* In the flow, as a section of the sidebar. It was a floating card hanging
+       off the bottom of the field, which is what a dropdown under a search bar
+       looks like; inside a panel the same list is just the panel's first
+       section, and it is also the only arrangement the rounded corners survive
+       — an absolutely positioned list is either clipped by the radius or hangs
+       out past the material it belongs to. */
+    [data-skin="apple"] .g-results {
+        position: static;
+        margin: 8px -10px -10px;
+        padding: 4px 0 6px;
+        max-height: 300px;
+        flex: 0 1 auto;
+        min-height: 0;
+        background: transparent;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        border-radius: 0;
+        border-top: 1px solid var(--g-line);
+        box-shadow: none;
+    }
+
+    [data-skin="apple"] .g-results li {
+        padding: 7px 16px;
+    }
+}
+
 /* Apple centres a place card's name and sets it large and bold, with the
    category underneath in grey — see the Seely Park card. The close button
    leaves the flow to allow it, since a centred title cannot share a row with
@@ -1672,9 +1972,127 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     right: 10px;
 }
 
+/* ...but a SECTION of the sidebar is not a card, and the two are different
+   things in Apple's own app: the place card centres its name because the card
+   is about that one place, while "Places" and "Recents" down the sidebar are
+   small grey captions hard against the left margin. Three centred 20px titles
+   stacked in one panel read as three cards that failed to separate.
+   The place card carries no modifier and keeps the treatment above. */
+[data-skin="apple"] .g-panel-head--section {
+    justify-content: space-between;
+    text-align: left;
+    padding: 14px 12px 6px 16px;
+}
+
+[data-skin="apple"] .g-panel-head--section .g-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0;
+    color: var(--g-text-dim);
+}
+
+[data-skin="apple"] .g-panel-head--section .g-panel-sub {
+    font-size: 11px;
+}
+
+/* Back into the row, since there is no centred title to make room for. */
+[data-skin="apple"] .g-panel-head--section .g-icon-btn {
+    position: static;
+    width: 26px;
+    height: 26px;
+}
+
+/* --- Liquid Glass on the small controls ------------------------------------
+   The material was on the four big surfaces and nothing else, which is the half
+   of the look that reads as "translucent panels" rather than as glass: in iOS 26
+   the buttons, the field and the map's own controls are cut from the same
+   substance as the panel they sit on, and each one carries its own lit edge.
+
+   Every control that has a fill gets the rim and the sheen. Controls with no
+   fill — a ghost button's transparent state, a list row at rest — deliberately
+   do not: glass with nothing behind it is not glass, and a rim drawn around
+   nothing is an outline. */
+
 /* Apple's dismiss control is a filled translucent disc, not a bare glyph. */
 [data-skin="apple"] .g-icon-btn {
-    background: var(--g-hover);
+    background-color: var(--g-hover);
+    background-image: var(--g-sheen);
+    box-shadow: var(--g-rim);
+}
+
+/* The two action buttons. The primary one is a filled capsule and the ghost a
+   tinted one, and both are solids in this look rather than outlines — so both
+   take the edge. */
+[data-skin="apple"] .g-btn {
+    background-image: var(--g-sheen);
+    box-shadow: var(--g-rim);
+}
+
+/* The field you type into, which is a control ON the panel rather than one of
+   its own — so it gets the edge without the shadow, the way a well pressed into
+   glass would. */
+[data-skin="apple"] .g-search-field {
+    background-image: var(--g-sheen);
+    box-shadow: var(--g-rim);
+}
+
+/* The blue circle at the end of the field. */
+[data-skin="apple"] .g-directions {
+    background-image: var(--g-sheen);
+    box-shadow: var(--g-rim);
+}
+
+/* Mapbox's own zoom and locate buttons, so the corner stack is the same
+   substance as the layers button that now sits on top of it. Written through
+   .mapboxgl-control-container for the same 0-3-0 reason the margin reset above
+   needs: mapbox-gl.css is injected after this file and wins every tie. */
+[data-skin="apple"] .mapboxgl-control-container .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+    background-color: var(--g-card-bg);
+    background-image: var(--g-sheen);
+    -webkit-backdrop-filter: var(--g-card-filter);
+    backdrop-filter: var(--g-card-filter);
+    box-shadow: var(--g-shadow-sm), var(--g-rim);
+}
+
+/* The hairline between stacked zoom buttons, which at --g-line is a drawn
+   border through a single pane. Glass divides by light, not by ink. */
+[data-skin="apple"] .mapboxgl-ctrl-group button + button {
+    border-top-color: rgba(255, 255, 255, 0.14);
+}
+
+/* A pressed legend row is a lit pane rather than a tinted rectangle. */
+[data-skin="apple"] .g-legend-row[aria-pressed="true"] {
+    background-image: var(--g-sheen);
+    box-shadow: var(--g-rim);
+}
+
+/* Magnifier first, the way it is in every Apple search field: the glyph says
+   what the box is for before you have typed in it. Google puts the same button
+   at the far end behind a hairline rule, which is why there is a rule to take
+   out as well as a button to move.
+
+   Outside the sidebar block below, deliberately. That block is about the column
+   being one panel and stops at 640px; this is about the shape of a search
+   field, and a look that put the magnifier back on the right the moment the
+   window narrowed would be two looks. */
+[data-skin="apple"] .g-search-icon {
+    order: -1;
+    width: 22px;
+    color: var(--g-text-dim);
+}
+
+[data-skin="apple"] .g-search-icon:hover {
+    background: transparent;
+    color: var(--g-text);
+}
+
+[data-skin="apple"] .g-search-icon .g-icon {
+    width: 16px;
+    height: 16px;
+}
+
+[data-skin="apple"] .g-search-sep {
+    display: none;
 }
 
 [data-skin="apple"] .g-icon-btn:hover {
@@ -1702,9 +2120,11 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     width: 44px;
     height: 44px;
     border: 0;
-    background: var(--g-card-bg);
+    background-color: var(--g-card-bg);
+    background-image: var(--g-sheen);
     -webkit-backdrop-filter: var(--g-card-filter);
     backdrop-filter: var(--g-card-filter);
+    box-shadow: var(--g-shadow), var(--g-rim);
     color: var(--g-text);
 }
 
@@ -1744,6 +2164,89 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     display: none;
 }
 
+/* --- the simulated walk ----------------------------------------------------
+   A simulation is the one time this screen is being WATCHED rather than walked,
+   so it gets the version with depth in it: the drifting ruling doubles its pace
+   and a second copy is laid under it that does not move at all. Two grids at
+   different speeds is parallax — the moving one reads as near and the fixed one
+   as far — and that is something a single sheet of ruling cannot do however
+   fast it travels.
+
+   UNLAYERED, and that is the whole reason this block is down here rather than
+   beside the grid it modifies. The grid lives in `@layer components`; the rule
+   immediately above, which switches it off for the Apple look, does not. A
+   layered rule loses to an unlayered one whatever the specificity says, so the
+   override written next to the grid was ignored outright — the drift stayed off
+   under the default skin and the stationary copy was the only thing on screen,
+   which is a still picture rather than a parallax. Exactly the trap this file
+   warns about at the top of the unlayered section, walked into anyway.
+
+   And it overrides the skin deliberately: the ruling comes back in BOTH looks
+   for this one state, because a demo of the route is the place a decoration
+   earns its keep.
+
+   Both rulings are drawn FLAT here — `--sign-grid-solid` rather than the
+   translucent `--sign-grid`, set on the sign so both pseudo-elements inherit
+   it. Two translucent grids over each other is four levels of the same colour
+   depending on how they happen to overlap, and under the Apple skin the card
+   they sit on is itself translucent, so the lines were letting the map through.
+   Flat lines cross flat lines, and the only thing that changes where they meet
+   is which one is on top. */
+body.simulating .nav-sign {
+    --sign-grid: var(--sign-grid-solid);
+}
+
+/* Anchored to the sign's CENTRE, like the stationary copy below, so the two are
+   in exact register at the top of every cycle and the drift carries the near
+   one off it and back. (This used to sit on `--grid-offset-x/y`, the corner
+   nudge the ordinary sign uses, which left the moving grid permanently off the
+   fixed one by an arbitrary 9 by 7 px — near enough to register to look like a
+   mistake and never near enough to be one.)
+
+   Centring is exact despite the two-cell bleed this layer needs: the inset is
+   symmetric, so this box and the sign share a centre. */
+body.simulating .nav-sign::before {
+    display: block;
+    animation-duration: calc(var(--grid-drift) / 2);
+    background-position: center;
+}
+
+/* The stationary layer. Same ruling, same centre, no animation. Inset by 0
+   rather than the two-cell bleed its neighbour needs: nothing moves it, so it
+   has no edge to hide.
+
+   Under the drifting layer and under the text — .nav-sign > * already lifts the
+   sign's contents to z-index 1, and this sits at 0 with the drift painted over
+   it in source order. */
+body.simulating .nav-sign::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        linear-gradient(to bottom,
+            var(--sign-grid) 0 var(--grid-line),
+            transparent var(--grid-line)),
+        linear-gradient(to right,
+            var(--sign-grid) 0 var(--grid-line),
+            transparent var(--grid-line));
+    background-size: var(--grid-cell) var(--grid-cell);
+    background-position: center;
+}
+
+/* Motion off means motion off: the drift stops, and a second grid exists only
+   to be crossed by something moving. */
+@media (prefers-reduced-motion: reduce) {
+    body.simulating .nav-sign::before {
+        animation: none;
+    }
+
+    body.simulating .nav-sign::after {
+        display: none;
+    }
+}
+
 [data-skin="apple"] .nav-sign-dim {
     color: var(--g-text-dim);
 }
@@ -1759,27 +2262,154 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     background-color: color-mix(in srgb, var(--g-blue) 26%, transparent);
 }
 
+/* --- the debug menu --------------------------------------------------------
+   The top-right corner, which is the only one genuinely free: the sidebar holds
+   the whole left edge down to the credit strip — directory, legend and all, so
+   the bottom-left is the sidebar's too — and the bottom right is the control
+   stack. This is the one place a card can appear without covering something a
+   visitor is using.
+
+   A .g-card like every other floating surface, so it wears whichever material
+   the current look calls for — translucent and blurred under Apple, opaque
+   under Google — rather than being the one panel on screen that gives away it
+   was added later. Nothing in here restyles the card itself; it is the same
+   surface as the legend with different rows in it.
+
+   UNLAYERED, with the rest of the chrome, so `.g-debug.hidden` up in the state
+   block keeps beating it. */
+.g-debug {
+    position: absolute;
+    right: var(--g-gap);
+    top: var(--g-gap);
+    z-index: 22;
+    width: 300px;
+    max-width: calc(100vw - var(--g-gap) * 2);
+    max-height: calc(100dvh - var(--g-gap) * 2 - var(--g-credit-h));
+    overflow-y: auto;
+    padding: 12px;
+}
+
+/* Roomier than a legend row, because each of these is a sentence rather than a
+   symbol, and a whole `label` so the text is part of the hit target — a switch
+   you have to hit a 51px capsule to work is one you miss. */
+.g-debug-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    cursor: pointer;
+}
+
+.g-debug-row+.g-debug-row {
+    border-top: 1px solid var(--g-line);
+}
+
+.g-debug-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.g-debug-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--g-text);
+}
+
+.g-debug-hint {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--g-text-dim);
+}
+
+/* The switches only mean something while the panel is up, and the panel sets
+   `disabled` on them when it is not — so they say so rather than looking live
+   and doing nothing. */
+.g-debug-row:has(.g-switch:disabled) {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* iOS's switch, drawn from the checkbox itself rather than from a span beside
+   it: `appearance: none` keeps every piece of behaviour a checkbox has — the
+   label association, the focus ring, the space bar, what a screen reader calls
+   it — and takes only the painting away.
+
+   51 by 31 with a 27px knob is Apple's own geometry, and it is worth copying
+   exactly: at any other ratio the knob either rattles in the track or fills it,
+   and both read as a switch that was traced rather than measured. */
+.g-switch {
+    appearance: none;
+    -webkit-appearance: none;
+    flex: none;
+    position: relative;
+    width: 51px;
+    height: 31px;
+    margin: 0;
+    border: 0;
+    border-radius: 9999px;
+    background: var(--g-line);
+    cursor: pointer;
+    transition: background-color 200ms ease;
+}
+
+.g-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 27px;
+    height: 27px;
+    border-radius: 9999px;
+    background: #fff;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+    /* The knob TRAVELS. A switch whose knob teleports while its track fades is
+       two animations that disagree about whether anything moved. */
+    transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.g-switch:checked {
+    background: var(--g-switch-on);
+}
+
+.g-switch:checked::after {
+    transform: translateX(20px);
+}
+
+.g-switch:disabled {
+    cursor: default;
+}
+
+/* --- the app with its route GUI taken away ---------------------------------
+   One switch, and it has to reach three places, because setting a start and a
+   destination is three separate offers: the button in the search bar, the two
+   buttons at the foot of every card, and the route card those open. The map
+   click that drops a pin is the fourth and it is not a piece of markup, so
+   main.js guards that one — see routingEnabled there.
+
+   Hidden rather than emptied: the panels keep their contents and their state,
+   so switching it back on returns the app to where it was rather than to a
+   clean one, which is what makes this useful for looking at the difference. */
+body.no-routing .g-directions,
+body.no-routing .g-place-actions,
+body.no-routing #side-panel {
+    display: none;
+}
+
 /* --- narrow screens -------------------------------------------------------- */
 /*
-   Two columns hold the edges down to 900px, one to 640px, and below that the
-   left one becomes a bottom sheet — which is what Google does on a phone.
+   One column holds the left edge down to 640px, and below that it becomes a
+   bottom sheet — which is what both Google and Apple do on a phone.
 */
 
-/* This breakpoint used to wrap the top bar onto two rows, because a 400px search
-   field and a chip strip could not share one at this width, and drop the left
-   column 90px to clear both. There is no strip in the bar any more and both
-   rules went with it.
-
-   What is left is the collision the legend brought: the search field is 400px
-   and the legend 280px, so somewhere below 900 they stop fitting side by side
-   and the legend lands on the field. It drops under the bar instead — the bar
-   is one row now, so that costs 58px and no wrapping. */
-@media (max-width: 900px) {
-    .g-right {
-        top: calc(var(--g-gap) * 2 + 48px);
-        max-height: calc(100dvh - var(--g-gap) * 3 - 48px - var(--g-hud-h));
-    }
-}
+/* A 900px breakpoint lived here. It existed because there were two columns —
+   a 400px one on the left and a 280px legend on the right — and below about
+   710px they stopped fitting side by side and the legend landed on the search
+   field. There is one column now, so there is no pair to separate and nothing
+   to do at this width: 400px plus two gutters fits in anything wider than the
+   phone breakpoint below. */
 
 /*
  * Phone. The panels become a bottom sheet — Google's own mobile pattern, and
@@ -1807,34 +2437,76 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
         justify-content: flex-end;
     }
 
-    /* The legend becomes a sheet in the same slot, and takes the layer above:
-       there is one place on a phone for a full-width card and both columns want
-       it. main.js starts the legend closed here and closes it again the moment
-       a row is pressed, so the two are only ever both up for the length of a
-       tap — and while they are, the one you just opened is the one on top. */
-    .g-right {
-        top: auto;
+    /* The field leaves the sheet and holds the top of the screen on its own.
+       It is the column's first row everywhere else, and that is what makes the
+       Apple sidebar one panel — but the column is at the BOTTOM here, and a
+       search box you have to scroll a sheet to reach is not one. Taken out of
+       flow rather than moved in the DOM, so there is one piece of markup and
+       the sheet below simply stacks without it.
+
+       `fixed` is safe here specifically because the sidebar block above stops
+       at 640px: a backdrop-filter makes its element the containing block for
+       fixed descendants, so under the merged column this would be positioned
+       against the sheet and clipped to it rather than against the window. */
+    .g-search {
+        position: fixed;
+        top: var(--g-gap);
         left: var(--g-gap);
-        bottom: calc(var(--g-gap) + var(--g-credit-h));
+        right: var(--g-gap);
         width: auto;
-        max-width: none;
-        max-height: 62dvh;
-        justify-content: flex-end;
-        z-index: 22;
     }
 
+    /* The legend used to be a second full-width sheet here, fighting the first
+       one for the single slot a phone has for a card. It is a section of the
+       one column now, so it queues behind the directory instead of covering it
+       and the whole arrangement — the raised z-index, the auto-close on press —
+       is not needed. */
+
+    /* Out of the control stack and back to the top-right corner. The stack is
+       at the bottom of the screen and the sheet covers the bottom of the
+       screen, so a layers button that stayed in it would be behind the sheet
+       at exactly the widths where the sheet is biggest.
+
+       `fixed` for the same reason .g-search uses it above, and it is safe for
+       the same reason: nothing between here and the viewport carries a
+       transform or a filter, so this positions against the window rather than
+       against Mapbox's corner container. */
     .g-layers {
-        left: auto;
+        position: fixed;
         right: var(--g-gap);
-        bottom: auto;
         top: calc(var(--g-gap) * 3 + 48px + 32px);
     }
 
+    /* And the menu opens downward from it rather than to its left: there is
+       room under a top-right button and none beside it. */
     .g-layers-menu {
-        order: 1;
+        right: 0;
+        bottom: auto;
+        top: calc(100% + 8px);
+        width: min(260px, calc(100vw - var(--g-gap) * 2));
     }
 
     .g-legend {
         min-height: 96px;
+    }
+
+    /* The top-right corner is the layers button's here, and the search field
+       has the top edge, so the debug menu takes the bottom instead — over the
+       sheet rather than beside it, which is the right relationship anyway: on a
+       screen this size it is a thing you open, use and close, not a panel you
+       work next to.
+
+       `fixed` for the same reason .g-search and .g-layers use it above, and it
+       is safe for the same reason: nothing between here and the viewport
+       carries a transform or a filter. */
+    .g-debug {
+        position: fixed;
+        top: auto;
+        left: var(--g-gap);
+        right: var(--g-gap);
+        bottom: calc(var(--g-gap) + var(--g-credit-h));
+        width: auto;
+        max-width: none;
+        max-height: 70dvh;
     }
 }

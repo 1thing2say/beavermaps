@@ -26,25 +26,35 @@ export function preferredBasemap() {
 /**
  * Wire up the toggle. Like the theme control, the button advertises the basemap
  * it will switch *to*, not the one currently shown.
+ *
+ * `surfaces` is a list for the same reason it is on the provider and skin
+ * controls, which this one has now caught up with: the setting is reachable
+ * from the layers menu and from the debug panel, there is exactly one piece of
+ * state behind both, and every surface is redrawn from it on every change — so
+ * neither can drift, because neither holds anything.
  */
-export function createBasemapToggle({ button, icon, label, onChange }) {
+export function createBasemapToggle({ surfaces, onChange }) {
   let basemap = preferredBasemap();
 
   function apply(next, { persist }) {
     basemap = next;
 
     const target = basemap === 'satellite' ? 'map' : 'satellite';
-    icon.innerHTML = ICONS[target];
-    label.textContent = target === 'satellite' ? 'Satellite' : 'Map';
-    button.setAttribute('aria-label', `Switch to ${target} basemap`);
+    for (const { button, icon, label } of surfaces) {
+      icon.innerHTML = ICONS[target];
+      label.textContent = target === 'satellite' ? 'Satellite' : 'Map';
+      button.setAttribute('aria-label', `Switch to ${target} basemap`);
+    }
 
     if (persist) localStorage.setItem(STORAGE_KEY, basemap);
     onChange(basemap);
   }
 
-  button.addEventListener('click', () => {
-    apply(basemap === 'satellite' ? 'map' : 'satellite', { persist: true });
-  });
+  for (const { button } of surfaces) {
+    button.addEventListener('click', () => {
+      apply(basemap === 'satellite' ? 'map' : 'satellite', { persist: true });
+    });
+  }
 
   apply(basemap, { persist: false });
 }

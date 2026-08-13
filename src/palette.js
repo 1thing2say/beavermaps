@@ -78,6 +78,10 @@ export const THEMES = {
     // greenspace teal is lifted rather than re-hued.
     label: '#c6d1dc',
     labelHalo: '#1a1a1a',
+    // The ring around a marker. Charcoal on a dark map: the ring cuts the disc
+    // out of the ground, and a white one on night ground is the brightest
+    // thing on screen competing with the labels.
+    pinRing: '#242424',
     areaLabel: '#4fbe90',
     // Pitch and court markings. my campus prints them white, which at
     // fill-emissive-strength 1 glares against night ground.
@@ -100,13 +104,24 @@ export const THEMES = {
       shrub: '#223a2b',
       paving: '#2b2b2b',
       parking: '#262626',
-      parking_stripe: '#333333',
+      // Thirteen points over the tarmac rather than six. Google draws no bay
+      // markings at all, so there is no value of theirs to take here — this is
+      // the neutral tier carried far enough that a 1.2 px rule reads on it.
+      parking_stripe: '#424242',
       walkway: '#3c4043',
       driveway: '#35393c',
       offsite_road: '#2f3234',
       crossing: '#4a4d50',
       sport: '#223529',
+      // Google draws stadium seating as a building, so the stands take the
+      // building grey rather than the ground under them.
+      bleachers: '#3a3e41',
       track: '#3a2e26',
+      // Google has no separate value for a court either, but it does not need
+      // one: this table is neutral-on-neutral by design, so the courts take the
+      // paving grey a step under the pitch rather than a hue of their own.
+      tennis: '#2c3a3c',
+      tennis_apron: '#2b2b2b',   // paving: on this map the apron is just ground
       closed: '#2a2a2a',
       pool: '#17313f',
       building: '#2f2f2f',
@@ -157,6 +172,7 @@ export const THEMES = {
     // their park icons, #17a773, not an olive.
     label: '#42586b',
     labelHalo: '#ffffff',
+    pinRing: '#ffffff',
     // Google's greenspace teal, at the lightness it needs rather than the one
     // they publish. Sampled off their map at #17a773, it measures 2.48:1 on the
     // pitches these names are printed over — every one of the five sits on
@@ -187,7 +203,7 @@ export const THEMES = {
       shrub: '#a9eac2',  // their 11.0% tier: 46 features, so it stays rare
       paving: '#f0f0ee',
       parking: '#eaeaea',
-      parking_stripe: '#f7f7f7',
+      parking_stripe: '#ffffff', // as far as the neutral tier goes: L 100 on L 93
       // Pavement is left white and the grey arrives as the network casing on
       // top, exactly as Google builds a road. Colouring the pavement grey as
       // well would double the casing and thicken every path.
@@ -196,7 +212,10 @@ export const THEMES = {
       offsite_road: '#ffffff',
       crossing: '#e9e9e9',
       sport: '#c3f1d5',
+      bleachers: '#dcd7c8',
       track: '#e3c9b6',
+      tennis: '#dfeae4',   // the pitch tier drained of green, as a hard court is
+      tennis_apron: '#f0f0ee',  // paving: on this map the apron is just ground
       closed: '#e4e4e4',
       pool: '#a5d8f3',
       building: '#e8e0cd',
@@ -277,6 +296,8 @@ export const SATELLITE = {
   buildingLine: null,
   label: '#ffffff',
   labelHalo: '#101828',
+  // A photograph has no reliable value to ring against, so imagery keeps white.
+  pinRing: '#ffffff',
   areaLabel: '#ffffff',
   parkingLabel: '#dbeafe',
   // Lighter again than the dark theme's. A photograph has no flat ground value
@@ -333,6 +354,11 @@ export const APPLE = {
     // off-white halo, where Google uses a blue-grey slate on pure white.
     label: '#000000',
     labelHalo: '#fefdf6',       // measured
+    // The same warm off-white as the halo, not pure white. Apple rings a
+    // marker in the colour they set label halos in — one paper colour for
+    // everything that has to be cut out of the ground — where Google uses
+    // a true white for both.
+    pinRing: '#fefdf6',
     // The park green deepened, placed by contrast rather than by the lightness
     // band. L 38 C 42 h 127, holding the measured hue exactly. An earlier pass
     // put it at L 41 against a 3:1 target; the target was wrong — these labels
@@ -349,11 +375,30 @@ export const APPLE = {
       lawn: '#bee298',          // L 85.8 C 40.6 — measured
       tree: '#b0d787',          // L 81.5 C 44.0
       shrub: '#a3cc7a',         // L 77.5 C 46.0
-      sport: '#bcdc9a',         // L 84.0 C 36.0
+      sport: '#b2e492',         // L 85.0 C 52.0 h 130 — the pitch, saturated
+      bleachers: '#d7d1c1',     // L 84.0 C  9.0 h  97 — the stands, a building
       // The paved tier: same band of lightness, chroma down near zero.
       paving: '#e7e6dc',        // L 91.0 C 5.0 h 105
-      parking: '#deddd4',       // L 88.0 C 4.5 h 105
-      parking_stripe: '#efeee8', // L 94.0 C 3.0 h 105
+      // Eight points darker than the rest of the paved tier was placed at, and
+      // the darkest ground on the daylight map, which is what tarmac is. The
+      // band it left was written when the campus ground was a warm near-white
+      // and a car park only had to be told from that; the ground is grass now,
+      // and a lot at L 88 sat LIGHTER than the lawn it is cut into — the one
+      // relationship the printed sheet is unambiguous about, where tarmac is
+      // eleven points under the grass. This is 5.8 under ours.
+      //
+      // It is also what makes the rake legible: white paint on a car park needs
+      // the car park to be somewhere below white. See parking_stripe.
+      parking: '#c8c7bd',       // L 80.0 C 5.0 h 105
+      // The bay dividers, and this one is placed against the tarmac rather than
+      // in the paved band with the rest. my campus rules their car parks in white on
+      // a mid-grey — L 100 on L 68, a 32-point step, and on their sheet the
+      // rake is the loudest texture on the page. Ours sat at L 94 on L 88 and
+      // was six points of nothing. This is as far up as sRGB goes at this hue,
+      // giving 11 points against the lot below it; the rest of the distance is
+      // made up by drawing them as lines with a floor rather than as sub-pixel
+      // bars, which is what actually made them invisible. See src/bay-rake.js.
+      parking_stripe: '#faf9f5', // L 98.0 C 2.5 h 105
       // Not white, unlike the Google table: under Apple the ribbon on top is
       // itself grey, so the ground beneath it matches rather than showing
       // through as a lighter core.
@@ -361,7 +406,21 @@ export const APPLE = {
       driveway: '#dfdfda',
       offsite_road: '#dfdfda',
       crossing: '#d2d2cc',      // L 84.0 C 3.0 h 110
-      track: '#e0a382',         // L 72.0 C 32.0 h 55 — a running track is red
+      // Measured over the same stadium in the daylight reference, and it holds
+      // the night map's arrangement exactly: the track carries the court value
+      // and the strip inside it carries the apron's. See APPLE.dark.land.track.
+      track: '#ced9cd',         // L 85.6 C  7.5 h 142 — measured, = tennis
+      // The courts by day, and the daylight reference does NOT carry the night
+      // map's teal over: it desaturates them almost to grey and turns them
+      // green, C 7.5 at h 142, so the courts read as a worn surface beside the
+      // planting rather than as a colour. Measured, like the rest of this block.
+      tennis: '#ced9cd',        // L 85.6 C  7.5 h 142 — measured
+      // ...and by day the apron is not tinted at all. Measured between two
+      // courts on the daylight reference and it comes back as ordinary paved
+      // ground, which is the whole reason this is a separate key from `tennis`:
+      // at night the complex is a teal block, by day it is twelve pale
+      // rectangles lying on the campus.
+      tennis_apron: '#edede6',  // L 93.6 C  3.6 h 110 — measured
       closed: '#d8d7d2',        // L 86.0 C 3.0 h 105
       pool: '#9fd2f6',          // L 82.0 C 24.0 h 250 — the exception
       building: '#e5e0cf',
@@ -384,68 +443,228 @@ export const APPLE = {
       roadsBrightness: 1,
     },
   },
+  /*
+   * Night, and — finally — measured rather than derived.
+   *
+   * This table went through four passes with nothing behind it but a screenshot
+   * read by eye, and each pass got one more thing wrong. It was the day table
+   * at a lower lightness (wrong: Apple drops the warm ground entirely at night
+   * and goes cool). Then it was cool but far too dark at L 19 (wrong: their
+   * night ground is a mid-slate). Then it was lifted, but sat at h 283, which
+   * is blue-VIOLET and reads lavender beside the real thing. Then the buildings
+   * were pushed to L 64 on a guess that the pale blocks were the brightest
+   * thing on the sheet — right about the direction, wrong by twenty points.
+   *
+   * Eight of the values below are now sampled off the reference with Digital
+   * Color Meter and converted out of the display's native P3 into sRGB, which
+   * is what finally settled it. What they show, in the order the map stacks up:
+   *
+   *     road              L 21.6  C  7.7  h 273
+   *     pathway           L 28.4  C 15.6  h 271
+   *     inside terrain    L 31.7  C 12.6  h 264
+   *     outside terrain   L 31.9  C 16.1  h 264
+   *     parking           L 32.8  C 16.6  h 266
+   *     dark grass        L 32.9  C 20.1  h 201
+   *     lighter grass     L 36.5  C 25.9  h 188
+   *     building          L 42.7  C 19.1  h 266
+   *
+   * Three things in that list this table had wrong, and none of them were
+   * guessable from a thumbnail. The neutral hue is 264-273, not 283 — six to
+   * nineteen degrees is the whole difference between slate and lavender. The
+   * planting is at h 188-201, a TEAL, where every previous pass put it at
+   * 160-170 and got a grass green Apple does not use after dark. And the whole
+   * map lives inside twenty-one points of lightness, floor to ceiling: the
+   * brightest ground on it is a building at L 42.7 and the darkest is a road at
+   * L 21.6. A `network` at L 52 and blocks at L 64, which is what was here, are
+   * both off the top of a scale Apple never leaves.
+   *
+   * So the day table's rule turns out to hold at night too — one narrow
+   * lightness band, meaning carried by chroma, which here runs 7.7 to 25.9 and
+   * tracks lightness rather than cutting across it. The eight measured values
+   * are used exactly as measured; everything else is placed on the same axis,
+   * and carries the LCH it was placed at.
+   *
+   * The buildings ARE still the brightest thing on the map. That reading was
+   * right — it is only the size of the gap that was invented. Eleven points
+   * over the ground, not thirty.
+   */
   dark: {
     style: STANDARD,
     lightPreset: 'night',
-    // The same inversion the Google dark theme documents, for the same reason:
-    // below a certain ground lightness the network has to be lighter than what
-    // it crosses or it stops being a network.
-    network: '#4e4e4b',         // L 33.0 C 2.0 h 110
-    networkCasing: '#1e1e1b',   // L 11.0 C 2.0 h 105
+    // Measured, and the opposite of what this used to say. The note here read
+    // "Apple draws circulation LIGHT at night — the ways are the brightest
+    // thing on the sheet after the labels", and the ribbon was authored at
+    // L 52 to match. A path on the reference measures L 28.4, which is DARKER
+    // than the terrain it crosses: a channel cut into the ground, not a band
+    // laid over it. Nothing on Apple's night map is lit except the labels.
+    network: '#34445b',         // L 28.4 C 15.6 h 271 — measured
+    networkCasing: '#263243',   // L 20.5 C 12.0 h 269
     casing: '#2557a8',
     route: '#0a84ff',           // systemBlue, dark
-    building: '#3b3932',        // L 24.0 C 5.0 h 97
-    buildingLine: '#49473d',    // L 30.0 C 6.0 h 97
-    mask: '#2f2e2a',            // L 19.0 C 3.0 h 100
-    label: '#ddddd9',           // L 88.0 C 2.0 h 105
-    labelHalo: '#1e1e1b',
-    areaLabel: '#98b17d',       // L 69 C 30 h 127, and 4.58:1 on the pitch it names
-    sportLine: '#5b6054',
-    parkingLabel: '#a2a09b',    // L 66.0 C 3.0 h 100
+    // The brightest ground on the map, and measured at last. The direction was
+    // never in doubt — Apple's blocks stand off the field, and that is the most
+    // recognisable thing about their night cartography — but the size of the
+    // step was invented, twice. It is ELEVEN points over the terrain, not the
+    // thirty this table was carrying and not the nine it had before that.
+    building: '#4e6784',        // L 42.7 C 19.1 h 266 — measured
+    // Darker than the fill it edges, where the day table's line is lighter:
+    // a pale block on a dark ground needs its edge cut INTO it.
+    buildingLine: '#3a526c',    // L 34.0 C 18.0 h 266
+    mask: '#3c4c5e',            // L 31.7 C 12.6 h 264 — measured
+    label: '#e6e8ec',           // L 91.9 C  2.2 h 272
+    labelHalo: '#20242e',       // L 14.2 C  7.3 h 278 — keep --g-label-halo in step
+    // Charcoal, not white. Apple rings their night markers in the ground's own
+    // dark rather than in white, which is what stops a screen full of discs
+    // reading as a constellation.
+    pinRing: '#2b3040',
+    // Apple's own recreation ink is #7de08c — L 81.6 C 56.6 h 145 — and this
+    // takes its hue and its chroma exactly and lifts it eight points of
+    // lightness. That is a deliberate departure, and the only one in this
+    // block: at Apple's own L 81.6 the label measures 3.68:1 on the pitch it is
+    // printed on, which their map is content with and this one is not. These
+    // names are 9-17px and are body text, so they owe 4.5. At L 90 they make
+    // 4.63:1 on the pitch and 5.67:1 on the lawn.
+    //
+    // The value it replaces held the right lightness and had given up on the
+    // colour: C 18 at h 175 is a pale mint, where the reference is a green
+    // three times as saturated.
+    areaLabel: '#95f8a2',       // L 90.0 C 56.6 h 145
+    // Field markings, and the reference draws none at all — no touchline, no
+    // centre circle, nothing on the pitches but green. The nearest thing Apple
+    // has is the apron a tennis court sits in, which is dE 4 from the court.
+    //
+    // So this is not white any more. At L 70 against a pitch at L 42 the
+    // markings were the brightest thing in the athletics half of the campus and
+    // the fields read as a set of drawings rather than as ground. Seven points
+    // over the pitch keeps my campus's touchlines legible as touchlines and stops
+    // them competing with the labels.
+    sportLine: '#2f835b',       // L 49.0 C 38.0 h 158
+    parkingLabel: '#a8aebb',    // L 71.0 C  7.4 h 274
     highlight: '#bf5af2',       // systemPurple, dark
     land: {
-      lawn: '#36412a',          // L 26.0 C 16.0 h 127
-      tree: '#3d4b2d',          // L 30.0 C 20.0 h 127
-      shrub: '#425331',         // L 33.0 C 22.0 h 127
-      sport: '#353e2a',         // L 25.0 C 14.0 h 127
-      paving: '#353531',        // L 22.0 C 2.5 h 105
-      parking: '#31302d',       // L 20.0 C 2.5 h 105
-      parking_stripe: '#3e3e3b', // L 26.0 C 2.0 h 105
-      walkway: '#474744',       // L 30.0 C 2.0 h 110
-      driveway: '#454541',      // L 29.0 C 2.0 h 110
-      offsite_road: '#40403d',  // L 27.0 C 2.0 h 110
-      crossing: '#5a5a56',      // L 38.0 C 2.0 h 110
-      track: '#4f392d',         // L 26.0 C 14.0 h 55
-      closed: '#31302d',        // L 20.0 C 2.0 h 105
-      pool: '#1c3d4f',          // L 24.0 C 16.0 h 250
-      building: '#3b3932',
+      // Planting, and the hue is measured rather than assumed. Every pass
+      // before this one put Apple's night greens at h 160-170 — a grass green,
+      // the day map's planting cooled down. They are at h 188-201, which is a
+      // TEAL: the blue in the ground carried into the vegetation rather than
+      // held out of it, which is why a campus that is 62% planting stopped
+      // reading as a separate map from the city around it.
+      //
+      // The two measured tiers are also the wrong way round from the day
+      // table's logic — the DARKER green is the bluer one (h 201 against 188),
+      // so chroma and hue both climb with lightness here.
+      tree: '#155658',          // L 32.9 C 20.1 h 201 — measured, dark grass
+      lawn: '#00615b',          // L 36.5 C 25.9 h 188 — measured, light grass
+      shrub: '#074d4e',         // L 29.0 C 20.0 h 199
+      // The pitch — measured off maps.apple.com at last, and the reference says
+      // the exact opposite of the note that used to be here.
+      //
+      // That note reasoned the pitch down to C 20 "because Apple never makes the
+      // pitches the most saturated thing in frame". Apple does. It is the most
+      // saturated surface on their night map by a wide margin: #007249 covers
+      // 2.3% of the frame at z17 at C 41.2, where the greenspace around it sits
+      // at C 30.5 and the tree canopy at C 20.1. The pitches are the one place
+      // the night map is allowed to be a colour.
+      //
+      // Both earlier passes were placed by argument rather than by pixels, and
+      // both landed within a point of L 41 while being 21 points of chroma and
+      // 28 degrees of hue away from the thing they were describing.
+      //
+      // L 42.0 is also the ceiling the area label sets, and it clears it: the
+      // ink measures 4.63:1 here and 5.67:1 on the lawn.
+      sport: '#007249',         // L 42.0 C 41.2 h 158 — measured
+      // The stands. my campus's sheet draws 24 of these and this table had no entry
+      // for them at all, so they fell through to the printed sheet's own ink —
+      // the one part of the campus neither look had an opinion about, and the
+      // reason a stadium here was a green blob where Apple's is a structure.
+      // They are a BUILDING, and Apple draws them as one: the bowl is the same
+      // slate as the blocks around it, a shade under so it reads as its own
+      // mass rather than merging with them.
+      // Sits just under the blocks, so the bowl reads as its own mass without
+      // leaving the building tier.
+      bleachers: '#465e79',     // L 39.0 C 18.0 h 266
+      // The paved tier, rebuilt around three measured points rather than one.
+      // The old set was a smooth ramp at a flat C 8 with the ways at the TOP of
+      // it; the reference has the ways at the bottom, chroma climbing with
+      // lightness, and a road darker than anything else on the map.
+      closed: '#36414f',        // L 27.0 C 10.0 h 267
+      parking: '#3a4f67',       // L 32.8 C 16.6 h 266 — measured
+      paving: '#37485c',        // L 30.0 C 14.0 h 266
+      offsite_road: '#2e343f',  // L 21.6 C  7.7 h 273 — measured, the road
+      driveway: '#303a48',      // L 24.0 C 10.0 h 269
+      // Fifteen points over the measured car park it is painted on, where it
+      // used to be four. Same reasoning as the daylight value: the printed
+      // sheet holds its rake a third of the lightness scale clear of the
+      // tarmac, and four points is a difference you can only find by looking
+      // for it. Still inside the paved tier's hue and chroma, so the car park
+      // reads as one surface with a rule on it rather than as two surfaces.
+      parking_stripe: '#60748d', // L 48.0 C 16.0 h 266
+      walkway: '#34445b',       // = network, the measured pathway
+      crossing: '#44566c',      // L 36.0 C 15.0 h 266
+      // A running track is NOT red on this map, and the note that used to say
+      // so was written from the physical world rather than from the reference.
+      // Measured at z18 over my campus's own stadium, a cross-section straight
+      // through the bowl reads 26 px of #1c566a, 14 px of #155263, then 116 px
+      // of field — which is to say the track is drawn in exactly the value the
+      // twelve tennis courts are drawn in, and the strip between it and the
+      // grass in exactly the apron's. Apple has one colour for a hard surface
+      // laid out for a sport and spends it on both.
+      //
+      // Held as its own key rather than pointed at `tennis` so the classic look
+      // can keep its terracotta, which is Google's convention and correct there.
+      track: '#1c566a',         // L 33.9 C 20.4 h 236 — measured, = tennis
+      // The twelve courts, and the reason build-basemap.mjs now sizes them out
+      // of `sport`. A court is not a pitch and Apple does not draw it as one:
+      // the playing surfaces go to h 158 at C 41, the courts sit at h 236 — the
+      // far side of the ground's own blue, seventy-eight degrees away — at a
+      // chroma half theirs. Painted `sport` they were twelve vivid green
+      // rectangles where the reference has one quiet teal block.
+      tennis: '#1c566a',        // L 33.9 C 20.4 h 236 — measured
+      // What the twelve sit on. At night the reference tints the whole complex
+      // and holds the courts two and a half dE off their apron — a cross-section
+      // is 23 px of #1c566a, a gap of this, 23 px of #1c566a, all the way
+      // across. Barely a difference, and it is the difference between reading
+      // twelve courts and reading one teal rectangle.
+      tennis_apron: '#155263',  // L 32.0 C 19.9 h 231 — measured
+      // Water, measured. The last note here had the right instinct — that water
+      // has to hold a chroma the neutrals cannot reach — and then stopped less
+      // than halfway. Apple's water is #1c347a: C 46.1, which is nine points
+      // clear of even the pitch, at h 292, twenty-seven degrees round from the
+      // ground's blue. It is the darkest saturated thing on the map, and being
+      // dark is what stops that much chroma shouting.
+      //
+      // C 28 at h 265 was the ground's own hue with the chroma turned up, which
+      // is why the pool read as a slightly bluer building.
+      pool: '#1c347a',          // L 24.0 C 46.1 h 292 — measured
+      building: '#4e6784',
     },
-    // Authored well above the target, because these go through Standard's
-    // lighting and the night preset takes most of it back.
-    //
-    // How much it takes back was measured off the rendered canvas rather than
-    // taken from the note on the Google table above, and the two disagree: that
-    // note says three quarters, and sampling the land outside the campus in
-    // both looks says about a FIFTH. Google's #2c2c2c comes back as #08090c and
-    // this table's #3f3d38 as #0b0c10 — 0.18 and 0.175 of what was written.
-    //
-    // Which means the campus cannot be matched to its surroundings at night by
-    // this route at all: reaching the #2f2e2a mask would need an authored value
-    // past #ffffff. Both looks therefore show a lighter campus on a near-black
-    // city, and that is the same thing the note on `mask` calls deliberate — a
-    // difference, rather than a hole where the map failed to load. It is simply
-    // larger in the dark than anyone chose.
+    // Authored up, because Standard's night preset lands these below what is
+    // written and the test models that at three quarters.
     basemapConfig: {
-      colorLand: '#3f3d38',
-      colorGreenspace: '#485738',
-      colorWater: '#255169',
-      colorRoads: '#686864',       // lighter than the land, as at night it must be
-      colorMotorways: '#6b5439',
-      colorTrunks: '#5c4d38',
-      colorBuildings: '#4f4c43',
-      colorRoadLabels: '#a2a09b',
-      colorPlaceLabels: '#ddddd9',
-      colorPointOfInterestLabels: '#a2a09b',
+      colorLand: '#50657d',
+      colorGreenspace: '#008179',
+      // #1c347a once the night preset has taken its quarter off. Authored up
+      // like everything else in this block; see the note above.
+      colorWater: '#2545a3',
+      // #526074 once the night preset has taken its quarter off — LIGHTER than
+      // the land, which is the third thing this line has said and the first one
+      // measured at the zoom it matters at.
+      //
+      // Apple flips the network between z16 and z17: light diagram above, dark
+      // asphalt below. Both earlier notes here were right about one side of
+      // that flip and wrong to state it as the whole rule. This provider draws
+      // the CITY, and the city is only ever read at overview zooms, so it takes
+      // the overview value. See the long note in src/google-tiles.js.
+      colorRoads: '#6d809b',
+      colorMotorways: '#8a7454',   // highways stay warm at night, as Apple's do
+      colorTrunks: '#77664a',
+      colorBuildings: '#6889b0',
+      // Measured off a street name on the reference: L 82.1 C 16.1 h 272, not
+      // the L 71 C 7.4 this carried. Apple's road labels are BRIGHTER than
+      // their place labels and carry the ground's blue rather than being neutral
+      // — the street grid is the thing you read a night map by.
+      colorRoadLabels: '#bdcdea',
+      colorPlaceLabels: '#e6e8ec',
+      colorPointOfInterestLabels: '#a8aebb',
       roadsBrightness: 1,
     },
   },

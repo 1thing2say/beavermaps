@@ -116,8 +116,18 @@ export function cubicBezier(x1, y1, x2, y2) {
 /** GROW_EASE as a function. Parsed from the string so there is one of it. */
 export const growEase = cubicBezier(...GROW_EASE.match(/-?[\d.]+/g).map(Number));
 
-/** The lifted head's width in CSS pixels, ring included. */
-export const SELECTED_W = 42;
+/**
+ * The lifted head's width in CSS pixels, ring included.
+ *
+ * 55, which is the settled width in the capture at the top of this file — the
+ * marker Apple actually draws, at the size they actually draw it. It was 42
+ * while the resting discs were 14–17 px; those are 20–24 now, and a lift has to
+ * stay a clear step up from what it replaced or the grow reads as a nudge.
+ * Everything else here is a fraction of this — the sway amplitude, the dot, the
+ * caption's rise — so this is the one number that sets the lifted marker's
+ * scale.
+ */
+export const SELECTED_W = 55;
 
 /**
  * The bobble — the part of the capture the size fit above walked straight past.
@@ -228,10 +238,40 @@ export function swayAt(ms, width = SELECTED_W) {
  */
 export const SWAY_STEP_MS = 25;
 
+/**
+ * The same swing, as an angle about the point the pin is planted at.
+ *
+ * `swayAt` is a horizontal displacement, and for a long time the head was moved
+ * by exactly that: the whole marker slid sideways and came back. That is what
+ * the capture measures — every row from the crown of the head to the tip of the
+ * tail is offset by the same amount at the extreme frame, so a pivot would have
+ * left a gradient down the stalk and there is none.
+ *
+ * It is not what a pin does, though, and it is not what was wanted here: a
+ * marker stuck in the ground swings from where it is stuck, head travelling and
+ * base still. So the measurement is kept and its APPLICATION changed. The
+ * amplitude, the delay, the damping and the period are all still the fitted
+ * ones; what they now drive is a rotation sized so that the HEAD's horizontal
+ * travel is the displacement the capture recorded. Everything anyone watches is
+ * unchanged, and the bottom of the marker stays where it was put.
+ *
+ * The lever is dot-to-head-centre, so `asin` rather than `atan`: the head is on
+ * the end of an arm and travels along an arc, not along a line. At the sizes
+ * this map draws a pin the peak is about six degrees.
+ */
+export function swayAngleAt(ms, width = SELECTED_W) {
+  const lever = (LIFT_DOT.y - LIFT_HEAD) * width * LIFT_ASPECT;
+  if (!lever) return 0;
+  // Clamped because asin is only defined on [-1, 1]; a width small enough to
+  // put the swing past its own lever would be a marker a few pixels tall.
+  const ratio = Math.max(-1, Math.min(1, swayAt(ms, width) / lever));
+  return (Math.asin(ratio) * 180) / Math.PI;
+}
+
 export function swayKeyframes(width = SELECTED_W) {
   const at = (ms) => ({
     offset: ms / SWAY_MS,
-    transform: `translateX(${swayAt(ms, width).toFixed(3)}px)`,
+    transform: `rotate(${swayAngleAt(ms, width).toFixed(4)}deg)`,
   });
 
   const frames = [at(0), at(SWAY_DELAY_MS)];
@@ -318,8 +358,16 @@ export const SYMBOL_FADE_MS = 300;
  * stops are written once here, handed to Mapbox as an expression by `sizeExpr`
  * and evaluated in JS by `sizeAt` — one table, and no way for the two to drift.
  */
-export const AMBIENT_SIZE = { 16: 0.54, 19: 0.65 };
-export const CATEGORY_SIZE = { 14: 0.72, 19: 0.92 };
+/*
+ * Sized off Apple's own markers rather than off what fitted. The disc is 26
+ * units, so these are 20–24 px for an ambient marker and 26–31 px for one the
+ * user just asked to see; the previous 14–17 and 19–24 were legible on a laptop
+ * and specks on a phone held at arm's length, which is the way a campus map is
+ * actually read. Apple's resting POI discs measure ~22 px at this kind of zoom
+ * and their names are set at 13, not 11.
+ */
+export const AMBIENT_SIZE = { 16: 0.78, 19: 0.92 };
+export const CATEGORY_SIZE = { 14: 1, 19: 1.2 };
 
 /**
  * ...and the disc a building's own name carries.
@@ -331,7 +379,7 @@ export const CATEGORY_SIZE = { 14: 0.72, 19: 0.92 };
  * marker is being drawn at to start its animation from, and a table read in one
  * place and duplicated in the other is how the two silently disagree.
  */
-export const LABEL_SIZE = { 15: 0.58, 19: 0.72 };
+export const LABEL_SIZE = { 15: 0.75, 19: 0.9 };
 
 /**
  * The same stops with every size multiplied.
@@ -408,7 +456,7 @@ export function sizeAt(stops, zoom) {
  *   wins that outright, so sharing the property would not blend the two — it
  *   would delete the growth for the duration of the swing.
  */
-export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink, from }) {
+export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink, ring, from }) {
   const el = document.createElement('div');
   el.className = 'pin-selected';
 
@@ -418,8 +466,12 @@ export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink
   // The origin is the dot, which now sits BELOW this element's own box — hence
   // a percentage over 100. Expressed against the head's height, not the whole
   // marker's, because that is the box being scaled.
-  scaler.style.transformOrigin = `50% ${((LIFT_DOT.y / LIFT_TIP) * 100).toFixed(2)}%`;
-  scaler.append(pinElement(kind, SELECTED_W));
+  const origin = `50% ${((LIFT_DOT.y / LIFT_TIP) * 100).toFixed(2)}%`;
+  scaler.style.transformOrigin = origin;
+  // The ring follows the theme, like the rasterised discs this replaces — a
+  // pin that kept a white ring on the way up would change colour as it was
+  // picked up, which is the one thing the lift is not allowed to do.
+  scaler.append(pinElement(kind, SELECTED_W, ring));
 
   const start = from / SELECTED_W;
   // How the marker sits while it is still pretending to be the resting disc:
@@ -433,6 +485,12 @@ export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink
 
   const sway = document.createElement('div');
   sway.className = 'pin-selected-sway';
+  // The SAME origin the grow scales about, and it has to be the same one: the
+  // two animations overlap for most of a second, and a scale about the dot
+  // combined with a turn about anything else would walk the marker across the
+  // screen while both were running. That point is where the pin is planted —
+  // below this element's own box, hence a percentage over 100.
+  sway.style.transformOrigin = origin;
   sway.append(scaler);
   el.append(sway);
 

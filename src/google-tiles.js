@@ -116,24 +116,121 @@ const APPLE_LIGHT_STYLE = [
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4a7f9e' }] },
 ];
 
+/*
+ * Apple's night ground, and the one place in this app where it is actually SEEN
+ * as Apple draws it.
+ *
+ * The Standard basemap's night preset takes about four fifths back out of
+ * whatever it is given — see the note on APPLE.dark.basemapConfig — so on that
+ * path the city around the campus lands near black whatever is written. A
+ * raster tile arrives already lit and there is no preset in front of it, so
+ * these are targets: what is written here is what appears. Under the Google
+ * provider this table IS the dark map.
+ *
+ * Cool blue-grey, not the warm olive this used to be. See APPLE.dark in
+ * palette.js for what changed and why; the values are the same ones, and they
+ * have to stay the same ones — the campus overlay is drawn on top of these
+ * tiles and a warm campus on a cool city is a seam at the boundary.
+ */
 const APPLE_DARK_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#2f2e2a' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#ddddd9' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#1e1e1b' }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#494741' }] },
-  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#333429' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#36412a' }] },
-  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#98b17d' }] },
-  // The same inversion the campus network uses at night: the ways go lighter
-  // than the ground rather than darker, with a near-black edge under them.
-  { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#4e4e4b' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#1e1e1b' }] },
-  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#a2a09b' }] },
-  { featureType: 'road.highway', elementType: 'geometry.fill', stylers: [{ color: '#503f2b' }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1e1e1b' }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#3a3934' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#1c3d4f' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#5d8296' }] },
+  { elementType: 'geometry', stylers: [{ color: '#3c4c5e' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#e6e8ec' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#20242e' }] },
+  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#67788e' }] },
+  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#155658' }] },
+  // Apple does not set a night map in one ink. A place name is near-white, a
+  // street name is the blue #bdcdea below, and a POI is coloured by what it
+  // SELLS: measured off the reference, a shop is #f6df73 at C 55.4, a clinic
+  // #ff8e92 at C 46.2, a park #7de08c at C 56.6. Three inks at three times the
+  // chroma of anything we were setting, and the reason their city reads as
+  // populated where ours read as a wiring diagram.
+  //
+  // Google's raster gives us one ink per feature type rather than per category,
+  // so this takes the two the schema can address. `poi` has to come BEFORE
+  // `poi.park` — these rules resolve last-match-wins, not most-specific-wins.
+  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#f6df73' }] },
+  { featureType: 'poi.medical', elementType: 'labels.text.fill', stylers: [{ color: '#ff8e92' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#00615b' }] },
+  // The same green the campus prints its own area names in, so a park label
+  // does not change colour at the boundary. Lifted off Apple's #7de08c for the
+  // contrast reason set out beside `areaLabel` in src/palette.js.
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#95f8a2' }] },
+  // GROUND, not buildings — and this one line was most of why the city around
+  // campus came out a pale lavender field with the college sitting on it as a
+  // dark stain, which is the exact inverse of the reference.
+  //
+  // `landscape.man_made` reads like "the built things" and is not: in Google's
+  // schema it is all developed LAND, so nearly every block outside the campus
+  // was being painted in the building colour. Google has no separate building
+  // feature to move that colour onto, so the pale-block effect lives where we
+  // have real footprints — on the campus sheet — and out here the city is
+  // simply ground, which is what it reads as on the reference anyway.
+  // The city outside, and it is the one ground colour the reference gives us
+  // TWICE: L 31.9 out here against L 31.7 under the campus. Two tenths of a
+  // point apart in lightness, and told apart only by chroma — 16.1 against
+  // 12.6, the city very slightly the bluer of the two. That is the whole
+  // treatment, and it is worth being exact about in both directions: matched
+  // any closer and the campus is a hole where the map failed to load, pushed
+  // any further and the boundary becomes a seam between two maps.
+  { featureType: 'landscape.man_made', elementType: 'geometry', stylers: [{ color: '#374d64' }] },
+  // The city was reading as an empty field: a third of the frame, one flat
+  // slate, with nothing on it but a web of roads. The obvious fix is building
+  // footprints and this API will not give them — painting
+  // `landscape.man_made` geometry.stroke a loud magenta and counting the
+  // result put ZERO pixels on screen, as did landscape.natural.landcover.
+  // Google's raster has no block-level detail here to reveal at this zoom.
+  //
+  // What it does have is POI polygons, which the same probe found covering
+  // about five per cent of the frame — the schools, the golf course and the
+  // shopping parcels around the campus. A step off the land gives the city
+  // some parcel structure without inventing anything. It stays a small step:
+  // at five per cent of the frame a strong tint reads as blotching.
+  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#415367' }] },
+  // LIGHT ribbons, and the note that used to be here was measured at the wrong
+  // zoom. It said "dark ribbons — measured at L 21.6, the darkest thing on
+  // Apple's night map", which is true and is about z17 and closer.
+  //
+  // Apple inverts the network between z16 and z17. Counting the two tones
+  // across three captures of the same place: the light #526074 is 4.65% of the
+  // frame at z16 and 0.02% at z17, and the dark #313d4d is 0.87% at z16 and
+  // 1.76% at z17. At overview zooms the network is a DIAGRAM — light lines you
+  // navigate by, over dark land — and only when you are close enough for a
+  // street to have width does it become asphalt.
+  //
+  // These tiles cannot follow that. A Google style is fixed for the life of a
+  // session token, so one value has to serve every zoom, and the zoom to serve
+  // is the one where the city is the subject: this app opens at z15.79, where
+  // the dark value left the surroundings a flat empty field with a campus
+  // sitting on it. Above z17 the city is a margin a few hundred pixels wide,
+  // mostly behind the panel, and it stays a shade light there. That is the
+  // trade, taken deliberately and in the direction of the opening view.
+  // Google's roads are drawn about twice Apple's width at this zoom — a cut
+  // across a residential street measures 8 px against the reference's 4 — and
+  // that is not adjustable from here. `weight` is the only width control the
+  // style schema offers, it applies to `geometry.stroke`, and it does nothing
+  // to the fill: at weight 1 the cut came back byte-identical, and at weight 5
+  // createSession fails and the whole provider falls back to Standard. The
+  // colour is exact and the width is Google's; that is the deal with a raster.
+  { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#526074' }] },
+  // Barely a casing. The reference draws none — a cross-section of a residential
+  // street at z16 is 2 to 4 px of flat #526074 with nothing but antialiasing at
+  // its edges — so this sits close enough to the fill to shape the ribbon
+  // without drawing an outline around it.
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#46536a' }] },
+  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#bdcdea' }] },
+  // One tier of hierarchy, which is the other half of why the city looked
+  // flat: every street was drawn at the one value, so a four-lane arterial and
+  // a cul-de-sac were the same mark. Apple's night map lifts the bigger road
+  // rather than widening it — and now that the base is light, lifting still
+  // means lighter. Only the arterials move.
+  { featureType: 'road.arterial', elementType: 'geometry.fill', stylers: [{ color: '#5b6a80' }] },
+  { featureType: 'road.arterial', elementType: 'geometry.stroke', stylers: [{ color: '#4d5b71' }] },
+  // Highways keep a warm cast at night on Apple's map, the one thing that does.
+  { featureType: 'road.highway', elementType: 'geometry.fill', stylers: [{ color: '#6b5b3f' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#353948' }] },
+  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#3b4f67' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#1c347a' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#8fa6d6' }] },
 ];
 
 /**

@@ -53,6 +53,18 @@
 // This replaces Google's balloon, which is a rounder head on a much longer
 // tail (0.42 r) and one flat fill. Both are good markers; they are not the same
 // marker, and the ratios above are the difference.
+/*
+ * What the ring around a marker is drawn in.
+ *
+ * White on a light map, and it stays the default so every caller that has no
+ * theme to hand keeps the behaviour it had. On a DARK map Apple rings the same
+ * discs in charcoal instead — the ring is there to cut the marker out of the
+ * ground, and on a dark ground a white one is the brightest thing on screen
+ * competing with the labels. The value comes from the palette (`pinRing`), so
+ * the two looks disagree about it the way they disagree about everything else.
+ */
+const RING_LIGHT = '#fff';
+
 const PIN = { w: 26, cx: 13, cy: 13, ring: 3.05 };
 /** Radius of the flat disc, inset so its centred ring lands inside the box. */
 PIN.r = PIN.cx - PIN.ring / 2;
@@ -173,16 +185,24 @@ const COLOURS = {
 const FALLBACK = '#0b57d0';
 
 /**
- * The permit machine's P, drawn once and used by both discs that are one.
+ * The permit machine, drawn once and used by both discs that are one.
  *
  * `parking_permit` is the machine as my campus's sheet prints it; `parking_meter` is
  * the same machine in the lighter azure the Parking row needs to tell it apart
  * from the lots around it. Same object, so the same pictogram — the colour is
- * the only thing the two views disagree about, and a second hand-drawn P would
- * be a way for them to start disagreeing about more.
+ * the only thing the two views disagree about, and a second hand-drawn machine
+ * would be a way for them to start disagreeing about more.
+ *
+ * It was a capital P until the ambient machines came forward to z16. The lots
+ * carry a blue P of their own now — one per car park, from the label layer —
+ * and two blue P discs a few metres apart, differing only in size, are not two
+ * answers to two questions, they are one answer printed twice. So the machine
+ * gets the machine: a pay station's head, display, stem and foot. The BLUE
+ * stays, because blue is what says parking on this map and a pay station is
+ * parking; it is the glyph that has to carry "and this is the part you pay at".
  */
 const PERMIT_MACHINE =
-  '<path fill-rule="evenodd" d="M9 5.4h4.3a4.3 4.3 0 0 1 0 8.6h-1.8v4.6H9zm2.5 2.5v3.6h1.8a1.8 1.8 0 0 0 0-3.6z"/>';
+  '<path fill-rule="evenodd" d="M8.2 3h7.6a1.6 1.6 0 0 1 1.6 1.6v9a1.6 1.6 0 0 1-1.6 1.6h-2.6v3.6h3V21H7.8v-2.2h3v-3.6H8.2a1.6 1.6 0 0 1-1.6-1.6V4.6A1.6 1.6 0 0 1 8.2 3zm1.2 2.8v3.2h5.2V5.8z"/>';
 
 // Glyphs on a 24x24 grid, centred. Filled unless the entry says otherwise —
 // the two vehicles are line drawings, which stay legible when a filled version
@@ -346,7 +366,7 @@ function glyphBody(kind, scale) {
  * that draws one anchors centre rather than bottom, and every label that goes
  * with one hangs beneath it rather than beside it.
  */
-export function restingSvg(kind) {
+export function restingSvg(kind, ring = RING_LIGHT) {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PIN_BOX.w} ${n(PIN_BOX.h)}" `
     + `width="${PIN.w * 2}" height="${n(PIN_BOX.h * 2)}">`
@@ -357,7 +377,7 @@ export function restingSvg(kind) {
     + 'fill="rgba(0,0,0,0.20)"/>'
     + fillGradient(pinColour(kind), `rg-${kind}`)
     + `<circle cx="${PIN.cx}" cy="${PIN.cy}" r="${n(PIN.r)}" fill="url(#rg-${kind})" `
-    + `stroke="#fff" stroke-width="${PIN.ring}"/>`
+    + `stroke="${ring}" stroke-width="${PIN.ring}"/>`
     + `<g transform="${glyphFit(GLYPH_SCALE)}">${glyphBody(kind, GLYPH_SCALE)}</g>`
     + '</svg>'
   );
@@ -371,10 +391,10 @@ export function restingSvg(kind) {
  * thing it names — the dot is where the place actually is, and it is the only
  * part of the drawing that does not move during the animation.
  */
-export function liftedSvg(kind) {
+export function liftedSvg(kind, ring = RING_LIGHT) {
   return liftedShape(pinColour(kind), `lg-${kind}`,
     `<g transform="${glyphFit(GLYPH_SCALE * 1.06)}">${glyphBody(kind, GLYPH_SCALE * 1.06)}</g>`,
-    { dot: false });
+    { dot: false, ring });
 }
 
 /**
@@ -384,18 +404,18 @@ export function liftedSvg(kind) {
  * drawing because on Apple's map they are the same drawing — a dropped pin is
  * their selected marker with nothing categorical inside it.
  */
-function liftedShape(base, id, inner, { dot = true } = {}) {
+function liftedShape(base, id, inner, { dot = true, ring = RING_LIGHT } = {}) {
   const boxH = dot ? LIFT.h : LIFT.tipY + LIFT.ring;
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PIN.w} ${n(boxH)}" `
     + 'width="100%" height="100%" aria-hidden="true">'
     + fillGradient(base, id)
-    + `<path d="${LIFT_PATH}" fill="url(#${id})" stroke="#fff" `
+    + `<path d="${LIFT_PATH}" fill="url(#${id})" stroke="${ring}" `
     + `stroke-width="${LIFT.ring}" stroke-linejoin="round"/>`
     + inner
     + (dot
       ? `<circle cx="${PIN.cx}" cy="${n(LIFT.dotY)}" r="${n(LIFT.dotR)}" `
-        + `fill="${shade(base, 0.7)}" stroke="#fff" stroke-width="0.8"/>`
+        + `fill="${shade(base, 0.7)}" stroke="${ring}" stroke-width="0.8"/>`
       : '')
     + '</svg>'
   );
@@ -471,13 +491,13 @@ export const pinColour = (kind) => COLOURS[kind] ?? FALLBACK;
  * up past its own resolution while it does it. As an element it is an SVG the
  * browser re-renders crisply at any scale, and the easing is one CSS property.
  */
-export function pinElement(kind, width) {
+export function pinElement(kind, width, ring = RING_LIGHT) {
   const el = document.createElement('div');
   el.style.width = `${width}px`;
   // The head's own box, which stops at the nub's tip. The dot below it is a
   // separate element because it must not move while this one does.
   el.style.height = `${(width * (LIFT.tipY + LIFT.ring)) / PIN.w}px`;
-  el.innerHTML = liftedSvg(kind);
+  el.innerHTML = liftedSvg(kind, ring);
   return el;
 }
 
@@ -538,7 +558,22 @@ export function routePin(colour, { title = '' } = {}) {
  * marker, and taking the whole overlay down for it would be a worse trade.
  * Images do not survive setStyle, hence hasImage rather than a load-once flag.
  */
-export function loadAmenityIcons(map) {
+/**
+ * The ring the current rasters were drawn with.
+ *
+ * Needed because the images are cached on the map by name and a theme change is
+ * a CONFIG change under Standard, not a setStyle — so nothing clears them. The
+ * ring is the one part of a marker that follows the theme, so without this a
+ * switch to dark kept twelve white-ringed discs until something else happened
+ * to rebuild the style.
+ */
+let rasterisedWith = null;
+
+export function loadAmenityIcons(map, ring = RING_LIGHT) {
+  if (rasterisedWith !== null && rasterisedWith !== ring) {
+    for (const kind of AMENITY_KINDS) if (map.hasImage(kind)) map.removeImage(kind);
+  }
+  rasterisedWith = ring;
   return Promise.all(AMENITY_KINDS.map((kind) => new Promise((resolve) => {
     if (map.hasImage(kind)) {
       resolve();
@@ -550,6 +585,6 @@ export function loadAmenityIcons(map) {
       resolve();
     };
     image.onerror = () => resolve();
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(restingSvg(kind))}`;
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(restingSvg(kind, ring))}`;
   })));
 }

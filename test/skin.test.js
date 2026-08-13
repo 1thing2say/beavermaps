@@ -25,8 +25,28 @@ import { root, contrast, deltaE, lch, flatten, toHex } from './helpers.js';
 
 const THEMES = ['light', 'dark'];
 
+/**
+ * The entries of `land` that are paint on a surface rather than the surface.
+ *
+ * One so far: a bay divider is 0.99 m of white line on tarmac, and src/main.js
+ * draws it as a line — `campus-rake`, over the car park rather than instead of
+ * it. It lives in `land` only because sheetPaint looks colours up by the sheet's
+ * `kind`, which does not distinguish the two.
+ *
+ * It matters because the rules below are about GROUND. The same distinction is
+ * already made further down for the court markings, in the same words: a
+ * stroke-width line under a letter is what a halo is for, and holding a label
+ * to 4.5 against every hairline it might cross drags the ink towards white
+ * until it stops reading as anything.
+ */
+const MARKINGS = new Set(['parking_stripe']);
+
+const landOf = (p) => Object.fromEntries(
+  Object.entries(p.land).filter(([kind]) => !MARKINGS.has(kind)),
+);
+
 /** Every surface a name can be printed on, for a given look and theme. */
-const groundsOf = (p) => ({ ...p.land, mask: p.mask, building: p.building });
+const groundsOf = (p) => ({ ...landOf(p), mask: p.mask, building: p.building });
 
 // ---------------------------------------------------------------------------
 // The map
@@ -86,6 +106,13 @@ test('every name is legible on every surface it can be printed on', () => {
         contrast(p.label, p.labelHalo) >= 4.5,
         `${skin}/${theme} label on its own halo is ${contrast(p.label, p.labelHalo).toFixed(2)}:1`,
       );
+      // Buildings used to be exempt here, and the exemption was a mistake
+      // built on a mistake: Apple's night blocks had been guessed at L 63,
+      // which no white name can survive, so this test was loosened to accept
+      // the halo alone on that one surface. Measuring the reference put them
+      // at L 42.7 — eleven points over the terrain, not thirty — and the ink
+      // clears 4.5 on them with room to spare. The rule is whole again, and
+      // the narrowest margin on the night map is now that building at 4.76:1.
       for (const [kind, ground] of Object.entries(groundsOf(p))) {
         const ratio = contrast(p.label, ground);
         assert.ok(ratio >= 4.5, `${skin}/${theme} label on ${kind} is ${ratio.toFixed(2)}:1`);
@@ -146,10 +173,20 @@ test('the network is separable from the ground it crosses', () => {
 test("Apple's ground is one hue family, told apart by saturation", () => {
   // The rule the whole APPLE table was built from, and the thing that would be
   // lost first if someone added a kind by picking a colour that looked right.
-  // Water is exempt by construction — no rule about a warm ground makes a blue —
-  // and so is the running track, which is red because tracks are.
-  const land = LOOKS.apple.light.land;
-  const onAxis = Object.entries(land).filter(([kind]) => kind !== 'pool' && kind !== 'track');
+  // Three kinds are exempt, and they are one exemption rather than three: a
+  // surface laid for a purpose is the colour of what it is made of, and no rule
+  // about a warm neutral ground can produce blue water, a red running track, or
+  // the green-grey of a hard court. Everything else here is LAND, and land is
+  // what the rule is about.
+  //
+  // `tennis` earns it on the measurement rather than by assertion. It is C 7.5,
+  // squarely in the paved tier by saturation, but at h 142 against a paved tier
+  // that runs 94-110 — and dE 4.1 from the same lightness and chroma at h 110,
+  // so it is a real difference and not hue wobbling about near the neutral axis.
+  // Apple draws a court as a worn green surface, not as pavement.
+  const land = landOf(LOOKS.apple.light);
+  const SURFACED = new Set(['pool', 'track', 'tennis']);
+  const onAxis = Object.entries(land).filter(([kind]) => !SURFACED.has(kind));
 
   const hues = onAxis.map(([, hex]) => lch(hex).h);
   const spread = Math.max(...hues) - Math.min(...hues);

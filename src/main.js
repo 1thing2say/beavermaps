@@ -21,6 +21,7 @@ import {
 import { maneuverIcon } from './nav-icons.js';
 import {
   loadAmenityIcons, routePin, liftedOffset, ROUTE_PIN_W, PIN_BASE_W, AMENITY_KINDS, pinInk,
+  pinColour,
 } from './map-images.js';
 import { buildingCard, pinCard } from './building-popup.js';
 import {
@@ -36,9 +37,13 @@ import { googleGround } from './google-tiles.js';
 import { paintIcons } from './g-icons.js';
 import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
 import {
-  withPoiIcons, withAmenityNames, POI_LABEL_KINDS, AMENITY_ZOOM, AMENITY_ZOOM_DEFAULT,
+  withPoiIcons, withParkingMarks, withAmenityNames, poiFor, POI_LABEL_KINDS,
+  AMENITY_ZOOM, AMENITY_ZOOM_DEFAULT,
 } from './poi.js';
-import { ringOf, trimToCampus } from './campus-clip.js';
+import { ringOf, centreOf, trimToCampus } from './campus-clip.js';
+import { bayRake } from './bay-rake.js';
+import { createGeolocation } from './geolocation.js';
+import { createDebugMenu } from './debug.js';
 import roomsData from './rooms.json';
 import { buildRoomIndex, lookupRoom } from './rooms.js';
 import { FONTS, SATELLITE, palette, styleKey } from './palette.js';
@@ -122,6 +127,11 @@ const FIT_MARGIN = 40;
 // The line everything of ours stops at. Same polygon the mask is cut from, so
 // the ground cover and the linework end together rather than a metre apart.
 const CAMPUS_RING = ringOf(campusBoundary);
+
+// Where the debug menu's virtual GPS fix stands. The centroid of that ring, so
+// it moves with the boundary rather than being a pair of numbers that quietly
+// stops meaning "the middle of the campus" the next time the ring is redrawn.
+const CAMPUS_CENTRE = centreOf(CAMPUS_RING);
 
 if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   console.warn("Please add your Mapbox Access Token to the .env file as VITE_MAPBOX_TOKEN.");
@@ -218,6 +228,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const legendPanel = document.getElementById('legend-panel');
   const placePanel = document.getElementById('place-panel');
   const categoryPanel = document.getElementById('category-panel');
+  const buildingsPanel = document.getElementById('buildings-panel');
+  const buildingsList = document.getElementById('buildings-list');
+  const buildingsCount = document.getElementById('buildings-count');
   // Same reason, one step further out: setStatus opens the route panel to say
   // anything that has gone wrong, and setStatus is reachable from the Google
   // basemap's failure path — which can resolve before the chrome block below is
@@ -258,7 +271,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const canvas = map.getCanvas().getBoundingClientRect();
     if (!canvas.width) return even;
 
-    const boxes = [placePanel, categoryPanel, sidePanel, legendPanel]
+    const boxes = [placePanel, categoryPanel, sidePanel, buildingsPanel, legendPanel]
       .filter((card) => !card.classList.contains('hidden'))
       .map((card) => card.getBoundingClientRect())
       .filter((box) => box.width);
@@ -308,6 +321,31 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const skinToggle = document.getElementById('skin-toggle');
   const skinIcon = document.getElementById('skin-toggle-icon');
   const skinLabel = document.getElementById('skin-toggle-label');
+
+  // The debug menu's copies of those same three controls. Registered as second
+  // surfaces below rather than wired to anything of their own — see src/debug.js
+  // for why that distinction is the point of the panel.
+  const debugPanel = document.getElementById('debug-panel');
+  const debugBasemap = document.getElementById('debug-basemap');
+  const debugProvider = document.getElementById('debug-provider');
+  const debugSkin = document.getElementById('debug-skin');
+
+  /**
+   * Whether the app is offering to route you anywhere.
+   *
+   * True in the app as shipped, and false only while the debug menu is up with
+   * its switch off. Read by the three places that would otherwise put a start
+   * or a destination on the map; the markup those offers live in is hidden by
+   * the stylesheet at the same time — see body.no-routing in src/input.css.
+   */
+  let routingEnabled = true;
+
+  // Real GPS until the debug menu says otherwise. Built here rather than inside
+  // map.on('load') because the fixture can be switched on before the map has
+  // finished loading — a reload with the flag already set does exactly that —
+  // and this object is what carries the answer across.
+  const geolocation = createGeolocation();
+  let geolocateControl = null;
 
   function setDistanceFeet(feet) {
     distanceText.innerHTML =
@@ -510,12 +548,32 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // visibly wider than the 3.3 m footpaths at every zoom.
   const M_PER_PIXEL_AT_Z0 = 122275;
 
+  /**
+   * How wide a line off the printed sheet is drawn, in metres, before zoom.
+   *
+   * Everything takes the width my campus drew it at — except the bleachers, and that
+   * exception is what turns a stadium into a stadium.
+   *
+   * my campus's sheet draws seating as 24 hairlines 0.78 m wide: the tier lines of a
+   * technical drawing, not the mass of a stand. Apple draws the same thing as a
+   * solid bowl wrapping the pitch, and there is no bowl in this data to colour
+   * — the features are LineStrings, so they cannot even enter the fill layer.
+   * Widening them to a stand's real depth is the honest way to get from one to
+   * the other: it is the same geometry my campus published, drawn at the size the
+   * thing actually is rather than at the size a draughtsman's line is.
+   */
+  const SHEET_WIDTH = [
+    'case',
+    ['==', ['get', 'kind'], 'bleachers'], 7,
+    ['coalesce', ['get', 'width'], 1.65],
+  ];
+
   const groundWidth = (floor) => [
     'interpolate', ['exponential', 2], ['zoom'],
     // The floor keeps the thinnest paths from disappearing when zoomed out,
     // where true width would put them below a pixel.
-    14, ['max', floor, ['*', ['coalesce', ['get', 'width'], 1.65], 2 ** 14 / M_PER_PIXEL_AT_Z0]],
-    20, ['max', floor, ['*', ['coalesce', ['get', 'width'], 1.65], 2 ** 20 / M_PER_PIXEL_AT_Z0]],
+    14, ['max', floor, ['*', SHEET_WIDTH, 2 ** 14 / M_PER_PIXEL_AT_Z0]],
+    20, ['max', floor, ['*', SHEET_WIDTH, 2 ** 20 / M_PER_PIXEL_AT_Z0]],
   ];
 
   /**
@@ -550,35 +608,81 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     // Over imagery there is nothing to add — see SATELLITE.land.
     if (!land) {
-      for (const id of ['campus-sheet-line', 'campus-sheet-fill']) {
+      for (const id of ['campus-rake', 'campus-sheet-line', 'campus-sheet-fill']) {
         if (map.getLayer(id)) map.removeLayer(id);
       }
       return;
     }
 
-    // `closed` takes the BUILDING grey rather than the one the land table holds
-    // for it. The two are near-neighbours in every look but not the same — in
-    // the classic light table it is a neutral #e4e4e4 against the buildings'
-    // warm #e8e0cd — and a closed building should sit in the row of buildings
-    // it belongs to, differing by the red over it and by nothing else.
+    // One kind is painted as something other than what it is called, and it is
+    // the sheet's own naming that is off rather than ours: `closed` takes the
+    // BUILDING grey rather than the one the land table holds for it. The two
+    // are near-neighbours in every look but not the same — in the classic light
+    // table it is a neutral #e4e4e4 against the buildings' warm #e8e0cd — and a
+    // closed building should sit in the row of buildings it belongs to,
+    // differing by the red over it and by nothing else.
+    //
+    // `lawn` used to be a second such override, painted in the campus GROUND
+    // colour, and that is now reversed. The argument for it was that layer 2 is
+    // four shapes totalling 519,000 m2 which the build script itself calls
+    // "open ground" — a base plate rather than planting, being whatever is left
+    // once the buildings, lots, paths and canopies are subtracted — so filling
+    // the residual with grass made the campus a park with some blocks in it.
+    //
+    // The argument was sound and the reference it was measured against was the
+    // wrong one. Apple would not paint a college green; my campus did, and my campus's
+    // sheet is what this map is a translation of. Counted over the campus body
+    // of the printed map, 39.3% of it is green — 24.4% open lawn at L 79 C 45,
+    // 9.5% tree canopy at L 47 C 37 — and the greenest thing about it is
+    // exactly that base plate. Restoring it lands us at 41.9% by day and 40.4%
+    // at night against their 39.3%, from each look's own measured values rather
+    // than from the print's ink.
+    //
+    // What the earlier note was right about survives: `land.lawn` is also the
+    // value the surrounding parkland is matched against, so the boundary
+    // between our sheet and the provider's greenspace agrees. See the seam
+    // test. The campus now runs into that parkland instead of sitting on it,
+    // which is a fair description of this campus.
     const fillColour = sheetPaint(land, 'fill', { closed: land.building });
     // Strokes that are ground read as ground; the rest keep my campus's ink. Building
     // outlines follow the theme so they agree with the footprints drawn on top.
     const lineColour = sheetPaint(
       { walkway: land.walkway, driveway: land.driveway, offsite_road: land.offsite_road, crossing: land.crossing },
       'stroke',
-      { building: colors.buildingLine, bleachers: colors.buildingLine, sport: colors.sportLine },
+      // The stands take the bleacher FILL rather than a building outline. They
+      // are drawn seven metres wide now — see SHEET_WIDTH — so they are a mass
+      // on the map rather than an edge, and an edge colour on a mass reads as a
+      // block of outline. Everything else keeps the pairing it had.
+      // A court's outline takes the court's own fill, which is to say it stops
+      // being an outline. The reference draws no line between a court and its
+      // surround at all — a cross-section through the twelve is 23 px of
+      // surface, a gap of apron, 23 px of surface, with no edge anywhere — and
+      // my campus's sheet carries these as stroke-only shapes in `#fff`, so left
+      // alone they came out as twelve white rectangles on bare ground.
+      {
+        building: colors.buildingLine,
+        bleachers: land.bleachers,
+        sport: colors.sportLine,
+        tennis: land.tennis,
+        tennis_apron: land.tennis_apron,
+      },
     );
 
     if (map.getLayer('campus-sheet-fill')) {
       map.setPaintProperty('campus-sheet-fill', 'fill-color', fillColour);
       map.setPaintProperty('campus-sheet-line', 'line-color', lineColour);
+      map.setPaintProperty('campus-rake', 'line-color', land.parking_stripe);
       return;
     }
     if (!campusBasemap) return; // still in flight; addNetworkLayers re-runs
 
     if (!map.getSource('campus-sheet')) {
       map.addSource('campus-sheet', { type: 'geojson', data: campusBasemap });
+    }
+    // The bay dividers, as lines rather than as the 0.99 m bars they are drawn.
+    // Its own source because it is its own geometry — see src/bay-rake.js.
+    if (!map.getSource('campus-rake')) {
+      map.addSource('campus-rake', { type: 'geojson', data: bayRake(campusBasemap) });
     }
 
     // `hidden` marks the parts the app supplies itself — the label plates and
@@ -636,7 +740,27 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       type: 'fill',
       source: 'campus-sheet',
       slot: 'middle',
-      filter: ['all', visible, ['has', 'fill']],
+      // Everything my campus gave a fill, PLUS the pitches — and the pitches are the
+      // exception because my campus did not give them one.
+      //
+      // Only 2 of the sheet's 22 `sport` shapes carry a fill: the stadium's
+      // track and one other. The remaining 19 are polygons drawn as white
+      // touchlines over the lawn, which is how a printed sheet says "pitch"
+      // and how a vector map says nothing at all — they never entered this
+      // layer, so the soccer, baseball, softball and tennis grounds were lawn
+      // with an outline on top while the one filled shape sat there in pitch
+      // green looking like the odd one out.
+      //
+      // The geometry is already the right shape. It only needed to be allowed
+      // in, and `sheetPaint` has had a colour waiting for it the whole time.
+      // ...and the twelve courts arrive the same way and need the same
+      // exception: stroke-only shapes that have to be let in as surfaces.
+      // ...minus the bay dividers, which are drawn by campus-rake below as
+      // lines. Left in here as well they would be the same 1,004 bars twice
+      // over, and the fill is the copy that cannot be seen at most zooms.
+      filter: ['all', visible,
+        ['!=', ['get', 'kind'], 'parking_stripe'],
+        ['any', ['has', 'fill'], ['in', ['get', 'kind'], ['literal', ['sport', 'tennis', 'tennis_apron']]]]],
       layout: { 'fill-sort-key': ['get', 'i'] },
       paint: {
         'fill-color': fillColour,
@@ -658,6 +782,32 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         'line-color': lineColour,
         'line-width': groundWidth(0.4),
         'line-opacity': ['coalesce', ['get', 'opacity'], 1],
+        'line-emissive-strength': 1,
+      },
+    }, anchor);
+
+    // The rake.
+    //
+    // Butt caps, not the round ones the sheet's other strokes take: a divider
+    // is a painted bar with a square end, and a round cap would add half its
+    // own width at each end — half a metre of overhang on a 7.9 m bar, which is
+    // the difference between a bay and a bay with feet.
+    //
+    // The 1.2 px floor is the whole point of the layer. Below it a divider is
+    // sub-pixel and Mapbox can only render it as a fraction of a pixel's worth
+    // of coverage, which is what turned a rank of them into a moire; at 1.2 it
+    // is a line. Above about z18.5 the true 0.99 m is wider than the floor and
+    // the floor stops applying, so from there on this draws exactly the bar my campus
+    // drew, in exactly the place they drew it.
+    map.addLayer({
+      id: 'campus-rake',
+      type: 'line',
+      source: 'campus-rake',
+      slot: 'middle',
+      layout: { 'line-sort-key': ['get', 'i'], 'line-cap': 'butt' },
+      paint: {
+        'line-color': land.parking_stripe,
+        'line-width': groundWidth(1.2),
         'line-emissive-strength': 1,
       },
     }, anchor);
@@ -953,6 +1103,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * eight categories through it.
    */
   const amenityHalo = () => palette(currentProvider, currentBasemap, currentTheme, currentSkin).labelHalo;
+  /** The ring the markers are drawn with, for the callers that have no `colors`. */
+  const pinRing = () => palette(currentProvider, currentBasemap, currentTheme, currentSkin).pinRing;
 
   const inkFor = (property) => {
     // Over imagery a tint has nothing fixed to sit against — foliage, tarmac
@@ -983,6 +1135,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (map.getLayer('campus-amenities')) {
       map.setPaintProperty('campus-amenities', 'text-color', inkFor('kind'));
       map.setPaintProperty('campus-amenities', 'text-halo-color', amenityHalo());
+      // The discs are rasterised images, so a theme change cannot repaint them
+      // — they have to be drawn again. Under Standard a theme change is a
+      // config change rather than a setStyle, so nothing else clears them; the
+      // loader compares the ring it was last given and re-rasterises only when
+      // it has actually moved.
+      loadAmenityIcons(map, pinRing());
       return;
     }
     if (!campusAmenities) return;
@@ -998,7 +1156,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         generateId: true,
       });
     }
-    loadAmenityIcons(map).then(() => {
+    loadAmenityIcons(map, pinRing()).then(() => {
       // A style swap can land between the two, taking the source with it.
       if (map.getLayer('campus-amenities') || !map.getSource('campus-amenities')) return;
       map.addLayer({
@@ -1032,9 +1190,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           // reading when the whole campus is on screen.
           'text-field': ['step', ['zoom'], '', 17, ['coalesce', ['get', 'name'], '']],
           'text-font': mapFont().medium,
-          'text-size': 11,
-          'text-anchor': 'top',
-          'text-offset': [0, 0.85],
+          'text-size': 13,
+          // Below, then above, then right, then left — see the same four on
+          // category-pins for what the anchor names mean, which is not what
+          // they sound like.
+          'text-variable-anchor': ['top', 'bottom', 'left', 'right'],
+          'text-radial-offset': 0.85,
+          'text-justify': 'auto',
           // Shared with the lifted marker's DOM label, so a name wraps on the
           // same words in both states — see LABEL_MAX_EM in pin-select.js.
           'text-max-width': LABEL_MAX_EM,
@@ -1135,7 +1297,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Shares the amenity loader: the four discs these need are registered in
     // map-images.js alongside the legend's own, so there is one icon family and
     // one place it is rasterised.
-    loadAmenityIcons(map).then(() => {
+    loadAmenityIcons(map, colors.pinRing).then(() => {
       if (map.getLayer('category-pins') || !map.getSource('category-pins')) return;
       map.addLayer({
         id: 'category-pins',
@@ -1162,11 +1324,29 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           'text-optional': true,
           'text-field': ['get', 'name'],
           'text-font': mapFont().medium,
-          'text-size': 12,
-          // Under the disc, and far enough under to clear its lower half —
-          // the anchor point is the coordinate and the disc is centred on it.
-          'text-anchor': 'top',
-          'text-offset': [0, 0.95],
+          'text-size': 14,
+          // Under the disc if the name fits there, and if it does not, above,
+          // then right, then left. It used to be under or nowhere, and "nowhere"
+          // is what a caption does when it loses a collision — so a row of pins
+          // in a car park drew six discs and one word between them.
+          //
+          // READ THESE BACKWARDS. An anchor names the edge of the LABEL that is
+          // pinned to the point, not the side of the point the label lands on:
+          // 'top' fastens the label's top edge to the coordinate and so hangs it
+          // BELOW, 'left' fastens its left edge and so puts it to the RIGHT.
+          // This list is the order asked for — below, above, right, left —
+          // written in those terms.
+          'text-variable-anchor': ['top', 'bottom', 'left', 'right'],
+          // Replaces text-offset, which a variable anchor would apply in one
+          // fixed direction for all four positions: the same [0, 0.95] that
+          // clears the disc downwards would push the label above it a further
+          // 0.95 em up, and the side ones down past its corner.
+          // text-radial-offset is that distance along whichever direction the
+          // anchor chose, so all four clear the disc by the same gap.
+          'text-radial-offset': 0.95,
+          // Follows the anchor: a label to the left of a pin ends flush against
+          // it rather than centred on a point it is no longer under.
+          'text-justify': 'auto',
           'text-max-width': LABEL_MAX_EM,
         },
         paint: {
@@ -1676,6 +1856,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // The hue the resting label was set in, so the caption crosses from it to
       // the map's ink rather than appearing already black.
       ink: currentBasemap === 'satellite' ? SATELLITE.label : pinInk(hit.kind, currentTheme),
+      ring: palette(currentProvider, currentBasemap, currentTheme, currentSkin).pinRing,
       from,
     });
 
@@ -1942,10 +2123,22 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    *
    * Same rule Apple applies and the same reason: a label tinted with its
    * marker's colour is readable as a category before it is readable as a word.
-   * Only the ones that HAVE a disc, though — an area name or a car park number
-   * has no marker to agree with, so those keep the map's own ink.
+   * Only the ones that HAVE a disc, though — an area name has no marker to
+   * agree with, so those keep the map's own ink.
+   *
+   * A car park now has a disc and still keeps its own ink, which is the one
+   * place these two sets come apart. The tint is not free: it is worth paying
+   * where it separates ten categories from each other, and a car park is in a
+   * category of one. What it would cost is measured — the lot names sit on the
+   * lot, and against `land.parking` the parking blue reads 3.09:1 at night
+   * where `parkingLabel` reads 3.78:1, and by day it lands at 10.93:1, a navy
+   * so much heavier than the surrounding type that the lots would read as the
+   * loudest names on the campus. `parkingLabel` was itself placed by measuring
+   * against that surface; see the note on it in src/palette.js.
    */
-  const labelPaint = (kind, colors) => (POI_LABEL_KINDS.has(kind)
+  const POI_TINTED_KINDS = new Set(['building', 'plate']);
+
+  const labelPaint = (kind, colors) => (POI_TINTED_KINDS.has(kind)
     ? ['case', ['has', 'poi'], inkFor('poi'), labelInk(kind, colors)]
     : labelInk(kind, colors));
 
@@ -2106,6 +2299,104 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     highlightBuilding(props.officialName);
   }
 
+  /**
+   * What one directory row says under the name.
+   *
+   * In the order it is worth knowing. What is INSIDE a building is the thing
+   * someone scanning a campus directory is actually after — nine destinations
+   * in the Student Center is why you would open it — so that wins. Failing
+   * that, the name my campus's own database uses, but only where it differs from the
+   * one printed on the map, since "Gym · Gym" is a row that says one thing
+   * twice. Failing both, the footprint, which every building has.
+   */
+  function buildingSub(props) {
+    const inside = props.contents?.length ?? 0;
+    if (inside) return `${inside} destination${inside === 1 ? '' : 's'} inside`;
+    if (props.officialName && props.officialName !== props.name) return props.officialName;
+    return `${Math.round(props.area_m2 * 10.7639).toLocaleString()} sq ft`;
+  }
+
+  /**
+   * The directory, listed down the sidebar.
+   *
+   * Straight off src/directory.json, which is the same file the footprints on
+   * the map are tapped through — so a row and the building it names hand the
+   * SAME properties object to showBuildingCard, and the card cannot disagree
+   * with itself depending on how it was opened.
+   *
+   * Alphabetical. There is no better order available: distance would need a
+   * start point that has not been set yet on the screen where this list is most
+   * useful, and "importance" is a judgment this file has no column for.
+   */
+  function renderBuildings() {
+    if (!campusDirectory) return;
+    const rows = campusDirectory.features
+      .map((feature) => feature.properties)
+      .filter((props) => props.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    buildingsCount.textContent = `${rows.length} on campus`;
+    buildingsList.replaceChildren(...rows.map((props) => {
+      const li = document.createElement('li');
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'g-row';
+
+      // One glyph, coloured by what the building IS — the same hue
+      // map-images.js paints its POI marker on the map, so the row and the disc
+      // over the footprint are visibly the same answer. poiFor returns null for
+      // the sheet's "Closed" areas, which never reach a directory row, but the
+      // fallback keeps a missing classification a grey disc rather than a throw.
+      const disc = document.createElement('span');
+      disc.className = 'g-row-disc';
+      disc.dataset.icon = 'building';
+      const hue = pinColour(poiFor(props.name) ?? 'campus');
+      disc.style.color = hue;
+      disc.style.background = `color-mix(in srgb, ${hue} 18%, transparent)`;
+      row.append(disc);
+
+      const text = document.createElement('span');
+      text.className = 'g-row-text';
+      const name = document.createElement('span');
+      name.className = 'g-row-name';
+      name.textContent = props.name;
+      const sub = document.createElement('span');
+      sub.className = 'g-row-sub';
+      sub.textContent = buildingSub(props);
+      text.append(name, sub);
+      row.append(text);
+
+      row.addEventListener('click', () => openBuilding(props));
+      li.append(row);
+      return li;
+    }));
+    paintIcons(buildingsList);
+  }
+
+  /**
+   * Open a building from the list rather than from the map.
+   *
+   * The card is the same one a tap on the footprint opens; the difference is
+   * that the thing you just chose may be off screen entirely, so this also
+   * takes the camera there. `anchor` is the pole of inaccessibility the label
+   * is set at — the point furthest inside the footprint — which is a better
+   * centre than the entrance node hanging off one edge of it.
+   */
+  function openBuilding(props) {
+    clearSelection();
+    showBuildingCard(props);
+    const centre = props.anchor ?? props.entrance;
+    if (!centre) return;
+    map.easeTo({
+      center: centre,
+      zoom: Math.max(map.getZoom(), 17),
+      // Read AFTER the card is up, so the campus is framed around the column
+      // the card has just made taller rather than the one it replaced.
+      padding: campusPadding(),
+      duration: 700,
+    });
+  }
+
   /** Re-route from the existing start to a newly chosen destination. */
   async function resetMap0(coords, name) {
     if (endMarker) endMarker.remove();
@@ -2143,7 +2434,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // The building names carry a POI disc now, so their images have to be
     // registered before a layer can reference one — same reason addAmenityLayer
     // waits, and the same loader, because they are one icon family.
-    loadAmenityIcons(map)
+    loadAmenityIcons(map, pinRing())
       .then(() => buildLabelLayers())
       .catch((error) => console.error('label icons unavailable:', error));
   }
@@ -2212,7 +2503,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         id: `campus-labels-${kind}`,
         filter: labelFilter(kind),
         layout: {
-          'text-field': ['get', 'text'],
+          // Sentence case under Apple, my campus's own capitals everywhere else. The
+          // string is derived at load rather than edited into labels.json —
+          // see titleCase in src/poi.js for why, and for why the naive rule is
+          // safe on these five names.
+          'text-field': area && currentSkin === 'apple'
+            ? ['coalesce', ['get', 'title'], ['get', 'text']]
+            : ['get', 'text'],
           // Google's own hierarchy is set in weight, not colour: area names in
           // Medium, major buildings in Medium, everything else Regular. Bold
           // appears nowhere on their map at these sizes.
@@ -2230,7 +2527,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           // my campus letterspaces its area capitals hard. Google tracks theirs only
           // slightly, so this is halved rather than dropped — losing it entirely
           // would make BASEBALL FIELD read as a building name.
-          'text-letter-spacing': area ? 0.07 : 0,
+          //
+          // Apple tracks nothing. The reason the halving is safe to drop there
+          // is that the case change above already does the separating: "Tennis
+          // Courts" cannot be mistaken for a building name the way an untracked
+          // TENNIS COURTS could.
+          'text-letter-spacing': area && currentSkin !== 'apple' ? 0.07 : 0,
           'symbol-sort-key': sortKey,
           ...(POI_LABEL_KINDS.has(kind) ? poiLayout : {}),
         },
@@ -2552,6 +2854,19 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         paint: {
           'line-color': colors.networkCasing,
           'line-width': NETWORK_CASING_WIDTH,
+          // Gone at overview zooms, because the reference has no casing there
+          // at all. A cut across a campus path on Apple at z16 is two pixels of
+          // one flat tone with nothing but antialiasing at its edges; the
+          // casing only appears once a path is wide enough to have edges worth
+          // drawing, which is the same threshold the network itself inverts at.
+          //
+          // This is what made our campus read as a fractured surface where
+          // theirs reads as blocks on a field. The casing is L 20.5 against
+          // ground at L 31.7 — eleven points under it — so at the opening view
+          // every footpath was a black seam, and there are a lot of footpaths.
+          // The core stays: at L 28.4 on L 31.7 it is a three-point mark, which
+          // is about the weight Apple's light path carries the other way up.
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 16.2, 0, 16.8, 1],
           // Same reasoning as the mask and the sheet: without this the night
           // preset drags both halves of the ribbon toward the ground colour and
           // the casing stops separating anything.
@@ -2665,6 +2980,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     deselectPin();
 
     document.body.classList.add('navigating');
+    // Published so the sign can tell a simulated walk from a real one: the grid
+    // behind it runs at double speed and gains a second, stationary layer to
+    // drift against. See body.simulating in src/input.css.
+    document.body.classList.toggle('simulating', simulate);
     sidePanel.classList.add('hidden');
     navBanner.classList.remove('hidden');
     navFooter.classList.remove('hidden');
@@ -2689,6 +3008,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     resetBannerAnimation();
 
     document.body.classList.remove('navigating');
+    document.body.classList.remove('simulating');
     sidePanel.classList.remove('hidden');
     navBanner.classList.add('hidden');
     navFooter.classList.add('hidden');
@@ -3006,10 +3326,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     },
   });
 
+  // Two surfaces each from here down: the layers menu's, and the debug menu's.
+  // The second is a button, not a copy of the state — every surface is repainted
+  // from the one value on every change, so pressing either moves both.
   createBasemapToggle({
-    button: basemapToggle,
-    icon: basemapIcon,
-    label: basemapLabel,
+    surfaces: [
+      { button: basemapToggle, icon: basemapIcon, label: basemapLabel },
+      {
+        button: debugBasemap,
+        icon: document.getElementById('debug-basemap-icon'),
+        label: document.getElementById('debug-basemap-label'),
+      },
+    ],
     onChange: (basemap) => {
       currentBasemap = basemap;
       syncBasemapStyle();
@@ -3019,11 +3347,16 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // Last of the three, so that its initial onChange — which can start a session
   // request — runs after the theme and basemap have published their own state.
   providerControl = createProviderToggle({
-    // One door now. `surfaces` stays a list because the control genuinely
-    // supports several and the second was the rail's; nothing about the state
-    // behind it changed when that went.
+    // Two doors: the layers menu's, and the debug menu's. This was down to one
+    // for a while, after the rail went — the list survived that because the
+    // arrangement was right even when only one thing was using it.
     surfaces: [
       { button: providerToggle, icon: providerIcon, label: providerLabel },
+      {
+        button: debugProvider,
+        icon: document.getElementById('debug-provider-icon'),
+        label: document.getElementById('debug-provider-label'),
+      },
     ],
     onChange: (provider) => {
       currentProvider = provider;
@@ -3040,6 +3373,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   createSkinControl({
     surfaces: [
       { button: skinToggle, icon: skinIcon, label: skinLabel },
+      {
+        button: debugSkin,
+        icon: document.getElementById('debug-skin-icon'),
+        label: document.getElementById('debug-skin-label'),
+      },
     ],
     onChange: (skin) => {
       currentSkin = skin;
@@ -3070,6 +3408,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const legendList = document.getElementById('legend-list');
   const legendClose = document.getElementById('legend-close');
   const legendOpen = document.getElementById('layers-legend');
+  const debugLegend = document.getElementById('debug-legend');
   // directionsBtn is declared up with the panels — setStatus can reach it first.
   const searchGo = document.getElementById('search-go');
 
@@ -3091,8 +3430,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * open panel is a camera that drifts while you are trying to use it.
    */
   function toggleRoutePanel(force) {
+    // The one card on this map that can be switched off entirely. Nothing is
+    // allowed to open it while the debug menu has the route GUI off, or the
+    // stylesheet would be hiding a panel this function had just told the camera
+    // to reserve room for — and the campus would sit off to one side of a gap
+    // with nothing in it.
+    const want = routingEnabled ? force : false;
     const was = !sidePanel.classList.contains('hidden');
-    const open = toggleSheet(sidePanel, directionsBtn, force);
+    const open = toggleSheet(sidePanel, directionsBtn, want);
     directionsBtn.setAttribute('aria-label', open ? 'Hide directions' : 'Directions');
     if (open !== was) map.easeTo({ padding: campusPadding(), duration: 300 });
     return open;
@@ -3123,6 +3468,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function toggleLegendPanel(force) {
     const was = !legendPanel.classList.contains('hidden');
     const open = toggleSheet(legendPanel, legendOpen, force);
+    // The debug menu's row is a second surface on this one piece of state, like
+    // its map-type and look buttons are on theirs. Only the attribute is
+    // repeated here; the panel's own class is still the single source of truth,
+    // and both buttons read it through this function.
+    debugLegend.setAttribute('aria-expanded', String(open));
     if (open !== was) map.easeTo({ padding: campusPadding(), duration: 300 });
     return open;
   }
@@ -3143,7 +3493,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     toggleLegendPanel(false);
   });
 
-  legendOpen.addEventListener('click', () => {
+  /** What either legend button does. */
+  function onLegendPressed() {
     toggleSheet(layersMenu, layersBtn, false);
     const open = toggleLegendPanel();
     if (!open) { clearLegendHighlight(); return; }
@@ -3151,7 +3502,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // sheet over two thirds of the screen with three legend rows showing, and a
     // campus squeezed into the strip above it.
     if (phone.matches) toggleRoutePanel(false);
-  });
+  }
+
+  legendOpen.addEventListener('click', onLegendPressed);
+  debugLegend.addEventListener('click', onLegendPressed);
 
   layersBtn.addEventListener('click', () => toggleSheet(layersMenu, layersBtn));
   // Click-away, the way every menu of this shape behaves. Bound on the document
@@ -3170,6 +3524,110 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // went with it.
   directionsBtn.addEventListener('click', () => {
     if (toggleRoutePanel()) focusSearch();
+  });
+
+  // -------------------------------------------------------------------------
+  // The debug menu
+  //
+  // Its three map controls wired themselves up above, as second surfaces on the
+  // controls that already hold that state. What is left is the pair of switches
+  // that have no counterpart in the app, and one rule applying both: everything
+  // in here is conditional on the panel being OPEN, so closing it is a complete
+  // way out and there is no combination of flags a visitor can be stranded in.
+  //
+  // The panel is deliberately NOT in campusPadding's list. Every other card is,
+  // because the campus should not sit under one — but the whole use of this one
+  // is to look at the map as it will actually be framed, and a panel that moved
+  // the camera to make room for itself would be changing the thing it was
+  // opened to inspect.
+  // -------------------------------------------------------------------------
+
+  // Whether the locate control is watching. Tracked from its own events rather
+  // than inferred, because `trigger()` is a toggle: called while it is already
+  // watching it stops it, so switching the fixture off and on again would turn
+  // the blue dot off at the exact moment it was asked for.
+  let locating = false;
+
+  const locateButton = () => document.querySelector('.mapboxgl-ctrl-geolocate');
+
+  // Set only when WE were the ones who re-enabled that button, so switching the
+  // fixture off puts it back the way the browser left it rather than leaving a
+  // live-looking control that cannot work.
+  let locateUnlocked = false;
+
+  /**
+   * Let the locate button be pressed even though the browser said no.
+   *
+   * The control asks for the geolocation permission while it sets itself up and
+   * disables its own button when the answer is "denied". That is right, and it
+   * stops being the question the moment the position is coming from a fixture
+   * instead — somebody who once blocked location for this origin is exactly the
+   * person who needs a way to see what the blue dot does. Without this the dot
+   * can still be turned on from here, but the button beside it is dead, and the
+   * button's own five states are half of the interface being looked at.
+   */
+  function unlockLocate(button) {
+    if (!button.disabled) return;
+    button.disabled = false;
+    locateUnlocked = true;
+  }
+
+  function relockLocate() {
+    if (!locateUnlocked) return;
+    const button = locateButton();
+    if (button) button.disabled = true;
+    locateUnlocked = false;
+  }
+
+  /**
+   * Start the locate control, once it is able to start.
+   *
+   * Waits for the BUTTON rather than calling `trigger()` and reading its
+   * refusal. The control builds that button at the end of setting itself up,
+   * and setting up waits on a permissions query which has not settled when a
+   * page opened with the fixture already on reaches this point — so trigger()
+   * would refuse, and warn, on every single reload with the switch on. Two
+   * seconds of retries and then it gives up, rather than spinning forever.
+   */
+  function startLocating(attempt = 0) {
+    // Before the map has loaded there is no control yet. The load handler calls
+    // this again once there is, so nothing is lost by returning here.
+    if (!geolocateControl || locating) return;
+    const button = locateButton();
+    if (!button) {
+      if (attempt < 20) setTimeout(() => startLocating(attempt + 1), 100);
+      return;
+    }
+    unlockLocate(button);
+    geolocateControl.trigger();
+  }
+
+  function applyDebug({ open, routing, gps }) {
+    // "Off by default" means off once you are in the back room, not off for
+    // everybody: with the panel closed this is the app, and the app gives
+    // directions. `open &&` is the whole of that guarantee, twice.
+    routingEnabled = !open || routing;
+    document.body.classList.toggle('no-routing', !routingEnabled);
+    if (!routingEnabled) toggleRoutePanel(false);
+
+    const fixture = open && gps;
+    // Where the position comes from, not whether the app is looking for one.
+    // Switching the fixture off hands the watch already in flight back to the
+    // real GPS rather than putting the dot away, which is the honest thing: it
+    // shows you what the real one actually does from here.
+    geolocation.useFixture(fixture ? CAMPUS_CENTRE : null);
+    if (fixture) startLocating();
+    else relockLocate();
+  }
+
+  createDebugMenu({
+    panel: debugPanel,
+    close: document.getElementById('debug-close'),
+    switches: {
+      routing: document.getElementById('debug-routing'),
+      gps: document.getElementById('debug-gps'),
+    },
+    onChange: applyDebug,
   });
 
   // -------------------------------------------------------------------------
@@ -3367,11 +3825,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   map.on('load', async () => {
     // Real GPS. Requires a secure context (https or localhost) or the browser
     // silently refuses to report a position.
+    //
+    // `geolocation` is ours rather than the browser's, which is a seam the
+    // control provides for exactly this. It passes every call straight through
+    // to `navigator.geolocation` until the debug menu stands a fixture in the
+    // middle of the campus, and the control never learns that anything changed
+    // — so what appears on screen is the real interface, not a drawing of it.
+    // See src/geolocation.js.
     const geolocate = new mapboxgl.GeolocateControl({
+      geolocation,
       positionOptions: { enableHighAccuracy: true },
       trackUserLocation: true,
       showUserHeading: true,
     });
+    geolocateControl = geolocate;
     // Bottom-right, which is where Google keeps locate, zoom and the scale bar,
     // and in that order up the stack: scale on top, then locate, then the zoom
     // pair, with the credit line under all three.
@@ -3385,9 +3852,38 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
     map.addControl(geolocate, 'bottom-right');
     map.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-right');
+
+    // And the layers switcher on top of all of it, in the same corner.
+    //
+    // It held the bottom-LEFT corner on its own until now. Handing it to
+    // addControl rather than placing it with CSS is what keeps it in step: the
+    // stack's spacing is one `gap` on a flex column, so a control that joins
+    // the column is spaced by the same rule as the rest and cannot end up two
+    // pixels out from the scale bar the way a hand-positioned `bottom` would
+    // the first time a control changed height. Prepended, like every other
+    // bottom-corner control, so being added last is what puts it at the top.
+    //
+    // A bare element is not enough: Mapbox's corner containers are
+    // `pointer-events: none` and hand `auto` back to `.mapboxgl-ctrl` only, so
+    // the stylesheet gives this one its clicks back — see .g-layers.
+    const layersEl = document.querySelector('.g-layers');
+    map.addControl({
+      onAdd: () => layersEl,
+      onRemove: () => layersEl.remove(),
+      getDefaultPosition: () => 'bottom-right',
+    }, 'bottom-right');
     geolocate.on('geolocate', (e) => {
       onUserMoved([e.coords.longitude, e.coords.latitude], { duration: 1000 });
     });
+
+    // What `locating` is kept in step with — see startLocating for why guessing
+    // at it is not good enough. Both events are the control's own.
+    geolocate.on('trackuserlocationstart', () => { locating = true; });
+    geolocate.on('trackuserlocationend', () => { locating = false; });
+
+    // A page reloaded with the debug fixture already set asked for the blue dot
+    // before this control existed. It exists now.
+    if (geolocation.fixture) startLocating();
 
     map.getCanvas().style.cursor = 'crosshair';
 
@@ -3462,8 +3958,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (directory.status === 'fulfilled') {
       campusDirectory = directory.value;
       addDirectoryLayers();
+      renderBuildings();
+      // The list is 30 rows tall the moment it lands, which is a chunk of the
+      // column that was not reserved when the campus was first framed.
+      map.easeTo({ padding: campusPadding(), duration: 300 });
     } else {
       console.error(directory.reason);
+      // Nothing to list, so the section says so rather than sitting empty under
+      // a heading — the one state where the sidebar has a hole in it.
+      buildingsPanel.classList.add('hidden');
     }
 
     // Last of the five collections it reads, so this is where the legend stops
@@ -3476,7 +3979,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // Classified on the way in rather than in the build script: which disc a
       // building name earns is presentation, and labels.json stays exactly what
       // my campus's cartographer set. See src/poi.js.
-      campusLabels = withPoiIcons(labels.value);
+      // ...and the lots my campus never named get a marker before that runs, so the
+      // generated ones and the printed ones are classified by the same pass and
+      // cannot end up wearing different discs. The sheet is the source of the
+      // shapes, and it has already been read a few branches up — if it failed
+      // to arrive, withParkingMarks adds nothing and the five named lots still
+      // get their P.
+      campusLabels = withPoiIcons(withParkingMarks(labels.value, campusBasemap));
       addLabelLayers();
     } else {
       console.error(labels.reason);
@@ -3523,7 +4032,19 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /** A destination chosen before a start point, held until there is one. */
   let pendingEnd = null;
 
+  // The debug menu can take the route GUI away, and these three functions are
+  // where it is taken: they are the only places an endpoint is put on the map,
+  // so between them they are the whole of the offer. Guarded here rather than at
+  // the four things that CALL them — a map click, a card button, a search
+  // result, a category row — because a rule stated once at the funnel cannot be
+  // half-applied, and the stylesheet is already hiding the affordances. See
+  // routingEnabled, and body.no-routing in src/input.css.
+  //
+  // A tap still lifts a pin, opens a building and clears a category with the
+  // GUI off, because none of those are about going anywhere.
+
   function placeStart(coords, label) {
+    if (!routingEnabled) return;
     showRoutePanel();
     startPoint = point(coords);
     startMarker?.remove();
@@ -3538,6 +4059,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   async function placeEnd(coords, label) {
+    if (!routingEnabled) return;
     showRoutePanel();
     endPoint = point(coords);
     endMarker?.remove();
@@ -3608,6 +4130,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * click supplies somewhere to walk from.
    */
   async function setDestination(coords, name) {
+    // With the route GUI off, a search result and a category row still mean
+    // something — "show me where that is" — so this degrades to the camera
+    // rather than to nothing. Dropping the red pin here without a route panel
+    // to explain it would be the worst of the three options.
+    if (!routingEnabled) {
+      map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 17), duration: 900 });
+      return;
+    }
+
     // Both ends already set: start over rather than accumulating markers.
     if (startPoint && endPoint) resetMap();
     // Before the flyTo below, so the camera is framing the space the panel has

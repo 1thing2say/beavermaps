@@ -22,7 +22,7 @@ const features = basemap.features;
  */
 const KINDS = new Set([
   'lawn', 'tree', 'shrub', 'paving', 'parking', 'parking_stripe', 'sport',
-  'track', 'pool', 'closed', 'building', 'walkway', 'driveway', 'offsite_road',
+  'tennis', 'tennis_apron', 'track', 'pool', 'closed', 'building', 'walkway', 'driveway', 'offsite_road',
   'crossing', 'parking_marker', 'bike_marker', 'label_plate', 'badge', 'north_arrow', 'bus_stop', 'bleachers',
   'emergency_phone', 'defibrillator', 'restroom', 'permit_machine',
 ]);
@@ -109,10 +109,25 @@ test('holes lie inside their exterior', () => {
   assert.ok(holes >= 1, 'no polygon holes at all — compound paths are being flattened');
 });
 
+/**
+ * The kinds src/main.js fills from the palette whatever the sheet says, listed
+ * in the campus-sheet-fill filter there.
+ *
+ * They are the shapes my campus drew as something other than a surface: nineteen
+ * pitches and twelve courts carried as stroke-only touchlines, the apron under
+ * the courts, and the stadium field, which the sheet does not draw at all —
+ * it is the hole in the track, promoted to a feature by build-basemap.mjs and
+ * so the one thing in this file with no ink of its own by construction.
+ */
+const FILLED_BY_KIND = new Set(['sport', 'tennis', 'tennis_apron']);
+
 test('nothing is invisible', () => {
   for (const f of features) {
     const { fill, stroke, i, kind } = f.properties;
-    assert.ok(fill || stroke, `feature ${i} (${kind}) has neither fill nor stroke`);
+    assert.ok(
+      fill || stroke || FILLED_BY_KIND.has(kind),
+      `feature ${i} (${kind}) has neither fill nor stroke`,
+    );
   }
 });
 

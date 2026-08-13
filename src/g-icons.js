@@ -71,6 +71,15 @@ const PATHS = {
     '<path d="M12 2.6 22 11h-3v9.4h-5.4v-5.6h-3.2v5.6H5V11H2z"/>',
   bus:
     '<path d="M6 2.6h12a2.4 2.4 0 0 1 2.4 2.4v11.4a2.4 2.4 0 0 1-1.4 2.2v1.8a1 1 0 0 1-1 1h-1.4a1 1 0 0 1-1-1v-1.6H8.4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-1.8a2.4 2.4 0 0 1-1.4-2.2V5A2.4 2.4 0 0 1 6 2.6zm-.4 3v6.6h12.8V5.6zm2 8.6a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2zm8.8 0a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z"/>',
+
+  // --- the directory ---------------------------------------------------------
+  // One mark for every row of the buildings list, because the *colour* is what
+  // tells them apart: each disc is tinted with the hue map-images.js paints that
+  // building's own POI marker, so a row and the thing it points at on the map
+  // are the same colour. Ten hand-drawn glyphs would say the same thing twice
+  // and let the two drift.
+  building:
+    '<path d="M4.4 3h9.2a1 1 0 0 1 1 1v5.4h4.6a1 1 0 0 1 1 1V21H3.4V4a1 1 0 0 1 1-1zm1 2v14h3V16h2.4v3h3V5zm9.2 6.4V19h3.6v-7.6zM6.6 6.8h1.8v1.8H6.6zm3.6 0H12v1.8h-1.8zM6.6 10.2h1.8V12H6.6zm3.6 0H12V12h-1.8zM16 13.6h1.8v1.8H16z"/>',
 };
 
 /** Every glyph this module can draw. Exported so the tests can check the join

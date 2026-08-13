@@ -44,7 +44,14 @@ function head(title, onClose) {
   const close = el('button', 'g-icon-btn');
   close.type = 'button';
   close.setAttribute('aria-label', 'Close');
-  close.innerHTML = icon('close');
+  // Wrapped, the way every close button in index.html is. `icon()` returns an
+  // svg sized 100%, so dropped straight into the button it filled all 32px of
+  // it — a × half again the size of the identical control on the legend two
+  // panels away, which .g-icon holds to 20. It only looked like a bare glyph
+  // because the disc behind it was the same width as the mark.
+  const glyph = el('span', 'g-icon');
+  glyph.innerHTML = icon('close');
+  close.append(glyph);
   close.addEventListener('click', onClose);
 
   row.append(text, close);

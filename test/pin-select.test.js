@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  sizeExpr, sizeAt, AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE, SELECTED_W,
+  sizeExpr, sizeAt, AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE, SELECTED_W, swayAngleAt,
   GROW_MS, GROW_EASE, SHRINK_MS, SHRINK_EASE,
   LABEL_START_SCALE, LABEL_RISE, LABEL_INK_DELAY, LABEL_INK_SPAN, SYMBOL_FADE_MS,
   swayAt, swayKeyframes, SWAY_AMP, SWAY_DECAY_MS, SWAY_PERIOD_MS, SWAY_DELAY_MS,
@@ -292,7 +292,11 @@ test('the sway starts late and outlives the grow', () => {
 
 test('the sway keyframes are a faithful sampling of the curve', () => {
   const frames = swayKeyframes(CAPTURE_W);
-  const px = (k) => Number(/-?[\d.]+/.exec(k.transform)[0]);
+  // Degrees now, not pixels. The keyframes turn the head about the point the
+  // pin is planted at rather than sliding the whole marker, so what is sampled
+  // is `swayAngleAt`. The curve underneath is the same fitted one — see the
+  // bobble test above, which still checks the displacement against the capture.
+  const deg = (k) => Number(/-?[\d.]+/.exec(k.transform)[0]);
 
   // WAAPI requires ascending offsets, and silently animates nonsense otherwise.
   assert.ok(frames.every((k, i) => i === 0 || k.offset > frames[i - 1].offset),
@@ -303,8 +307,8 @@ test('the sway keyframes are a faithful sampling of the curve', () => {
   // It has to start and end at rest, or mounting the pin snaps it sideways and
   // removing it snaps it back. The end is exact because SWAY_MS lands on a zero
   // of the sine rather than on a round number.
-  assert.equal(px(frames[0]), 0);
-  assert.equal(px(frames.at(-1)), 0);
+  assert.equal(deg(frames[0]), 0);
+  assert.equal(deg(frames.at(-1)), 0);
   assert.ok(Math.abs(swayAt(SWAY_MS, CAPTURE_W)) < 1e-9,
     'SWAY_MS is no longer at a zero crossing, so the last keyframe is a jump');
 
@@ -323,9 +327,12 @@ test('the sway keyframes are a faithful sampling of the curve', () => {
     while (i < frames.length - 2 && frames[i + 1].offset < f) i += 1;
     const [a, b] = [frames[i], frames[i + 1]];
     const u = (f - a.offset) / (b.offset - a.offset);
-    worst = Math.max(worst, Math.abs(px(a) + u * (px(b) - px(a)) - swayAt(ms, CAPTURE_W)));
+    worst = Math.max(worst, Math.abs(deg(a) + u * (deg(b) - deg(a)) - swayAngleAt(ms, CAPTURE_W)));
   }
-  assert.ok(worst < 0.05, `linear interpolation is ${worst.toFixed(3)}px off the curve`);
+  // 0.06 degrees, which is the angle that moves the head about a twentieth of a
+  // pixel at this marker's lever — the same sub-pixel budget the px version of
+  // this assertion held the slide to.
+  assert.ok(worst < 0.06, `linear interpolation is ${worst.toFixed(4)} degrees off the curve`);
   assert.ok(frames.length < 60, `${frames.length} keyframes is more than this curve needs`);
   assert.ok(SWAY_STEP_MS > 0);
 });
@@ -433,7 +440,14 @@ test('a growing layer scales its stops, not the finished expression', () => {
   }
   // The stops themselves are untouched — this returns a new table each time, and
   // a version that mutated would permanently shrink the layer it animated.
-  assert.deepEqual(CATEGORY_SIZE, { 14: 0.72, 19: 0.92 });
+  //
+  // Against a snapshot rather than against the literal values, which is what
+  // this claim actually is: "scaleStops did not touch its input". Written out
+  // as {14: 0.72, 19: 0.92} it also failed the day the pins were made bigger,
+  // reporting a mutation that had not happened.
+  const before = { ...CATEGORY_SIZE };
+  scaleStops(CATEGORY_SIZE, 0.5);
+  assert.deepEqual(CATEGORY_SIZE, before);
   assert.notEqual(scaleStops(CATEGORY_SIZE, 1), CATEGORY_SIZE);
 });
 

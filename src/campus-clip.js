@@ -33,6 +33,18 @@
  * decision about presentation.
  */
 
+/**
+ * Metres per degree at my campus's latitude.
+ *
+ * The campus is 900 m across, so a flat conversion at one latitude is exact to
+ * well under the width of the thinnest thing on the sheet, and every distance
+ * this app measures for presentation — how far apart two car parks are, how
+ * wide a painted bay divider is — goes through these. Kept here, and imported,
+ * so the two modules that need them cannot drift apart on the value.
+ */
+export const M_PER_LON = 86_940;
+export const M_PER_LAT = 110_980;
+
 /** The campus ring, from the Feature build-boundary.mjs writes. */
 export function ringOf(boundary) {
   const geometry = boundary.geometry ?? boundary.features?.[0]?.geometry;
@@ -52,6 +64,35 @@ export function inCampus([lon, lat], ring) {
     }
   }
   return hit;
+}
+
+/**
+ * The middle of the campus: the area centroid of the ring.
+ *
+ * Not the middle of its bounding box, which is the middle of a rectangle nobody
+ * drew — my campus's boundary is an L with a long arm down the west side, and the two
+ * answers are 60 m apart. The centroid is the one a person would point at.
+ *
+ * Shoelace, over a closed ring, so the sign of the area cancels and the winding
+ * does not matter. It lands 7 m off the nearest walked path and inside no
+ * building, which is what makes it usable as a stand-in for a GPS fix.
+ */
+export function centreOf(ring) {
+  let twiceArea = 0;
+  let x = 0;
+  let y = 0;
+  for (let i = 1; i < ring.length; i += 1) {
+    const [x0, y0] = ring[i - 1];
+    const [x1, y1] = ring[i];
+    const cross = x0 * y1 - x1 * y0;
+    twiceArea += cross;
+    x += (x0 + x1) * cross;
+    y += (y0 + y1) * cross;
+  }
+  // A degenerate ring has no centroid to compute; fall back to its first point
+  // rather than handing back a NaN that would silently become a blank map.
+  if (!twiceArea) return ring[0].slice(0, 2);
+  return [x / (3 * twiceArea), y / (3 * twiceArea)];
 }
 
 function everyCoord(geometry, test) {
