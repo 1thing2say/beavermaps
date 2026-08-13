@@ -27,7 +27,7 @@ import { buildingCard, pinCard } from './building-popup.js';
 import {
   mountSelectedPin, sizeExpr, sizeAt, LABEL_MAX_EM,
   AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE,
-  growEase, swayAt, scaleStops, GROW_MS, SWAY_MS,
+  growEase, shrinkEase, swayAt, scaleStops, GROW_MS, SHRINK_MS, SWAY_MS,
 } from './pin-select.js';
 import { createThemeControl, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
@@ -228,6 +228,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const legendPanel = document.getElementById('legend-panel');
   const placePanel = document.getElementById('place-panel');
   const categoryPanel = document.getElementById('category-panel');
+  // Not one of those three any more — the directory lives in the debug card and
+  // is not measured. Kept here with them because it is still a panel handle and
+  // there is no better block for it to be in.
   const buildingsPanel = document.getElementById('buildings-panel');
   const buildingsList = document.getElementById('buildings-list');
   const buildingsCount = document.getElementById('buildings-count');
@@ -271,7 +274,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const canvas = map.getCanvas().getBoundingClientRect();
     if (!canvas.width) return even;
 
-    const boxes = [placePanel, categoryPanel, sidePanel, buildingsPanel, legendPanel]
+    // buildingsPanel is not in this list and must not be: it is a section of
+    // the debug card now, and the debug card is a thing you open, read and
+    // close rather than a panel the map is framed around.
+    const boxes = [placePanel, categoryPanel, sidePanel, legendPanel]
       .filter((card) => !card.classList.contains('hidden'))
       .map((card) => card.getBoundingClientRect())
       .filter((box) => box.width);
@@ -405,7 +411,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       searchClear.classList.add('hidden');
       closeResults();
     }
-    setStatus("Click on the map to set a start point.");
+    // What the next click will actually do, which the virtual location changes:
+    // with a fix on the campus there is nowhere to set a start FROM, so the
+    // click is a destination and saying otherwise sends people looking for a
+    // step that is not there.
+    setStatus(geolocation.fixture
+      ? 'Click on the map to set a destination.'
+      : 'Click on the map to set a start point.');
     startCoordText.textContent = "Not set";
     endCoordText.textContent = "Not set";
     setDistanceFeet(0);
@@ -1474,6 +1486,16 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    */
   let choreography = 0;
 
+  /**
+   * True while the category pins are growing in.
+   *
+   * The entrance owns `icon-size` on that layer frame by frame, and the pin
+   * hover writes the same property. Without this, a pointer resting where the
+   * pins land would snap them to full size half way through their arrival. See
+   * paintPinHover, which is the only reader.
+   */
+  let pinsArriving = false;
+
   /** Asked each time, so a preference changed mid-session takes effect at once. */
   const prefersStill = () =>
     Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
@@ -1560,13 +1582,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const APPEAR_MS = GROW_MS * 0.3;
 
     const settle = () => {
+      pinsArriving = false;
       if (!map.getLayer(layer)) return;
       map.setLayoutProperty(layer, 'icon-size', base);
       map.setPaintProperty(layer, 'icon-translate', [0, 0]);
       map.setPaintProperty(layer, 'icon-opacity', 1);
       map.setPaintProperty(layer, 'text-opacity', 1);
+      // ...and hand the layer back to the hover, in case the pointer has been
+      // sitting where a pin has just landed. A no-op when nothing is hovered.
+      paintPinHover(layer);
     };
     if (prefersStill()) { settle(); return; }
+    pinsArriving = true;
 
     // Frame zero, set now rather than on the first callback. `paintCategory`
     // has already pushed the data, so a rAF's worth of delay is a rAF of pins
@@ -1800,6 +1827,157 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       };
     }
     return null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Hovering a pin
+  //
+  // A marker under the pointer springs up a little, its name changes colour,
+  // and the cursor becomes a pointer. Three signals for one fact — this is a
+  // thing you can press — because each of them is doing something the other two
+  // cannot: the cursor says it before you have looked away from what you were
+  // reading, the size says WHICH one of forty markers, and the colour survives
+  // the pin being under your own hand.
+  //
+  // The spring is the lift's own, off the same capture. A hover is not a
+  // selection, so it goes a fraction of the distance — but it is the same
+  // gesture in miniature, and a different easing here would read as a different
+  // map. That overshoot is the twitch.
+  //
+  // HOW IT IS DRAWN, because this is the part with a trap in it: `icon-size` is
+  // a LAYOUT property, and layout properties cannot read `feature-state`. So
+  // there is no per-feature hover the way there is for a fill. What there IS is
+  // `['id']`, which is legal in a layout expression — so the layer is given a
+  // size expression that names one id and scales only that one, and the
+  // expression is rewritten each frame. The `case` sits INSIDE the interpolate's
+  // outputs rather than around it, for the same reason scaleStops exists: Mapbox
+  // only accepts `['zoom']` as the direct input to a top-level interpolate.
+  //
+  // One layer at a time, always. Pushing a layout property re-lays out that
+  // layer's symbols, and the printed-label set is the expensive one — the
+  // category swap declines to animate it for exactly this reason. Hovering
+  // touches only the layer the pointer is actually over.
+  // -------------------------------------------------------------------------
+
+  /** How much bigger a hovered pin is drawn. Small: it is a hint, not a lift. */
+  const HOVER_SCALE = 1.16;
+  const HOVER_MS = 260;
+
+  /** The pin under the pointer, shaped like selectedPin so the two read alike. */
+  let hoveredPin = null;
+  /** The multiplier the hovered pin is currently drawn at. */
+  let hoverScale = 1;
+  /** Bumped to cancel a run in flight, exactly as `choreography` does. */
+  let hoverRun = 0;
+
+  /**
+   * `icon-size` for a layer, with the hovered feature — and only it — scaled.
+   *
+   * Falls back to the plain expression whenever this layer is not the hovered
+   * one, so a layer that is left goes back to being declarative rather than
+   * holding a frame's worth of state.
+   */
+  function pinSizeExpr(layer) {
+    const stops = SIZE_TABLE[layer] ?? LABEL_SIZE;
+    if (hoveredPin?.layer !== layer || hoverScale === 1) return sizeExpr(stops);
+    const mine = ['==', ['id'], hoveredPin.id];
+    return ['interpolate', ['linear'], ['zoom'], ...Object.entries(stops).flatMap(
+      ([zoom, size]) => [Number(zoom), ['case', mine, size * hoverScale, size]],
+    )];
+  }
+
+  /** ...and its `text-color`, with the hovered pin's name in the accent. */
+  function pinTextExpr(layer) {
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const base = layer === 'campus-amenities' ? inkFor('kind')
+      : layer === 'category-pins' ? inkFor('icon')
+        : labelPaint(layer.replace('campus-labels-', ''), colors);
+    if (hoveredPin?.layer !== layer) return base;
+    return ['case', ['==', ['id'], hoveredPin.id], colors.highlight, base];
+  }
+
+  /**
+   * Push both onto one layer.
+   *
+   * `category-pins` is skipped while its entrance is playing. That animation
+   * owns the same layout property frame by frame, and a hover repaint landing in
+   * the middle of it would drop the pins to full size mid-arrival. It gets one
+   * repaint when the swap settles instead, so a pointer resting where the pins
+   * land still finds its hover.
+   */
+  function paintPinHover(layer) {
+    if (!map.getLayer(layer)) return;
+    if (layer === 'category-pins' && pinsArriving) return;
+    map.setLayoutProperty(layer, 'icon-size', pinSizeExpr(layer));
+    map.setPaintProperty(layer, 'text-color', pinTextExpr(layer));
+  }
+
+  /** Ease one layer's hover scale from where it is to `to`, then settle. */
+  function runHover(layer, to, ms, ease, run, done) {
+    if (prefersStill()) {
+      // The colour still changes — it is the signal, not the decoration — but
+      // nothing moves.
+      hoverScale = 1;
+      done?.();
+      paintPinHover(layer);
+      return;
+    }
+    const from = hoverScale;
+    const started = performance.now();
+    const step = (now) => {
+      if (run !== hoverRun) return;
+      const p = Math.min(1, (now - started) / ms);
+      hoverScale = from + (to - from) * ease(p);
+      paintPinHover(layer);
+      if (p < 1) { requestAnimationFrame(step); return; }
+      if (done) { done(); paintPinHover(layer); }
+    };
+    requestAnimationFrame(step);
+  }
+
+  /**
+   * Point at a pin, or at nothing.
+   *
+   * Three cases, and the third is the compromise. Arriving at a pin springs it
+   * up; leaving one for empty map settles it back down where it is. Moving
+   * straight from a pin in one layer to a pin in another SNAPS the first back,
+   * because one scale cannot animate two layers and the expression that grew the
+   * old feature names an id its layer is no longer about. Nobody watches the pin
+   * they just left when a new one is growing under the pointer.
+   */
+  function hoverPin(next) {
+    const prev = hoveredPin;
+    if (next?.layer === prev?.layer && next?.id === prev?.id) return;
+    hoverRun += 1;
+    const run = hoverRun;
+
+    if (prev && (!next || prev.layer !== next.layer)) {
+      if (next) {
+        hoveredPin = null;
+        hoverScale = 1;
+        paintPinHover(prev.layer);
+      } else {
+        // hoveredPin stays `prev` for the length of this, because the
+        // expression settling it back down is still the one that names it.
+        runHover(prev.layer, 1, SHRINK_MS, shrinkEase, run, () => {
+          if (run === hoverRun) hoveredPin = null;
+        });
+      }
+    }
+
+    if (!next) return;
+    hoveredPin = next;
+    hoverScale = 1;
+    runHover(next.layer, HOVER_SCALE, HOVER_MS, growEase, run);
+  }
+
+  /** Let go of whatever is hovered without animating — for a style swap. */
+  function clearHover() {
+    hoverRun += 1;
+    const was = hoveredPin;
+    hoveredPin = null;
+    hoverScale = 1;
+    if (was) paintPinHover(was.layer);
   }
 
   function deselectPin() {
@@ -2285,6 +2463,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       },
       onEnd: async (coords, name) => {
         clearSelection();
+        // Same as the search box: with the virtual location on, "Directions"
+        // from a building's card is a whole question and gets a whole answer.
+        if (!startPoint) haveStart();
         if (!startPoint) {
           pendingEnd = { coords, name };
           showRoutePanel();
@@ -2317,12 +2498,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   /**
-   * The directory, listed down the sidebar.
+   * The directory, listed at the foot of the debug menu.
    *
    * Straight off src/directory.json, which is the same file the footprints on
    * the map are tapped through — so a row and the building it names hand the
    * SAME properties object to showBuildingCard, and the card cannot disagree
-   * with itself depending on how it was opened.
+   * with itself depending on how it was opened. That is most of why this list
+   * is worth keeping once it is out of the sidebar: a row that is missing, or
+   * whose subtitle reads wrong, is directory.json saying so.
    *
    * Alphabetical. There is no better order available: distance would need a
    * start point that has not been set yet on the screen where this list is most
@@ -2959,7 +3142,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     addLabelLayers();
 
     if (navActive) addBuildingsLayer();
-    map.getCanvas().style.cursor = 'crosshair';
   }
 
   // -------------------------------------------------------------------------
@@ -2989,12 +3171,29 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     navFooter.classList.remove('hidden');
     map.resize();
 
-    if (!userMarker) {
-      const dot = document.createElement('div');
-      dot.className = 'user-dot';
-      userMarker = new mapboxgl.Marker({ element: dot });
+    // With the virtual location on, the control's blue dot IS the position —
+    // same argument as the start pin, and the same answer: ours would be a
+    // second dot sitting on the first. Removed rather than skipped, so a walk
+    // begun with the fixture off and resumed with it on does not leave one
+    // behind.
+    if (geolocation.fixture) {
+      userMarker?.remove();
+    } else {
+      if (!userMarker) {
+        const dot = document.createElement('div');
+        dot.className = 'user-dot';
+        userMarker = new mapboxgl.Marker({ element: dot });
+      }
+      userMarker.setLngLat(routeCoords[0]).addTo(map);
     }
-    userMarker.setLngLat(routeCoords[0]).addTo(map);
+
+    // The locate control recentres on every fix while it holds the camera, and
+    // navigation has a camera of its own — pitched to 60, zoomed in and turned
+    // to face the walk. Dropping the control to background is the one gesture
+    // that keeps the dot live and gives the camera up; it is what pressing its
+    // button while locked on does. `locating` is the control's own state, kept
+    // by its two track events rather than guessed at.
+    if (locating) geolocateControl?.trigger();
 
     onUserMoved(routeCoords[0], { duration: 900 });
 
@@ -3173,18 +3372,47 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // Simulator — walk the route without leaving your desk
   // -------------------------------------------------------------------------
 
+  /**
+   * Walk the route.
+   *
+   * TWO WAYS THROUGH, and which one runs is decided by whether the virtual
+   * location is standing in for the GPS.
+   *
+   *   WITH THE FIXTURE ON, this moves the FIXTURE and nothing else. The
+   *   geolocation object delivers the new position to the watch the control
+   *   already has open, the control fires its own `geolocate`, and that is what
+   *   advances the navigation — so the blue dot, the accuracy ring and the
+   *   heading wedge move because the position they are drawn from moved. This is
+   *   what the fixture is for: from inside the control nothing about the walk is
+   *   made up. It is also the only arrangement where there is ONE dot on the
+   *   screen rather than a stationary blue one and a moving grey one.
+   *
+   *   WITHOUT IT there is no fix to move, so the marker is driven directly, as
+   *   it always was.
+   *
+   * The fixture is left wherever the walk ended rather than being put back. You
+   * walked there; a route started afterwards should start from where you are.
+   * Toggling the switch off and on again returns it to the centre of campus.
+   */
   function startSimulation() {
     stopSimulation();
     simAlong = 0;
     const totalKm = cumulative[cumulative.length - 1];
     const perTickKm =
       (WALK_FEET_PER_SEC * SIM_SPEED * (SIM_TICK_MS / 1000)) / FEET_PER_KM;
+    const viaFixture = Boolean(geolocation.fixture);
 
     simTimer = setInterval(() => {
       simAlong = Math.min(simAlong + perTickKm, totalKm);
       const position = along(routeLine, simAlong).geometry.coordinates;
-      if (userMarker) userMarker.setLngLat(position);
-      onUserMoved(position);
+      if (viaFixture) {
+        // The wedge points where the camera is already facing, which is the
+        // direction of travel — onUserMoved works it out a stride ahead.
+        geolocation.useFixture(position, { heading: lastBearing });
+      } else {
+        if (userMarker) userMarker.setLngLat(position);
+        onUserMoved(position);
+      }
       if (simAlong >= totalKm) stopSimulation();
     }, SIM_TICK_MS);
   }
@@ -3278,6 +3506,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // Fires on first load *and* after every setStyle, which is exactly when the
   // custom layers need rebuilding.
   map.on('style.load', () => {
+    // Before the builders, not after. A swap rebuilds every pin layer with its
+    // plain size expression, so a hover held across one would be a pin that is
+    // no longer big while `hoveredPin` still says it is — and the next mousemove
+    // over the same pin would match, do nothing, and leave it flat for good.
+    clearHover();
     addNetworkLayers();
     addGoogleGround();
   });
@@ -3311,6 +3544,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // two light presets. Re-running the builders applies the new palette to
     // layers that already exist, so the map recolours without a reload and
     // without dropping the route or the campus mask.
+    //
+    // The hover goes first for the same reason it does on a style swap: those
+    // builders push a plain `text-color` and a plain `icon-size` over whatever
+    // the hover had written, and a `hoveredPin` still naming the pin underneath
+    // would make the next mousemove over it a no-op.
+    clearHover();
     addNetworkLayers();
     if (map.getLayer('campus-buildings')) addBuildingsLayer();
   }
@@ -3611,6 +3850,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (!routingEnabled) toggleRoutePanel(false);
 
     const fixture = open && gps;
+
+    // A start that came from the fixture is a start with no marker — the dot was
+    // the marker. Switching the fixture off takes the dot away and would leave a
+    // route running from a point nothing on the map is drawing, so the route
+    // goes with it. `startPoint && !startMarker` is that state exactly, and it
+    // is the state itself rather than a flag kept alongside it.
+    if (!fixture && startPoint && !startMarker) resetMap();
+
     // Where the position comes from, not whether the app is looking for one.
     // Switching the fixture off hands the watch already in flight back to the
     // real GPS rather than putting the dot away, which is the honest thing: it
@@ -3873,7 +4120,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       getDefaultPosition: () => 'bottom-right',
     }, 'bottom-right');
     geolocate.on('geolocate', (e) => {
-      onUserMoved([e.coords.longitude, e.coords.latitude], { duration: 1000 });
+      // A simulated walk pushes a new fix every SIM_TICK_MS, so the camera ease
+      // has to finish inside one tick. At a second apiece every fix would
+      // interrupt the last and the dot would slide along a route the camera
+      // never catches up with.
+      onUserMoved([e.coords.longitude, e.coords.latitude],
+        { duration: simTimer ? SIM_TICK_MS : 1000 });
     });
 
     // What `locating` is kept in step with — see startLocating for why guessing
@@ -3884,8 +4136,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // A page reloaded with the debug fixture already set asked for the blue dot
     // before this control existed. It exists now.
     if (geolocation.fixture) startLocating();
-
-    map.getCanvas().style.cursor = 'crosshair';
 
     // All from the same server, so ask together. They are settled separately
     // because only the network is load-bearing: without it nothing can be
@@ -3958,14 +4208,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (directory.status === 'fulfilled') {
       campusDirectory = directory.value;
       addDirectoryLayers();
+      // Built once, on arrival, rather than when the debug menu opens: it is
+      // thirty rows off a file that is already in hand, and doing it now means
+      // the menu is never briefly empty on the frame it is opened.
+      //
+      // No re-frame after it. The list used to be in the left column, where
+      // thirty rows landing was a chunk of canvas that had not been reserved
+      // when the campus was first fitted; a card that floats over the map on
+      // request costs the framing nothing.
       renderBuildings();
-      // The list is 30 rows tall the moment it lands, which is a chunk of the
-      // column that was not reserved when the campus was first framed.
-      map.easeTo({ padding: campusPadding(), duration: 300 });
     } else {
       console.error(directory.reason);
-      // Nothing to list, so the section says so rather than sitting empty under
-      // a heading — the one state where the sidebar has a hole in it.
+      // Nothing to list, so the section goes rather than sitting empty under a
+      // heading. Its own hidden state, not the debug menu's — the rest of the
+      // card is unaffected by a directory that failed to load.
       buildingsPanel.classList.add('hidden');
     }
 
@@ -4042,6 +4298,39 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   //
   // A tap still lifts a pin, opens a building and clears a category with the
   // GUI off, because none of those are about going anywhere.
+
+  /**
+   * Take the virtual location as the start, without drawing a start pin.
+   *
+   * ONE PIN, NOT TWO, and that is the whole point of it. With the fixture on
+   * there is already a blue dot on the campus saying where you are, and the old
+   * flow ignored it: the first click dropped a green Start marker somewhere else
+   * and the second dropped the red one, so a map that knew your position still
+   * made you tell it twice and then drew the answer in two places.
+   *
+   * Snapped to the network, because a fix lands wherever it lands and the router
+   * walks between vertices. The blue dot stays where the GPS put it — moving it
+   * onto the path would be the fixture lying about the position rather than the
+   * router being honest about the graph.
+   *
+   * Returns whether it took. Nothing to adopt is a normal answer, not a failure:
+   * the fixture is off, or the network has not landed yet.
+   */
+  function adoptFixtureStart() {
+    const at = geolocation.fixture;
+    if (!at || !networkPoints || !routingEnabled) return false;
+    showRoutePanel();
+    startPoint = point(nearestPoint(point(at), networkPoints).geometry.coordinates);
+    // No marker. The dot is the marker — see above — and a green pin standing on
+    // top of it would be the second pin this exists to remove.
+    startMarker?.remove();
+    startMarker = null;
+    startCoordText.textContent = 'Your location';
+    return true;
+  }
+
+  /** A start exists, adopting the virtual location if that is what is standing in. */
+  const haveStart = () => Boolean(startPoint) || adoptFixtureStart();
 
   function placeStart(coords, label) {
     if (!routingEnabled) return;
@@ -4145,6 +4434,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // already taken rather than the space it is about to.
     showRoutePanel();
 
+    // Searching for somewhere while the virtual location is on is a complete
+    // question — from here, to that — so it routes rather than parking the
+    // destination in `pendingEnd` and asking for a start that already exists.
+    if (!startPoint) haveStart();
+
     if (!startPoint) {
       // Nothing to route yet, so the destination is the only thing worth
       // looking at. With a start point already down the camera belongs to the
@@ -4177,18 +4471,47 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   // The cursor says what a click will do. Over a pin or a building that is
-  // "open this", not "drop a point here", and the crosshair says the wrong one.
+  // "open this", so it becomes a pointer; everywhere else it is Mapbox's own —
+  // the grab hand, which is the truth about the rest of the map, since dragging
+  // is what the empty parts of it are for.
+  //
+  // It used to be a crosshair off the pins, from when a click anywhere set a
+  // route endpoint and the whole canvas really was a target. That is behind the
+  // debug menu's routing switch now, so for a visitor the crosshair was
+  // promising a precision the map no longer asks for. An empty string rather
+  // than 'grab' or 'default' so the value comes from Mapbox's stylesheet and
+  // stays right if dragging is ever disabled.
   //
   // One query across all three rather than pinAt() and buildingAt() in turn:
   // this runs on every mouse move, and three hit tests a frame to decide the
   // shape of a cursor is three times the work the answer is worth.
-  const POINTER_LAYERS = ['category-pins', 'campus-amenities', 'campus-directory-hit'];
+  // Every layer that draws a pin, plus the building footprints. One query, and
+  // the TOPMOST feature wins rather than pinAt's fixed layer order: a hover is
+  // about what the pointer is visibly on, and what it is visibly on is whatever
+  // was drawn last.
+  const POINTER_LAYERS = () =>
+    ['category-pins', 'campus-amenities', ...POI_LABEL_LAYERS, 'campus-directory-hit']
+      .filter((id) => map.getLayer(id));
+
   map.on('mousemove', (e) => {
     if (navActive) return;
-    const layers = POINTER_LAYERS.filter((id) => map.getLayer(id));
-    const over = layers.length > 0 && map.queryRenderedFeatures(e.point, { layers }).length > 0;
-    map.getCanvas().style.cursor = over ? 'pointer' : 'crosshair';
+    const layers = POINTER_LAYERS();
+    const [hit] = layers.length ? map.queryRenderedFeatures(e.point, { layers }) : [];
+    map.getCanvas().style.cursor = hit ? 'pointer' : '';
+    // A building is pressable and gets the cursor, but it is not a pin and has
+    // nothing to spring — its own hover is the outline highlight.
+    //
+    // `hit.id` is checked, not assumed. Every pin source is declared with
+    // `generateId`, so one is always there; an expression built around an
+    // undefined id would be rejected outright by the style validator, which is
+    // too sharp an edge to leave resting on a property of the data.
+    const pin = hit && hit.id != null && hit.layer.id !== 'campus-directory-hit';
+    hoverPin(pin ? { layer: hit.layer.id, id: hit.id } : null);
   });
+
+  // The pointer leaving the canvas fires no mousemove, so without this a pin
+  // stays big and tinted while the pointer is over the sidebar.
+  map.on('mouseout', () => hoverPin(null));
 
   // Esc puts a selection back, which is the one thing every card on every map
   // agrees on. Both halves of it: a tap on a footprint opens a card without
@@ -4247,6 +4570,16 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     // Both ends already set: start over rather than accumulating markers.
     if (startPoint && endPoint) resetMap();
+
+    // With the virtual location on, every click is a destination — you are
+    // already standing somewhere and the dot says where. Asked here rather than
+    // baked into placeStart so an explicit "Start here" on a building's card
+    // still overrides it: that is somebody saying they want to leave from
+    // somewhere other than where they are, which is a real thing to want.
+    if (!startPoint && haveStart()) {
+      await placeEnd(snapped);
+      return;
+    }
 
     if (!startPoint) {
       placeStart(snapped);

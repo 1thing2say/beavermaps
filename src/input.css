@@ -1025,16 +1025,10 @@ body.navigating .app-chrome {
     flex: none;
 }
 
-/* The directory is the section that gives up height, and it is the right one to
-   ask: thirty rows is the longest thing in the column and it is a list you
-   scroll rather than read whole, so a squeeze costs it nothing a scroll does
-   not already cost. `1 1` rather than `0 1` so it also takes the SLACK on a
-   tall window — an empty strip under the last building with the legend floating
-   below it would read as a gap in the panel rather than the end of a list. */
-#buildings-panel {
-    flex: 1 1 auto;
-    min-height: 200px;
-}
+/* #buildings-panel was here, taking the column's slack under a `flex: 1 1 auto`.
+   It is a section of the debug card now — see .g-debug-directory further down,
+   where it is bounded instead, because a card that opens over the map has no
+   slack to give it. */
 
 /* --- the selected place ----------------------------------------------------
    What a tap on the map opens: a building's card, or the thinner one a lone pin
@@ -1053,10 +1047,10 @@ body.navigating .app-chrome {
    Which leaves nothing to stop it being squeezed — so it does not shrink at
    all.
    `0 1 auto` was survivable while everything under it came and went. It is not
-   now the column always ends in a directory and a legend: two sections that are
-   always open, always long, and between them took the whole column, leaving the
-   card at 36px — its title, and its facts, contents and both buttons clipped
-   off by .g-place's own overflow. The card is what you just tapped; it is the
+   now the column always ends in the legend: a section that is always open,
+   always long, and on its own took the rest of the column, leaving the card at
+   36px — its title, and its facts, contents and both buttons clipped off by
+   .g-place's own overflow. The card is what you just tapped; it is the
    last thing in the column that should give up room, not the first. If the
    column overflows with it open, the sidebar scrolls. */
 #place-panel {
@@ -1088,15 +1082,47 @@ body.navigating .app-chrome {
     flex: 1;
 }
 
-.g-place-facts {
-    margin: 3px 0 0;
-    font-size: 12px;
+/* The card's name, set as a place's name rather than a panel's heading. Apple
+   gives a place card a title big enough to wrap to two lines and lets it, which
+   is the right call for "Learning Resource Center" — a 16px heading with an
+   ellipsis in it is a name you have to guess at. */
+.g-place .g-panel-title {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+}
+
+/* What it is, then whose it is, in one grey line under the name. */
+.g-place-cat {
+    margin: 4px 0 0;
+    font-size: 13px;
+    line-height: 1.35;
     color: var(--g-text-dim);
 }
 
+/* No rule under the head. Every other panel in the column uses one to separate
+   a heading from its list, but this head is followed by the action tiles, and a
+   line between a place's name and the buttons for that place cuts the card in
+   half at the one seam that is not a seam. Space does the work instead. */
+.g-place .g-panel-head {
+    border-bottom: 0;
+    padding-bottom: 0;
+}
+
+/* The × sits in a filled disc at rest rather than only under the pointer: in
+   the corner of a card whose first line is a 26px name, a bare grey glyph does
+   not read as a control at all. */
+.g-place .g-icon-btn {
+    background: var(--g-surface-2);
+}
+
+.g-place .g-icon-btn:hover {
+    background: var(--g-line);
+}
+
 .g-place-body {
-    padding: 8px 16px 4px;
-    border-top: 1px solid var(--g-head-rule);
+    padding: 4px 16px 12px;
     /* The part that absorbs the column's leftover height, the way the results
        list and the legend list do. */
     overflow-y: auto;
@@ -1104,61 +1130,159 @@ body.navigating .app-chrome {
     min-height: 0;
 }
 
-.g-place-kicker {
-    margin: 0 0 6px;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--g-text-dim);
+/* --- the grouped lists -----------------------------------------------------
+   Apple's inset-grouped table, which is the shape of every place card they
+   ship: a plain heading in the card's own background, and under it ONE rounded
+   surface with hairlines between its rows. The two halves are what make it
+   work — a heading inside the group would read as a first row, and rows given
+   separate surfaces read as a stack of little cards rather than a table.
+
+   Ours held the same facts as two grey `·`-joined runs of text. The words were
+   the same; what a caption cannot do is let you look one of them up. */
+.g-place-section+.g-place-section {
+    margin-top: 18px;
 }
 
-.g-place-list {
+.g-place-section-title {
+    margin: 0 0 8px;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--g-text);
+}
+
+.g-place-group {
     margin: 0;
     padding: 0;
     list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+    border-radius: 12px;
+    background: var(--g-surface-2);
+    overflow: hidden;
 }
 
-.g-place-item-name {
-    display: block;
-    font-size: 13px;
+.g-place-field,
+.g-place-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 9px 14px;
+}
+
+/* The divider starts where the text does and runs to the edge — Apple's inset
+   hairline, and the one detail that keeps a group reading as a table instead of
+   as boxes. A pseudo-element rather than a border because a border cannot be
+   inset on one side only, and inset padding on the row would pull the text in
+   with it. */
+.g-place-group> :not(:first-child) {
+    position: relative;
+}
+
+.g-place-group> :not(:first-child)::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 14px;
+    border-top: 1px solid var(--g-line);
+}
+
+.g-place-field-label {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--g-text-dim);
+}
+
+.g-place-field-value,
+.g-place-entry-name {
+    margin: 0;
+    font-size: 14px;
     line-height: 1.35;
     color: var(--g-text);
 }
 
-.g-place-item-sub {
-    display: block;
-    margin-top: 1px;
+.g-place-entry-sub {
     font-size: 12px;
     line-height: 1.35;
     color: var(--g-text-dim);
 }
 
-.g-place-facilities {
-    margin: 0;
-    flex: none;
-    padding: 8px 16px;
-    border-top: 1px solid var(--g-head-rule);
-    font-size: 12px;
-    color: var(--g-text-dim);
-}
-
+/* --- the actions -----------------------------------------------------------
+   Tiles under the name rather than a row of pills at the foot of the card, and
+   both parts of that are deliberate. Under the name, because on a building with
+   a directory the old placement put the one control the card is FOR below a
+   scroll. Tiles, because "Start here" and "Go here" differ by a word and set as
+   two identical pills the only way to tell them apart was to read both — a
+   glyph does it at a glance. */
 .g-place-actions {
     display: flex;
     gap: 8px;
     flex: none;
-    padding: 10px 16px 12px;
-    border-top: 1px solid var(--g-head-rule);
+    padding: 12px 16px;
 }
 
-/* Both buttons split the row. The route panel's actions sit at their natural
-   width because there are three of them and one is primary; here there are two
-   and neither is the obvious default. */
-.g-place-actions .g-btn {
+.g-place-action {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 0;
+    padding: 10px 6px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--g-surface-2);
+    color: var(--g-text);
+    cursor: pointer;
+}
+
+.g-place-action:hover {
+    background: var(--g-hover);
+}
+
+/* A fixed box either way, so the two tiles' labels sit on the same baseline
+   whether or not the glyph above them is in a circle. `icon()` returns an svg
+   sized 100%, which is why the glyph is measured here and not on the svg. */
+.g-place-action-disc {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+}
+
+.g-place-action-disc svg {
+    width: 19px;
+    height: 19px;
+}
+
+.g-place-action-label {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.2;
+}
+
+/* The leading tile is the answer to the question the card was opened with, so
+   it is the filled one. Its glyph gets the disc the other does not: on a solid
+   field a bare white arrow is a shape, and in a circle it is a button — which
+   is exactly the difference Apple draws between Directions and Call. */
+.g-place-action--primary {
+    background: var(--g-blue);
+    color: #fff;
+}
+
+.g-place-action--primary:hover {
+    background: color-mix(in srgb, var(--g-blue) 88%, #000);
+}
+
+.g-place-action--primary .g-place-action-disc {
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.g-place-action--primary .g-place-action-disc svg {
+    width: 15px;
+    height: 15px;
 }
 
 .g-row {
@@ -1573,12 +1697,14 @@ body.navigating .app-chrome {
    kept whatever happens, for the same reason the results panel keeps a couple. */
 /* Floored a good deal higher than the panels above it, and this floor is doing
    real work rather than guarding an edge case.
-   Two long lists share the column now — thirty buildings and eleven categories
-   — and neither fits whole, so the only question is how the squeeze is split.
-   Proportional shrink gives it to the longer list and left the legend at four
-   rows with its provenance note sitting on top of them. So the legend states a
-   floor it will not go under, the directory above takes whatever is left, and
-   both scroll inside their own section with their headings still in view. */
+   It was settling a fight: the thirty-building directory sat above this and
+   neither list fit whole, so proportional shrink handed the room to the longer
+   one and left the legend at four rows with its provenance note sitting on top
+   of them. The directory is in the debug menu now and the fight is over, but
+   the floor stays — eleven categories still do not fit a short window with a
+   place card and a route open above them, and four rows of a key is not a key.
+   It gives up height last, and scrolls inside itself with its heading in
+   view. */
 .g-legend {
     flex: 0 1 auto;
     min-height: 264px;
@@ -1949,15 +2075,22 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     }
 }
 
-/* Apple centres a place card's name and sets it large and bold, with the
-   category underneath in grey — see the Seely Park card. The close button
-   leaves the flow to allow it, since a centred title cannot share a row with
-   something only one side has. */
+/* A place card's name, set large and bold with the category under it in grey.
+   It was CENTRED here, from the sheet Apple's phone app slides up. On the web —
+   which is the shape this sidebar actually is — the same card is hard against
+   the left margin and the title is bigger, because it is allowed to wrap to two
+   lines rather than being a sheet's handle. "Department of Chemistry - UCDAVIS"
+   over two left-aligned lines is the reference for all of this.
+
+   The close button still leaves the flow. It no longer has to — a left-aligned
+   title could share the row — but the title wraps under it that way instead of
+   stopping short, which is the whole reason the reference has room for two
+   lines of name and two round buttons on the same line. */
 [data-skin="apple"] .g-panel-head {
     position: relative;
-    justify-content: center;
-    text-align: center;
-    padding: 16px 44px 12px;
+    justify-content: flex-start;
+    text-align: left;
+    padding: 16px 16px 12px;
 }
 
 [data-skin="apple"] .g-panel-title {
@@ -1966,10 +2099,16 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     letter-spacing: -0.02em;
 }
 
+[data-skin="apple"] .g-place .g-panel-title {
+    font-size: 26px;
+    /* Room for the button that sits over the end of the first line. */
+    padding-right: 34px;
+}
+
 [data-skin="apple"] .g-panel-head .g-icon-btn {
     position: absolute;
-    top: 10px;
-    right: 10px;
+    top: 14px;
+    right: 12px;
 }
 
 /* ...but a SECTION of the sidebar is not a card, and the two are different
@@ -2264,10 +2403,10 @@ body.simulating .nav-sign::after {
 
 /* --- the debug menu --------------------------------------------------------
    The top-right corner, which is the only one genuinely free: the sidebar holds
-   the whole left edge down to the credit strip — directory, legend and all, so
-   the bottom-left is the sidebar's too — and the bottom right is the control
-   stack. This is the one place a card can appear without covering something a
-   visitor is using.
+   the whole left edge down to the credit strip — the legend runs to the foot of
+   it, so the bottom-left is the sidebar's too — and the bottom right is the
+   control stack. This is the one place a card can appear without covering
+   something a visitor is using.
 
    A .g-card like every other floating surface, so it wears whichever material
    the current look calls for — translucent and blurred under Apple, opaque
@@ -2322,6 +2461,33 @@ body.simulating .nav-sign::after {
     font-size: 11px;
     line-height: 1.35;
     color: var(--g-text-dim);
+}
+
+/* The campus directory, at the foot of the card.
+   ---------------------------------------------------------------------------
+   Thirty rows, and the only thing in here that can outgrow the card. Bounded
+   and scrolled INSIDE itself rather than left to lengthen the panel: the panel
+   scrolls too, but a section that pushes the switches above it off the top is
+   one you have to scroll back up to reach, and those switches are what somebody
+   opened this menu for.
+
+   Pulled out to the card's edges by the negative margin, and the rows given
+   back the 12px in their own padding, so a row highlights across the full
+   width — the way a list row does — while its text still lines up with
+   "Buildings" above it. The rows are otherwise the sidebar's own .g-row,
+   untouched, since this list opens the same building card the map does. */
+.g-debug-directory {
+    max-height: 240px;
+    margin: 0 -12px;
+}
+
+.g-debug-directory .g-row {
+    padding: 8px 12px;
+}
+
+#buildings-count {
+    margin: 0;
+    padding: 0 12px 4px;
 }
 
 /* The switches only mean something while the panel is up, and the panel sets
@@ -2458,9 +2624,9 @@ body.no-routing #side-panel {
 
     /* The legend used to be a second full-width sheet here, fighting the first
        one for the single slot a phone has for a card. It is a section of the
-       one column now, so it queues behind the directory instead of covering it
-       and the whole arrangement — the raised z-index, the auto-close on press —
-       is not needed. */
+       one column now, so it queues under whatever is above it instead of
+       covering it, and the whole arrangement — the raised z-index, the
+       auto-close on press — is not needed. */
 
     /* Out of the control stack and back to the top-right corner. The stack is
        at the bottom of the screen and the sheet covers the bottom of the

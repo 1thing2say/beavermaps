@@ -168,29 +168,23 @@
                 </div>
             </div>
 
-            <!-- The campus directory, and the sidebar's resting content.
+            <!-- The campus directory was here, between the route and the
+                 legend, and it is in the debug menu now.
                  ===========================================================
-                 Apple's sidebar is never empty — theirs holds Recents, and
-                 that is what makes it a sidebar rather than a search box with
-                 a shadow. This map has something better than a history to put
-                 there: the thirty buildings in src/directory.json, which is
-                 the same feature-per-building file the map itself is tapped
-                 through, so a row here and a tap on the footprint open exactly
-                 the same card.
+                 It was the sidebar's resting content, on the reasoning that
+                 Apple's sidebar is never empty — theirs holds Recents. But a
+                 list of every building is not what Recents is: Recents is
+                 short, and it is what YOU did. Thirty alphabetical rows that
+                 are the same thirty on every visit are an index, and the way
+                 you ask this map about a building is to type its name in the
+                 field above or tap it on the map. The list answered a question
+                 nobody had while permanently holding the tallest section of
+                 the column.
 
-                 Every building, not a chosen few. A directory that stops at
-                 the ten someone decided were the interesting ones is a
-                 directory you cannot trust to answer "is Raef Hall on this
-                 map", and thirty rows is a short scroll, not a wall. -->
-            <div id="buildings-panel" class="g-card g-panel">
-                <div class="g-panel-head g-panel-head--section">
-                    <div>
-                        <h2 class="g-panel-title">Buildings</h2>
-                        <p id="buildings-count" class="g-panel-sub"></p>
-                    </div>
-                </div>
-                <ul id="buildings-list" class="g-panel-list"></ul>
-            </div>
+                 It survives whole, as a section of the debug menu, because it
+                 is genuinely useful for the person BUILDING this — a
+                 directory.json that dropped a building shows up as a row that
+                 is not there. See the block in index.html's debug panel. -->
 
             <!-- The legend, and the only list of the eleven categories there
                  is now.
@@ -378,6 +372,25 @@
                 </span>
                 <input id="debug-gps" type="checkbox" class="g-switch">
             </label>
+
+            <!-- The campus directory, off src/directory.json. It held the
+                 sidebar until it did not earn the room; the note where it used
+                 to be says why. It is here rather than deleted because this is
+                 the one place a list of EVERY building is the right shape: the
+                 question it answers is "is the file complete", which is a
+                 question about the data and not about the campus.
+
+                 Last in the card, and the only section that scrolls inside
+                 itself, so thirty rows cannot push the switches above it out
+                 of reach. Not a .g-card — a card inside a card would blur
+                 twice under Apple — but the rows are the same .g-row the map's
+                 own lists use, and clicking one opens the same building card a
+                 tap on the footprint does. -->
+            <p class="g-layers-heading g-layers-heading--split">Buildings</p>
+            <div id="buildings-panel" class="g-panel g-debug-directory">
+                <p id="buildings-count" class="g-debug-hint"></p>
+                <ul id="buildings-list" class="g-panel-list"></ul>
+            </div>
         </div>
 
         <!-- Turn-by-turn banner. Hidden until navigation starts. During a

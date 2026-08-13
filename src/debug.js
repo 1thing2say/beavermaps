@@ -1,6 +1,6 @@
 // A back room for the person building this map.
 //
-// Two kinds of thing live in here, and it is worth being clear about which is
+// Three kinds of thing live in here, and it is worth being clear about which is
 // which, because they justify themselves differently.
 //
 //   GATHERED CONTROLS — map type, provider, look, legend. Every one of these
@@ -16,6 +16,13 @@
 //   business in the app proper. They exist so a piece of interface can be
 //   looked at without arranging the world that produces it: you should not have
 //   to walk onto the campus to see what the blue dot does.
+//
+//   READOUTS — the buildings directory at the foot of the card. It changes
+//   nothing; it is src/directory.json rendered as a list, so a building that
+//   fell out of the file is a row that is not there. It held the sidebar until
+//   it was moved here, which is why it is a full list with the map's own rows
+//   rather than a debug-shaped dump — the markup came with it. Nothing in this
+//   module touches it; main.js fills it when the file lands.
 //
 // ONE RULE, AND IT IS THE WHOLE DESIGN: with the menu closed, the app is
 // exactly the app. Every lie is gated on the menu being open, so a flag left

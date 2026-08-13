@@ -14,6 +14,7 @@
 // sitting in a blurred one, and its greys were hard-coded past both looks.
 
 import { icon } from './g-icons.js';
+import { poiFor, POI_CLASSES } from './poi.js';
 
 const FEET_PER_METRE = 10.7639; // squared: m² -> ft²
 
@@ -25,6 +26,36 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+/**
+ * One labelled fact, in Apple's grouped-list shape: the caption small and grey
+ * ABOVE the value rather than beside it.
+ *
+ * A `dl` row, because that is what this is — every one of them is a term and
+ * its definition, and the markup saying so is free. The wrapping div is what
+ * lets a row be one flex column; `dt`/`dd` alone cannot be grouped.
+ */
+function field(label, value) {
+  const row = el('div', 'g-place-field');
+  row.append(el('dt', 'g-place-field-label', label), el('dd', 'g-place-field-value', value));
+  return row;
+}
+
+/**
+ * A titled section of the card body: a heading, then one inset group.
+ *
+ * The heading is outside the group and the group is the rounded surface, which
+ * is the arrangement rather than a detail of it — it is what makes a run of
+ * facts read as one block with hairlines between the rows instead of as a stack
+ * of little cards. Returns both so the caller fills the group it was given.
+ */
+function section(title, tag = 'dl') {
+  const wrap = el('section', 'g-place-section');
+  wrap.append(el('h3', 'g-place-section-title', title));
+  const group = el(tag, 'g-place-group');
+  wrap.append(group);
+  return { wrap, group };
 }
 
 /**
@@ -58,19 +89,41 @@ function head(title, onClose) {
   return { row, text };
 }
 
-/** The two buttons every card on this map ends with, and their wiring. */
+/**
+ * The two buttons every card on this map ends with, and their wiring.
+ *
+ * Tiles rather than a row of text buttons: a glyph in a filled disc with its
+ * word underneath, the leading one tinted. That is Apple's place card — see
+ * Directions / Call / Website — and the shape is doing something the old row
+ * did not. "Start here" and "Go here" are four words that differ by one, and
+ * set as two identical pills the only thing telling them apart was reading
+ * both. An arrow leaving a point and a walker are different at a glance.
+ *
+ * Directions leads because it is what the card is usually opened for: you
+ * tapped a building to go to it. Start here is the other end of the same
+ * journey and is the one you press second, if at all.
+ *
+ * They move together. Both are hidden by `body.no-routing` when the debug
+ * menu's routing switch is off, which is why they are one row and not two
+ * buttons the caller places.
+ */
 function actions(coords, name, { onStart, onEnd }) {
   const row = el('div', 'g-place-actions');
 
-  const start = el('button', 'g-btn g-btn--ghost', 'Start here');
-  start.type = 'button';
-  start.addEventListener('click', () => onStart(coords, name));
+  function tile(glyph, label, primary, onPress) {
+    const button = el('button', `g-place-action${primary ? ' g-place-action--primary' : ''}`);
+    button.type = 'button';
+    const disc = el('span', 'g-place-action-disc');
+    disc.innerHTML = icon(glyph);
+    button.append(disc, el('span', 'g-place-action-label', label));
+    button.addEventListener('click', () => onPress(coords, name));
+    return button;
+  }
 
-  const go = el('button', 'g-btn g-btn--primary', 'Go here');
-  go.type = 'button';
-  go.addEventListener('click', () => onEnd(coords, name));
-
-  row.append(start, go);
+  row.append(
+    tile('directions', 'Directions', true, onEnd),
+    tile('walk', 'Start here', false, onStart),
+  );
   return row;
 }
 
@@ -121,7 +174,9 @@ export function pinCard({ coords, kind, name }, { onStart, onEnd, onClose }) {
   // bike rack" is the same word printed twice at two sizes.
   const { row, text } = head(name ?? KIND_NAMES[kind] ?? 'Marker', onClose);
   if (name && KIND_NAMES[kind] && KIND_NAMES[kind] !== name) {
-    text.append(el('p', 'g-panel-sub', KIND_NAMES[kind]));
+    // The same grey line the building card runs, for the same reason: it is
+    // what this thing IS, under what it is called.
+    text.append(el('p', 'g-place-cat', KIND_NAMES[kind]));
   }
   card.append(row);
 
@@ -143,48 +198,71 @@ export function buildingCard(props, { onStart, onEnd, onClose }) {
 
   const { row, text } = head(name, onClose);
 
-  // Only worth showing when it says something the heading does not.
-  if (officialName && officialName !== name) text.append(el('p', 'g-panel-sub', officialName));
+  // One grey line under the name, the way Apple runs "University Department ·
+  // University of California, Davis" under a place: WHAT it is, then WHOSE it
+  // is. The classification comes from the same table that picks the building's
+  // disc on the map, so the line and the marker cannot disagree, and my campus
+  // name is only worth its half when it says something the heading does not.
+  const kind = POI_CLASSES[poiFor(name)];
+  const qualifiers = [];
+  if (kind) qualifiers.push(kind);
+  if (officialName && officialName !== name) qualifiers.push(officialName);
+  if (qualifiers.length) text.append(el('p', 'g-place-cat', qualifiers.join(' · ')));
 
-  const facts = [`${Math.round(area * FEET_PER_METRE).toLocaleString()} sq ft`];
-  if (height) facts.push(`${Math.round(height * 3.28084)} ft tall`);
-  text.append(el('p', 'g-place-facts', facts.join(' · ')));
-
-  if (parts?.length) text.append(el('p', 'g-place-facts', parts.join(' · ')));
   card.append(row);
 
-  if (contents.length) {
-    const body = el('div', 'g-place-body');
-    body.append(el('p', 'g-place-kicker',
-      contents.length === 1 ? '1 destination inside' : `${contents.length} destinations inside`));
-
-    const list = el('ul', 'g-place-list');
-    for (const entry of contents) {
-      // No class of its own: the two spans below are blocks in a gapped flex
-      // column, which is the whole of what a row here needs to be.
-      const item = el('li');
-      item.append(el('span', 'g-place-item-name', entry.name));
-      if (entry.description) {
-        const short = entry.description.length > TRIM
-          ? `${entry.description.slice(0, TRIM).trimEnd()}…`
-          : entry.description;
-        item.append(el('span', 'g-place-item-sub', short));
-      }
-      list.append(item);
-    }
-    body.append(list);
-    card.append(body);
-  }
-
-  if (facilities.length) {
-    card.append(el('p', 'g-place-facilities', facilities
-      .map((f) => (f.n ? `${f.name} ×${f.n}` : f.name))
-      .join(' · ')));
-  }
-
+  // Above the body rather than at the foot of the card. It was last, under
+  // everything, which put the one thing the card is FOR behind a scroll on any
+  // building with a directory — you tapped it to walk there.
+  //
   // No entrance means no routing node was found near the walls, which would
   // make both buttons lie about what they do.
   if (entrance) card.append(actions(entrance, name, { onStart, onEnd }));
 
+  const body = el('div', 'g-place-body');
+
+  // The facts, as a grouped list rather than the two grey `·`-joined lines they
+  // were. Same words, but "12,400 sq ft · 34 ft tall" is a caption you skim and
+  // a labelled row is one you can look something up in, and this is the half of
+  // the card people actually read a number out of.
+  const details = section('Details');
+  details.group.append(field('Floor area',
+    `${Math.round(area * FEET_PER_METRE).toLocaleString()} sq ft`));
+  if (height) details.group.append(field('Height', `${Math.round(height * 3.28084)} ft`));
+  // Several footprints folded into one building — the wings my campus numbers
+  // separately. Plural label only when it is one.
+  if (parts?.length) {
+    details.group.append(field(parts.length === 1 ? 'Section' : 'Sections', parts.join(' · ')));
+  }
+  if (facilities.length) {
+    details.group.append(field('Facilities', facilities
+      .map((f) => (f.n ? `${f.name} ×${f.n}` : f.name))
+      .join(' · ')));
+  }
+  body.append(details.wrap);
+
+  if (contents.length) {
+    // The count is the heading, not a kicker above one: "5 destinations inside"
+    // IS the title of this section, and a separate "Inside" over it would be a
+    // second heading saying the same thing.
+    const inside = section(
+      contents.length === 1 ? '1 destination inside' : `${contents.length} destinations inside`,
+      'ul',
+    );
+    for (const entry of contents) {
+      const item = el('li', 'g-place-entry');
+      item.append(el('span', 'g-place-entry-name', entry.name));
+      if (entry.description) {
+        const short = entry.description.length > TRIM
+          ? `${entry.description.slice(0, TRIM).trimEnd()}…`
+          : entry.description;
+        item.append(el('span', 'g-place-entry-sub', short));
+      }
+      inside.group.append(item);
+    }
+    body.append(inside.wrap);
+  }
+
+  card.append(body);
   return card;
 }

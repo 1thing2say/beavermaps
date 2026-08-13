@@ -116,6 +116,11 @@ export function cubicBezier(x1, y1, x2, y2) {
 /** GROW_EASE as a function. Parsed from the string so there is one of it. */
 export const growEase = cubicBezier(...GROW_EASE.match(/-?[\d.]+/g).map(Number));
 
+/** ...and the way out, for the callers that ease a symbol layer rather than an
+ *  element. Parsed the same way and from the same constant, so the DOM lift and
+ *  a layer settling back down cannot end up on two different curves. */
+export const shrinkEase = cubicBezier(...SHRINK_EASE.match(/-?[\d.]+/g).map(Number));
+
 /**
  * The lifted head's width in CSS pixels, ring included.
  *
