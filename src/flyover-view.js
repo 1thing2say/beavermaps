@@ -50,6 +50,7 @@ import { spinnerOverlay } from './spinner.js';
 // because a tile measured on one scale against a box built on another is a
 // comparison of two different things that happen to share a unit.
 import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
+import { pinLayer, SETTLED_MS, QUIET_MS } from './flyover-pin.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
@@ -209,6 +210,7 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   Tile3DLayer: geo.Tile3DLayer,
   Tiles3DLoader: tiles.Tiles3DLoader,
   LineLayer: layers.LineLayer,
+  IconLayer: layers.IconLayer,
   Clip: geoClip(ext.ClipExtension, core.COORDINATE_SYSTEM),
 })).catch((error) => {
   // Not cached on failure, so a flyover opened on a dropped connection can be
@@ -449,6 +451,28 @@ const stage = {
    * would be culled against the first one's box.
    */
   box: null,
+  /**
+   * The current building's roof point, for the same reason and read by the same
+   * callback: it is what "the building has arrived" is tested against.
+   */
+  roof: null,
+  /**
+   * When a tile last finished loading, for anything waiting on the picture to
+   * stop changing. Belongs to the stage rather than to a card because
+   * `onTileLoad` belongs to the layer, which outlives every card.
+   */
+  lastLoad: 0,
+  /**
+   * The grid and the tiles for the current building, held so the pin can be
+   * animated without rebuilding them.
+   *
+   * deck.gl takes the whole layer list on every `setProps`, and the pin moves on
+   * every frame — so without this the tile layer would be reconstructed sixty
+   * times a second. That is survivable (the tileset is keyed by `data` and would
+   * not refetch) but it throws away and rebuilds a composite layer's sublayers
+   * for no reason, which is exactly the churn a low-end device cannot afford.
+   */
+  base: [],
 };
 
 /**
@@ -480,6 +504,48 @@ function makeGrid({ LineLayer }, centre, span) {
     getWidth: 1,
     widthMinPixels: 1,
   });
+}
+
+/**
+ * The coarsest a tile may be and still count as "the building has arrived".
+ *
+ * `contentAvailable` alone was not enough, and the photograph of it is
+ * unambiguous: the spinner came off at 1.45 s over a viewport of nothing but
+ * grid and the building appeared at 2.6 s — more than a second of an empty box
+ * with no spinner over it, and a pin dropping onto blank ground in the middle of
+ * it. Some tile really had loaded; it was just not a tile of my campus. Google's
+ * tileset descends through 64.20, 32.10, 16.05, 8.03, 4.01 and 2.01 m over this
+ * campus, and the coarse levels are ground that has been simplified until a
+ * building is a bump in it.
+ *
+ * 8.03 is the level above the 4.01 the traversal is actually aiming at (see
+ * SCREEN_SPACE_ERROR), and 16 was tried first and was still half a second early:
+ * a 16 m tile of my campus clipped to a 78 m perimeter is pale, almost flat ground,
+ * which against this grid is indistinguishable from no tile at all. It was being
+ * drawn. It just did not look like anything. One level finer is where a roof
+ * with edges on it appears, and it is still two levels coarser than the leaves,
+ * so a slow connection is not held under a spinner waiting for detail nobody
+ * asked for.
+ */
+const READY_ERROR_M = 8.5;
+
+/**
+ * Whether this tile is the building the card is about, rather than some ground
+ * that happens to be under it.
+ *
+ * Two tests, and the second is the one that matters for the pin: fine enough to
+ * be a building, and covering the ROOF the pin is going to land on. A pin
+ * dropping onto ground that has not loaded is worse than a pin that is late,
+ * because the first reads as a bug and the second reads as loading.
+ */
+function showsSubject(tile, roof) {
+  if (!(tile.geometricError <= READY_ERROR_M)) return false;
+  if (!roof) return true;
+  let extent;
+  try { extent = tile.boundingBox; } catch { return true; }
+  if (!extent) return true;
+  const [lo, hi] = extent;
+  return roof[0] >= lo[0] && roof[0] <= hi[0] && roof[1] >= lo[1] && roof[1] <= hi[1];
 }
 
 function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
@@ -548,12 +614,17 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
             for (const tile of kept.splice(MAX_TILES_DRAWN)) tile.unselect();
           }
 
-          if (kept.some((tile) => tile.contentAvailable)) stage.onReady?.();
+          if (kept.some((tile) => tile.contentAvailable && showsSubject(tile, stage.roof))) {
+            stage.onReady?.();
+          }
           return kept;
         },
       },
     },
     onTileLoad: (tile) => {
+      // What "the picture has stopped changing" is measured against. See
+      // QUIET_MS in src/flyover-pin.js.
+      stage.lastLoad = performance.now();
       // Collected from the tiles themselves. Google's copyright is not a
       // constant — it is a property of whose imagery is under you — and it
       // arrives in each glTF's `asset.copyright`, not in the tileset JSON. The
@@ -603,7 +674,7 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
   });
 }
 
-function buildStage(tools, key, view, box, centre, span) {
+function buildStage(tools, view) {
   const host = document.createElement('div');
   host.className = 'g-flyover-stage';
 
@@ -624,7 +695,7 @@ function buildStage(tools, key, view, box, centre, span) {
     // a transparent clear, which is what this wants: the grid behind the canvas
     // shows through everywhere the clip discarded, which is the whole point of
     // drawing a grid there.
-    layers: [makeGrid(tools, centre, span), makeLayer(tools, key, box)],
+    layers: stage.base,
   });
 }
 
@@ -645,11 +716,23 @@ function buildStage(tools, key, view, box, centre, span) {
  * @param {number}   options.reach    Half-width of the tile box, metres.
  * @param {number[][]} options.box    [[w, s], [e, n]] tiles are loaded inside.
  * @param {string}  [options.name]    For the spinner's caption and the a11y label.
+ * @param {number[]} [options.roof]   [lon, lat, z] the pin drops onto; see roofOf.
  * @returns {{ el: HTMLElement, destroy: () => void }}
  */
-export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
+export function createFlyover({ key, centre, span, pitch, reach, box, name, roof }) {
   /** Identity for this card's claim on the shared canvas. */
   const token = {};
+
+  /**
+   * When the pin's fall began, or 0 while there is still nothing to fall onto.
+   *
+   * Set by the orbit once two things are true — the roof's own tile has content
+   * and the tileset has gone quiet — and read by it on every frame after. The
+   * orbit starts turning before either, so this cannot be the orbit's own clock.
+   */
+  let dropAt = 0;
+  /** Whether the roof this pin is aimed at has actually loaded. */
+  let roofReady = false;
 
   const el = document.createElement('figure');
   el.className = 'g-flyover';
@@ -694,6 +777,7 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
       // building nobody is looking at is the sort of thing that shows up as a
       // blank viewport on the NEXT card.
       stage.box = null;
+      stage.roof = null;
       stage.host?.remove();
     }
   }
@@ -716,10 +800,12 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
     const view = { longitude, latitude, zoom: zoomFor(span, width, latitude), pitch, bearing: 0 };
 
     stage.box = box ?? null;
+    stage.roof = roof ?? null;
+    stage.base = [makeGrid(tools, centre, span), makeLayer(tools, key, box)];
 
     if (!stage.deck) {
       try {
-        buildStage(tools, key, view, box, centre, span);
+        buildStage(tools, view);
       } catch (error) {
         fail(error?.message ?? 'Aerial view unavailable');
         return;
@@ -731,7 +817,7 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
       // construction, so a new instance is how either is changed.
       stage.deck.setProps({
         views: new tools.MapView({ id: 'flyover' }),
-        layers: [makeGrid(tools, centre, span), makeLayer(tools, key, box)],
+        layers: stage.base,
       });
     }
     stage.owner = token;
@@ -747,6 +833,11 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
     stage.onReady = () => {
       if (dead) return;
       credit.textContent = [...stage.credits].join(', ') || FALLBACK_CREDIT;
+      // Half of the drop's condition. The other half — the tileset going quiet,
+      // so the building is DRAWN and not merely loaded — is checked per frame in
+      // the orbit, because it is a thing that becomes true with the passage of
+      // time rather than with the arrival of a tile. See QUIET_MS.
+      roofReady = true;
       // The spinner goes as soon as there is something to look at, rather than
       // when the whole set has landed. Waiting for the traversal to go quiet
       // would hold a spinner over a scene that is already showing the building;
@@ -757,12 +848,36 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
       busy.remove();
     };
 
+    // The pin's layer for a given moment of the drop, or nothing at all before
+    // there is a building under it. `roof` is absent for anything src/roofs.json
+    // has no measured centre for, and an unmarked flyover is a better answer
+    // than one marking a guess.
+    // `ms` of null means "not yet": before the drop has a reason to start there
+    // is no pin at all, rather than a pin parked somewhere. `roof` is absent for
+    // anything src/roofs.json has no measured centre for, and an unmarked
+    // flyover is a better answer than one marking a guess.
+    const pin = (ms) => (roof && ms !== null
+      ? [pinLayer(tools, { roof, span, width, height, ms })]
+      : []);
+
     // A still frame under `prefers-reduced-motion`. The three-quarter bearing
     // is not arbitrary — a building photographed square-on from the air reads
     // as a plan, and turning it off-axis is what gives it two visible faces and
     // a depth to it. It is the frame the orbit would have paused at.
+    //
+    // The pin still lands, because it is not decoration — it is the answer to
+    // "which of these buildings". What it loses is the fall: `settled` is past
+    // the end of the shutter, so every ghost has caught up and the pin is simply
+    // there. It has to be redrawn on `onReady` rather than once here, because at
+    // this point the tiles have not arrived and neither has the drop's clock.
     if (prefersStill()) {
-      stage.deck.setProps({ viewState: { ...view, bearing: 35 } });
+      const settle = () => stage.deck?.setProps({
+        viewState: { ...view, bearing: 35 },
+        layers: [...stage.base, ...pin(roofReady ? SETTLED_MS : null)],
+      });
+      const ready = stage.onReady;
+      stage.onReady = () => { ready(); settle(); };
+      settle();
       return;
     }
 
@@ -773,7 +888,14 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
       // ORBIT_MS whether the tab is rendering at 120fps or dropping frames
       // decoding tiles — which is exactly when this is running.
       const bearing = (((now - start) / ORBIT_MS) * 360) % 360;
-      stage.deck.setProps({ viewState: { ...view, bearing } });
+      // Nothing falls onto a building that is not on screen yet. Held until the
+      // roof's tile has content AND nothing has loaded for QUIET_MS, which is
+      // what "the picture has stopped changing" looks like from here.
+      if (!dropAt && roofReady && now - stage.lastLoad > QUIET_MS) dropAt = now;
+      stage.deck.setProps({
+        viewState: { ...view, bearing },
+        layers: [...stage.base, ...pin(dropAt ? now - dropAt : null)],
+      });
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);

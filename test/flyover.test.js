@@ -18,8 +18,10 @@ import assert from 'node:assert/strict';
 import { load } from './helpers.js';
 import {
   tierOf, canFlyOver, framing, boxOf, footprintExtent, FLYOVER_TIER, MIN_AREA_M2, STALE_IMAGERY,
-  M_PER_DEG_LAT, M_PER_DEG_LON,
+  M_PER_DEG_LAT, M_PER_DEG_LON, MIN_SPAN_M, roofOf,
 } from '../src/flyover.js';
+import { fallen, DROP_MS, SETTLED_MS, pinHeight, dropMetres } from '../src/flyover-pin.js';
+import { pushPinSvg, PUSH_PIN, PUSH_PIN_RED } from '../src/push-pin.js';
 import { poiFor } from '../src/poi.js';
 
 const buildings = load('directory').features;
@@ -114,7 +116,7 @@ test('framing pulls in for a small building and stops short for a large one', ()
   assert.ok(small.span < big.span);
   // Both clamped, which is the part that matters: an unclamped span would orbit
   // Adaptive PE from 36 m and the Parking Garage from a quarter of a mile.
-  assert.equal(small.span, 230);
+  assert.equal(small.span, MIN_SPAN_M);
   assert.equal(big.span, 800);
   // A missing footprint must still produce a usable camera rather than NaN.
   assert.ok(Number.isFinite(framing(undefined).span));
@@ -221,7 +223,7 @@ test('a building with no footprint still gets the framing it always had', () => 
   // Every real my campus building is in this range — the largest is the garage at
   // 8,629 m2 — so in practice this is the whole of the fallback.
   for (const area of [173, 631, 5403, 8629]) {
-    const expected = Math.max(230, Math.min(800, Math.sqrt(area) * 4));
+    const expected = Math.max(MIN_SPAN_M, Math.min(800, Math.sqrt(area) * 4));
     assert.equal(framing(area).span, expected);
     assert.ok(Math.abs(framing(area).reach - expected * 0.2) < 1e-9);
   }
@@ -286,4 +288,184 @@ test('the size bound rejects a planet-scale slab and keeps a building-scale tile
   assert.ok(953 <= maxTileSpan);
   assert.ok(3812 > maxTileSpan);
   assert.ok(30_630 > maxTileSpan);
+});
+
+// --- the framing floor --------------------------------------------------------
+
+test('the framing floor stops where the imagery does, not before', () => {
+  // MIN_SPAN_M is the closest the camera goes, and the claim in its comment is
+  // that it is set by Google's own resolution rather than by taste. Checked
+  // here because the failure it prevents is silent: a smaller number still
+  // renders, it just renders enlarged blobs, and nobody reading the diff would
+  // know which side of the imagery's limit they had landed on.
+  const DEVICE_PX = 640; // ~320 CSS px of sidebar, drawn at 2x
+  const LEAF_ERROR_M = 2.01; // finest tiles over my campus; see src/roofs.json
+  const perPixel = MIN_SPAN_M / DEVICE_PX;
+  const leafPx = LEAF_ERROR_M / perPixel;
+
+  // Above SCREEN_SPACE_ERROR (8, in src/flyover-view.js), so the traversal
+  // actually reaches the finest level at the tightest framing rather than
+  // stopping one short of it and enlarging that.
+  assert.ok(leafPx > 8, `leaves project to ${leafPx.toFixed(1)} px, under the 8 px threshold`);
+  // And not so far above it that the leaves are being magnified past their own
+  // detail, which is the thing a lower floor would buy.
+  assert.ok(leafPx < 14, `leaves project to ${leafPx.toFixed(1)} px — the camera is too close`);
+});
+
+test('most buildings get the framing that was designed, not the floor', () => {
+  // The regression this catches is the one the 230 m floor WAS: two thirds of
+  // the campus framed at whatever the clamp said instead of the quarter-frame
+  // the arithmetic promises, with Operations at 6.8% of the picture. A future
+  // change to BOX_MARGIN, BOX_REACH or the floor that quietly re-clamps the
+  // campus fails here rather than in somebody's eyes.
+  const rows = directory.filter((row) => canFlyOver(asCard(row)));
+  const framed = rows.map((row) => {
+    const feature = buildings.find((f) => (f.properties ?? f).name === row.name);
+    const extent = footprintExtent(feature?.geometry);
+    const half = extent
+      ? Math.max(extent.halfWidth, extent.halfHeight)
+      : Math.sqrt(row.area_m2) / 2;
+    return { name: row.name, frac: (2 * half) / framing(row.area_m2, extent).span };
+  });
+
+  const designed = framed.filter((f) => f.frac > 0.249).length;
+  assert.ok(designed >= framed.length * 0.6,
+    `only ${designed} of ${framed.length} buildings reach the designed 25% of frame`);
+  // Nothing may be smaller than an eighth of the picture. Below that a building
+  // is one roof among several and the shot has stopped being about it, which is
+  // what the pin exists to paper over and should not have to.
+  const worst = framed.reduce((a, b) => (a.frac < b.frac ? a : b));
+  assert.ok(worst.frac > 0.12,
+    `${worst.name} is ${(worst.frac * 100).toFixed(1)}% of the frame`);
+});
+
+// --- the pin ------------------------------------------------------------------
+
+test('every building that flies has a measured roof to drop a pin on', () => {
+  // The silent failure this exists for: a building added to the directory
+  // without regenerating src/roofs.json flies perfectly well and is simply
+  // never marked. Nothing errors, nothing looks broken, and the one feature
+  // that says WHICH building you are looking at is missing on exactly the
+  // building nobody has seen before.
+  const missing = directory
+    .filter((row) => canFlyOver(asCard(row)))
+    .filter((row) => !roofOf(row.name))
+    .map((row) => row.name);
+  assert.deepEqual(missing, [],
+    `no roof centre for ${missing.join(', ')} — rerun scripts/build-roofs.mjs`);
+});
+
+test('a roof centre is a point in the sky above its own building', () => {
+  for (const row of directory.filter((r) => canFlyOver(asCard(r)))) {
+    const roof = roofOf(row.name);
+    assert.equal(roof.length, 3, `${row.name}'s roof has no height`);
+    const [lon, lat, z] = roof;
+    // On campus. A transposed or mis-signed coordinate lands in the Indian
+    // Ocean and the flyover would orbit an empty grid with a pin in it.
+    assert.ok(lon > -121.352 && lon < -121.342, `${row.name} roof longitude ${lon}`);
+    assert.ok(lat > 38.644 && lat < 38.654, `${row.name} roof latitude ${lat}`);
+    // my campus's ground runs about -5 to -1 m in this datum and its tallest building
+    // is 14 m, so a roof outside this band is a datum mistake rather than a
+    // building. Negative is normal here: the geoid sits about 32 m below the
+    // ellipsoid at my campus.
+    assert.ok(z > -8 && z < 30, `${row.name} roof at ${z} m is outside my campus's range`);
+  }
+});
+
+test('the pin falls rather than easing, and lands exactly on the roof', () => {
+  const drop = 100;
+  assert.equal(fallen(0, drop), drop, 'the pin does not start in the sky');
+  assert.equal(fallen(-50, drop), drop, 'a drop that has not begun is already falling');
+  assert.equal(fallen(DROP_MS, drop), 0, 'the pin does not land on the roof');
+  assert.equal(fallen(DROP_MS * 10, drop), 0, 'the pin keeps going after it lands');
+  assert.equal(fallen(SETTLED_MS, drop), 0);
+
+  // Monotonic, and ACCELERATING — the half-way point of a free fall is a
+  // quarter of the way down, not half. An ease-out would arrive slowest exactly
+  // where the motion blur has to read, so this is the property that matters
+  // rather than the shape of any particular curve.
+  let previous = drop;
+  for (let ms = 0; ms <= DROP_MS; ms += 20) {
+    const height = fallen(ms, drop);
+    assert.ok(height <= previous, `the pin rose between ${ms - 20} and ${ms} ms`);
+    previous = height;
+  }
+  assert.ok(fallen(DROP_MS / 2, drop) > drop * 0.7, 'the fall is not accelerating');
+
+  // The shutter has to outlast the fall or the trail is cut off mid-flight.
+  assert.ok(SETTLED_MS > DROP_MS);
+});
+
+test('the pin and its fall both fit in the sky the shot actually has', () => {
+  // THE MEASUREMENT THIS FILE EXISTS TO PROTECT. The flyover is a pitched
+  // three-quarter shot of a building that fills a quarter of the frame, so
+  // there is very little sky in it: photographed at 368x230, the Library's roof
+  // projects about 85 px below the top edge. Everything above that is
+  // off-camera, and the pin plus its whole fall have to live inside it — the
+  // first version dropped 88 m, which was ten times the room available, and the
+  // pin was invisible for the entire drop and simply appeared, landed.
+  //
+  // These are the two numbers that failure would move, checked against the
+  // headroom rather than against themselves.
+  const HEADROOM_PX = 85;
+  const [width, height] = [368, 230];
+  const px = pinHeight(height);
+  assert.ok(px < HEADROOM_PX, `a ${px} px pin does not fit under a ${HEADROOM_PX} px sky`);
+
+  // The fall, converted back into pixels the way the renderer will draw it.
+  // ALTITUDE_GAIN is folded into `dropMetres`, so this round-trips through the
+  // real arithmetic rather than restating it.
+  const fallPx = dropMetres(196, width, height) * 2.11 * (width / 196);
+  assert.ok(fallPx > px * 1.5,
+    `a ${fallPx.toFixed(0)} px fall on a ${px} px pin is a hop, not a drop`);
+  // Most of the fall has to be ON SCREEN. The pin may start just above the top
+  // edge — a thing falling INTO a picture does — but if it clears the frame by
+  // more than its own height the drop happens where nobody can see it.
+  assert.ok(px + fallPx < HEADROOM_PX + px,
+    `the fall starts ${(px + fallPx - HEADROOM_PX).toFixed(0)} px above the frame`);
+
+  // A viewport of nothing must not produce a pin of nothing: the flyover
+  // measures its own element, and a card built into a hidden panel measures 0.
+  assert.ok(pinHeight(0) > 0);
+  assert.ok(pinHeight(4000) < 120, 'the pin grows without limit on a large screen');
+});
+
+test('the push pin marks a place with its point', () => {
+  // `anchorY: height` in src/flyover-pin.js is only correct because the tip is
+  // at the very bottom of the box. If the drawing ever gains padding under the
+  // point, every pin on the campus rises off its roof by that much.
+  assert.equal(PUSH_PIN.tipY, PUSH_PIN.h);
+  assert.ok(PUSH_PIN.aspect > 1, 'the pin is not taller than it is wide');
+});
+
+test('the push pin rasterises: intrinsic size on demand, percentages otherwise', () => {
+  // The defect this catches: an SVG sized in percentages has no natural
+  // dimensions, so a data: URI of one decodes at the browser's 300x150 default.
+  // deck.gl loads icons exactly that way, so the pin would reach the atlas
+  // squashed and blurred with nothing in the console to say so.
+  const sized = pushPinSvg({ height: 128 });
+  assert.match(sized, /width="62\.\d+" height="128"/);
+  assert.ok(!sized.includes('100%'));
+  assert.match(pushPinSvg(), /width="100%" height="100%"/);
+
+  // Every gradient the drawing refers to has to exist under the key it was
+  // asked for, or the browser paints the shape black and says nothing.
+  const svg = pushPinSvg({ id: 'probe' });
+  for (const [, ref] of svg.matchAll(/url\(#([^)]+)\)/g)) {
+    assert.ok(svg.includes(`id="${ref}"`), `no gradient defined for ${ref}`);
+  }
+  assert.ok(svg.startsWith('<svg') && svg.endsWith('</svg>'));
+});
+
+test('recolouring the pin spins the hue and leaves the steel alone', () => {
+  const red = pushPinSvg({ colour: PUSH_PIN_RED });
+  const green = pushPinSvg({ colour: '#1e8e3e' });
+  assert.notEqual(red, green);
+  // The needle is measured chrome and must not follow the ball: a green pin
+  // with a green spike is a drawing of a different object.
+  for (const steel of ['#65615a', '#524c42', '#bdb5af']) {
+    assert.ok(green.includes(steel), `the needle lost ${steel} when recoloured`);
+  }
+  // ...while the body did move.
+  assert.ok(!green.includes('#e60313'));
 });

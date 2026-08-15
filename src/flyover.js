@@ -32,6 +32,11 @@
 // static overhead shot tomorrow and a defibrillator could not, and a table that
 // records why something was refused is the one you can extend.
 
+// An import attribute, which the other JSON imports in this app do not need:
+// they are only ever loaded by Vite, and this file is also loaded directly by
+// node under test/flyover.test.js, where a bare JSON import is a hard error.
+import roofs from './roofs.json' with { type: 'json' };
+
 /** The tiers, ordered so `>=` means "at least this much of a thing". */
 export const FLYOVER_TIER = { POINT: 0, FLAT: 1, SOLID: 2 };
 
@@ -188,6 +193,25 @@ export function tierOf({ name, poi, labelKind, area_m2: area } = {}) {
 export const canFlyOver = (thing) => tierOf(thing) >= FLYOVER_TIER.SOLID;
 
 /**
+ * Where a building's roof is, as [lon, lat, z] with z in metres above the WGS84
+ * ellipsoid — the point the flyover's pin is dropped onto.
+ *
+ * Measured, not modelled. scripts/build-roofs.mjs reads it off Google's own leaf
+ * tiles at 2.01 m geometric error, so the pin lands on the roof the viewer is
+ * actually looking at rather than on a height this app believes the roof to be.
+ * The two disagree: my campus's ground sits between -5 and -1 m in this datum and the
+ * heights in src/directory.json are above local ground, so anything derived
+ * would have to guess at the offset per building.
+ *
+ * Null for a name with no measured roof, which the renderer treats as "no pin"
+ * rather than as an error. Only 30 of my campus's rows have one, and a thing that
+ * flies without a roof — a footprint with no directory row behind it — is
+ * better shown unmarked than marked in the wrong place.
+ */
+const ROOFS = new Map(roofs.buildings.map((row) => [row.name, row.centre]));
+export const roofOf = (name) => (name ? ROOFS.get(name.trim()) ?? null : null);
+
+/**
  * How wide a piece of ground the camera should hold in frame, in metres.
  *
  * SIZED FROM THE FOOTPRINT WHEN THERE IS ONE, and this is the whole of the fix
@@ -224,7 +248,7 @@ export function framing(area, extent) {
   // the inversion that makes this work. The old order — pick a span from the
   // area, take a fifth of it as the reach — could only ever produce a square
   // proportional to sqrt(area), so no clamp on it could rescue a long building.
-  const span = Math.max(230, Math.min(800, required / BOX_REACH));
+  const span = Math.max(MIN_SPAN_M, Math.min(800, required / BOX_REACH));
   return {
     /** Ground width the viewport should span, in metres. */
     span,
@@ -242,6 +266,33 @@ export function framing(area, extent) {
     reach: Math.max(required, span * BOX_REACH),
   };
 }
+
+/**
+ * The closest the camera is allowed to get, as a ground width in metres.
+ *
+ * THE FLOOR IS WHAT MADE SMALL BUILDINGS UNREADABLE, and it was doing it to two
+ * thirds of the campus. Everything below it is framed at whatever the floor
+ * says rather than at the 25% of frame the arithmetic promises, so at 230 m
+ * Operations — 16 m across — was 6.8% of the picture: a shed, in an aerial shot
+ * of four other buildings. Twenty-one of the thirty that fly were clamped, from
+ * 6.8% up to 23.9%, and only nine got the framing that was designed.
+ *
+ * 130 is not a taste. It is where Google's imagery stops having anything more to
+ * show, so it is the point past which moving the camera closer magnifies rather
+ * than reveals. The finest tiles over my campus carry a geometric error of 2.01 m; the
+ * viewport is about 320 CSS px wide and drawn at 2x, so the span lands on 640
+ * device pixels and a 130 m span puts 0.20 m on a pixel — which is 2.01 m across
+ * ten of them. Below that the leaves are being enlarged past their own detail
+ * and the roof turns to soft blobs, which is a worse answer than a small
+ * building, because a small building is at least sharp.
+ *
+ * It has a second effect worth knowing about: at 0.20 m per pixel the 2.01 m
+ * leaves project to ~10 px against SCREEN_SPACE_ERROR's 8, so a small building
+ * now reaches the FINEST level where at 230 m it stopped at the second finest.
+ * More tiles per building, but over a box that shrank with the span — `reach` is
+ * a fifth of it — so the ground loaded goes down, not up.
+ */
+export const MIN_SPAN_M = 130;
 
 /**
  * The perimeter's half-width, as a multiple of the framed span.

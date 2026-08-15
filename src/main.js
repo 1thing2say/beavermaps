@@ -34,7 +34,7 @@ import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
 import { createSkinControl, preferredSkin, applySkinAttribute } from './skin.js';
 import { googleGround } from './google-tiles.js';
-import { canFlyOver, framing, boxOf, footprintExtent } from './flyover.js';
+import { canFlyOver, framing, boxOf, footprintExtent, roofOf } from './flyover.js';
 import { createFlyover } from './flyover-view.js';
 import { spin } from './spinner.js';
 import { paintIcons } from './g-icons.js';
@@ -2734,6 +2734,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         // loading — stays in one file with the rest of it.
         return createFlyover({
           key: googleKey, centre, name: props.name, ...frame, box: boxOf(centre, frame.reach),
+          // The ROOF, which is a different point from the one the camera aims
+          // at: `centre` is the middle of the footprint, on the ground, and a
+          // pin dropped on that goes through the building.
+          roof: roofOf(props.name),
         });
       })()
       : null;
