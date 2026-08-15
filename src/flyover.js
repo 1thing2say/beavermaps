@@ -212,7 +212,7 @@ export const canFlyOver = (thing) => tierOf(thing) >= FLYOVER_TIER.SOLID;
  */
 export function framing(area) {
   const width = Math.sqrt(Math.max(area ?? 0, MIN_AREA_M2));
-  const span = Math.max(150, Math.min(520, width * 2.6));
+  const span = Math.max(230, Math.min(800, width * FRAME_WIDTHS));
   return {
     /** Ground width the viewport should span, in metres. */
     span,
@@ -224,27 +224,51 @@ export function framing(area) {
 }
 
 /**
- * The box's half-width, as a multiple of the framed span.
+ * The perimeter's half-width, as a multiple of the framed span.
  *
- * MEASURED, and the first value was wrong in an instructive way. The obvious
- * choice is something generous — 1.5x the span, so the box comfortably contains
- * everything a tilted camera might look at. Computing where deck.gl's own far
- * plane already lands showed that box would never once have been consulted: at
- * 55 degrees of pitch the default frustum stops about 0.6 spans past the target
- * on the ground, so any box wider than that is decoration with a comment on it.
+ * THIS HAS TO BE SMALLER THAN THE FRAME OR THERE IS NOTHING TO SEE, which is
+ * the mistake the previous value made. At 0.55 the perimeter is 1.1 spans
+ * across — WIDER than the viewport — so it clipped nothing but a sliver at the
+ * top edge, and the honest description of that is "a perimeter that does not
+ * appear to work". A boundary you cannot see is indistinguishable from one that
+ * is not there.
  *
- * The crossover is at 0.62 and is scale-free — every term scales with the span,
- * so it is the same multiple for Adaptive PE and for the Parking Garage. 0.55
- * therefore bites at every size, and what it cuts is the band of ground near
- * the top of the frame that the camera looks past the building at. That ground
- * is the most expensive thing in the shot and the least looked at: it is
- * furthest away, it is nobody's answer to "which building is this", and at 1.1
- * spans wide the box still holds the whole footprint with room around it.
+ * 0.28 puts the square at 0.56 spans, a bit over half the frame's width, so it
+ * closes on all four sides and the grid surrounds it. The building itself is
+ * 1/2.6 of a span across by construction (see `framing`), so the square is
+ * about 1.5x the footprint in every direction — enough for the forecourt, the
+ * planting and the paths leading up to a building, which is what makes the shot
+ * read as a place rather than as a model on a turntable.
  *
- * Below about 0.4 the box starts cutting into the building's own ground at the
- * far side of the orbit, which reads as damage rather than as a boundary.
+ * The far plane follows from this too and gets tighter with it, so a smaller
+ * square is also less loaded: see `farPlaneFor` in src/flyover-view.js. Nothing
+ * here is scale-dependent — every term is a multiple of the span — so one value
+ * holds from Adaptive PE at 173 m2 to the Parking Garage at 8,629.
  */
-const BOX_REACH = 0.55;
+const BOX_REACH = 0.2;
+
+/**
+ * How many building-widths of ground the camera holds in frame.
+ *
+ * This exists to make room for the perimeter, and it is the second half of a
+ * fix whose first half was not enough. Shrinking the square alone cannot put
+ * grid on all four sides of it: the camera is tilted 55 degrees off nadir, so
+ * the bottom of the frame is the NEAREST ground and is only a fraction of a
+ * span in front of the target. A square big enough to contain the building runs
+ * off that bottom edge before it closes.
+ *
+ * Backing the camera off is what opens the gap. At four building-widths the
+ * square — 1.6 building-widths across, see BOX_REACH — sits at half the frame's
+ * width with its near edge inside the bottom of the picture, which is the
+ * arrangement that reads as a boundary rather than as a crop.
+ *
+ * It costs apparent size: the building is a quarter of the frame rather than
+ * the two fifths it was. That is the trade, and it is the right way round for
+ * this feature — the shot is meant to answer "what is around this building",
+ * and a boundary you can see is worth more than a roof you can see slightly
+ * larger.
+ */
+const FRAME_WIDTHS = 4;
 
 /**
  * Metres per degree at my campus's latitude.

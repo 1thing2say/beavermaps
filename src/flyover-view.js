@@ -118,41 +118,45 @@ const MAX_GPU_MB = 24;
 const MAX_TILES_DRAWN = 48;
 
 /**
- * deck.gl's camera geometry, which the far plane below has to be expressed in.
+ * How far the ground grid reaches from the building, in spans.
  *
- * The projection works in units of one viewport HEIGHT: the camera sits
- * `FOCAL` of them from the point it is looking at, which is the old Mapbox
- * `altitude: 1.5` convention that deck.gl still derives its field of view from.
- * Everything in `farPlaneFor` is in those units, and the only conversion needed
- * is metres-per-unit — the viewport's height in metres, which the framing knows.
+ * It has to cover everything the camera can see, because the grid is what
+ * stands for "no tiles here" and a grid that stops before the frame edge just
+ * moves the problem outward. Deck.gl's own far plane stops about 0.6 spans past
+ * the target at this pitch — measured — so 1.5 covers the visible ground with
+ * room to spare in every direction the orbit swings through.
+ *
+ * THIS IS WHY THERE IS NO LONGER A CUSTOM FAR PLANE. An earlier version cut the
+ * frustum to the building's box to stop the traversal requesting distant tiles,
+ * and that is incompatible with this: the far plane clips ALL geometry, so a
+ * plane tight enough to bound the tiles also sliced the grid off mid-frame. The
+ * default plane is already a real bound — it is the 0.6 spans measured above,
+ * not the horizon — and the tile budgets that remain (screen-space error, the
+ * memory ceiling, the drawn-tile cap and the clip itself) are the ones that
+ * were doing the heavy work anyway.
  */
-const FOCAL = 1.5;
+const GRID_SPANS = 1.5;
+
+/** Grid cells across the frame. Constant, so every building rules the same. */
+const GRID_CELLS = 12;
 
 /**
- * The camera's far plane, in deck.gl's units, so the traversal stops at the box.
+ * How far below the ground the grid is drawn, in metres.
  *
- * THIS IS THE ONE THAT STOPS THE DOWNLOAD. Everything else here — the tile cap,
- * the memory budget, the draw filter — acts on tiles that have already been
- * asked for. The traversal culls against the frustum, so the frustum is the
- * only thing that decides what is ever requested, and the far plane is the end
- * of the frustum.
+ * Under the terrain rather than on it, which is what makes "everywhere the
+ * tiles are not" work without any coordination between the two. Where tiles
+ * render they are nearer the camera and the depth test hides the grid; where
+ * the clip discarded them nothing was written to the depth buffer at all — a
+ * discarded fragment writes no depth — so the grid shows through. The two never
+ * have to agree about where the boundary is, because the boundary is wherever
+ * the tiles happen to stop.
  *
- * Set from the building's own box rather than a fixed multiplier, because the
- * box is sized from the footprint: a plane that framed the Parking Garage would
- * cut through Adaptive PE. The distance wanted is to the far top CORNER of the
- * box, since a plane that only reached its centre would clip the diagonals.
- *
- * Returns undefined when the box is wider than deck.gl's own far plane, so the
- * default is left alone rather than pushed OUT — this is a budget, and a budget
- * that can raise the limit is not one.
+ * Deep enough to clear the terrain's own relief. my campus is flat and sits near zero
+ * metres ellipsoidal, and the finest tiles measure -6.4 m at their lowest, so
+ * eight metres down is below all of it without being far enough to show a
+ * parallax gap at the edges.
  */
-function farPlaneFor({ reach, span, pitch }, width, height) {
-  // 1 unit = the viewport's height in metres.
-  const metresPerUnit = (height * span) / width;
-  const u = reach / metresPerUnit;
-  const p = (pitch * Math.PI) / 180;
-  return Math.hypot(u, u + FOCAL * Math.sin(p), FOCAL * Math.cos(p));
-}
+const GRID_DEPTH_M = -8;
 
 /** Google requires attribution and it is per-tile. Shown until tiles say more. */
 const FALLBACK_CREDIT = 'Google';
@@ -173,11 +177,13 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   import('@deck.gl/geo-layers'),
   import('@loaders.gl/3d-tiles'),
   import('@deck.gl/extensions'),
-]).then(([core, geo, tiles, ext]) => ({
+  import('@deck.gl/layers'),
+]).then(([core, geo, tiles, ext, layers]) => ({
   Deck: core.Deck,
   MapView: core.MapView,
   Tile3DLayer: geo.Tile3DLayer,
   Tiles3DLoader: tiles.Tiles3DLoader,
+  LineLayer: layers.LineLayer,
   Clip: geoClip(ext.ClipExtension, core.COORDINATE_SYSTEM),
 })).catch((error) => {
   // Not cached on failure, so a flyover opened on a dropped connection can be
@@ -275,6 +281,59 @@ function keyedFetch(key) {
  * what is visible toward the horizon but leaves the scale at the centre of the
  * screen alone, and the centre is where the building is.
  */
+/**
+ * The grid, as line segments on the ground in lon/lat.
+ *
+ * Built in geographic coordinates rather than drawn as a texture because that
+ * is the whole of what was wrong with the first version: a CSS background sits
+ * on the screen, so it stayed put while the camera orbited past it and read as
+ * graph paper taped to the monitor. These are segments lying flat in the scene,
+ * so they recede with the ground, converge toward the horizon, and turn with
+ * the building — which is the only way a grid can say "this is ground we did
+ * not load" rather than "this is a decorated background".
+ *
+ * Square in METRES, not in degrees. A degree of longitude at my campus is 0.78 of a
+ * degree of latitude, so a grid ruled on degrees would be visibly oblong.
+ */
+function gridLines([lon, lat], extent, step) {
+  const lines = [];
+  for (let m = -extent; m <= extent + 1e-6; m += step) {
+    const dLat = m / M_PER_DEG_LAT;
+    const dLon = m / M_PER_DEG_LON;
+    const eastWest = extent / M_PER_DEG_LON;
+    const northSouth = extent / M_PER_DEG_LAT;
+    lines.push({
+      from: [lon - eastWest, lat + dLat, GRID_DEPTH_M],
+      to: [lon + eastWest, lat + dLat, GRID_DEPTH_M],
+    });
+    lines.push({
+      from: [lon + dLon, lat - northSouth, GRID_DEPTH_M],
+      to: [lon + dLon, lat + northSouth, GRID_DEPTH_M],
+    });
+  }
+  return lines;
+}
+
+/**
+ * The grid's ink, read from the stylesheet so it follows the theme.
+ *
+ * `--g-grid-ink` is the same token the card's own surfaces are drawn from, and
+ * taking it from the computed style rather than restating it here is what stops
+ * the 3D grid and the panel around it drifting apart the next time either
+ * palette is touched. deck.gl wants bytes, CSS gives hex; the fallback is the
+ * light theme's value, for the case where the token has not resolved yet.
+ */
+function gridInk() {
+  const css = getComputedStyle(document.documentElement)
+    .getPropertyValue('--g-grid-ink').trim();
+  const hex = /^#([0-9a-f]{6})$/i.exec(css)?.[1] ?? 'd8dade';
+  return [
+    parseInt(hex.slice(0, 2), 16),
+    parseInt(hex.slice(2, 4), 16),
+    parseInt(hex.slice(4, 6), 16),
+  ];
+}
+
 function zoomFor(span, width, latitude) {
   const metresPerPixel = 156543.03392 * Math.cos((latitude * Math.PI) / 180);
   return Math.log2((width * metresPerPixel) / span);
@@ -376,6 +435,28 @@ const stage = {
  * the tileset already in memory. That is the difference between a clip that
  * costs nothing and one that costs a billable root request per building.
  */
+/**
+ * The ground the tiles are not covering.
+ *
+ * Drawn first and below everything, so it needs no knowledge of where the tiles
+ * stop — see GRID_DEPTH_M. Its own id is constant so deck.gl updates it in
+ * place across buildings rather than rebuilding the geometry.
+ */
+function makeGrid({ LineLayer }, centre, span) {
+  return new LineLayer({
+    id: 'flyover-grid',
+    data: gridLines(centre, span * GRID_SPANS, span / GRID_CELLS),
+    getSourcePosition: (d) => d.from,
+    getTargetPosition: (d) => d.to,
+    getColor: gridInk(),
+    // A hairline whatever the zoom, like ruled paper rather than like painted
+    // lines on tarmac — the grid is a notation, not part of the scene.
+    widthUnits: 'pixels',
+    getWidth: 1,
+    widthMinPixels: 1,
+  });
+}
+
 function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
   return new Tile3DLayer({
     // Constant id and constant `data`, which is what stops the tileset being
@@ -467,7 +548,7 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
   });
 }
 
-function buildStage(tools, key, view, box, farZ) {
+function buildStage(tools, key, view, box, centre, span) {
   const host = document.createElement('div');
   host.className = 'g-flyover-stage';
 
@@ -479,7 +560,7 @@ function buildStage(tools, key, view, box, farZ) {
   stage.canvas = canvas;
   stage.deck = new tools.Deck({
     canvas,
-    views: new tools.MapView({ id: 'flyover', farZ }),
+    views: new tools.MapView({ id: 'flyover' }),
     // No controller, on purpose. See the note at the top of this file: it is
     // what keeps the tiles this pulls inside the campus.
     controller: false,
@@ -488,7 +569,7 @@ function buildStage(tools, key, view, box, farZ) {
     // a transparent clear, which is what this wants: the grid behind the canvas
     // shows through everywhere the clip discarded, which is the whole point of
     // drawing a grid there.
-    layers: [makeLayer(tools, key, box)],
+    layers: [makeGrid(tools, centre, span), makeLayer(tools, key, box)],
   });
 }
 
@@ -578,13 +659,12 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
     const width = el.clientWidth || 320;
     const height = el.clientHeight || Math.round(width * 0.625);
     const view = { longitude, latitude, zoom: zoomFor(span, width, latitude), pitch, bearing: 0 };
-    const farZ = farPlaneFor({ reach, span, pitch }, width, height);
 
     stage.box = box ?? null;
 
     if (!stage.deck) {
       try {
-        buildStage(tools, key, view, box, farZ);
+        buildStage(tools, key, view, box, centre, span);
       } catch (error) {
         fail(error?.message ?? 'Aerial view unavailable');
         return;
@@ -595,8 +675,8 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
       // immutable once constructed, and a layer's props are read at
       // construction, so a new instance is how either is changed.
       stage.deck.setProps({
-        views: new tools.MapView({ id: 'flyover', farZ }),
-        layers: [makeLayer(tools, key, box)],
+        views: new tools.MapView({ id: 'flyover' }),
+        layers: [makeGrid(tools, centre, span), makeLayer(tools, key, box)],
       });
     }
     stage.owner = token;

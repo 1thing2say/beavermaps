@@ -113,23 +113,31 @@ test('framing pulls in for a small building and stops short for a large one', ()
   assert.ok(small.span < big.span);
   // Both clamped, which is the part that matters: an unclamped span would orbit
   // Adaptive PE from 36 m and the Parking Garage from a quarter of a mile.
-  assert.equal(small.span, 150);
-  assert.equal(big.span, 520);
+  assert.equal(small.span, 230);
+  assert.equal(big.span, 800);
   // A missing footprint must still produce a usable camera rather than NaN.
   assert.ok(Number.isFinite(framing(undefined).span));
   assert.ok(framing().pitch > 0 && framing().pitch < 90);
 });
 
-test('the tile box is tight enough to actually bind', () => {
-  // The measured crossover: deck.gl's own far plane already stops about 0.62
-  // spans past the target, so a box wider than that would never be consulted.
-  // This is the assertion that keeps `reach` an actual budget rather than a
-  // comment about one — see BOX_REACH.
+test('the perimeter fits inside the frame and still holds the building', () => {
+  // Two bounds, and the perimeter is only useful between them.
+  //
+  // Too wide and it never appears: at 0.5 spans of reach the square is exactly
+  // the frame's width, so nothing is left over to draw grid in and the clip is
+  // invisible. That is the bug this pair of assertions exists to catch — it
+  // shipped once at 0.55 and read as a feature that did not work.
+  //
+  // Too narrow and it cuts the subject. `framing` sets the span at
+  // FRAME_WIDTHS times the footprint's width, so the building occupies that
+  // fraction of the frame and the square has to be wider to contain it at all.
   for (const area of [173, 631, 5403, 8629, 50_000]) {
     const { span, reach } = framing(area);
-    assert.ok(reach / span < 0.62,
-      `reach is ${(reach / span).toFixed(2)} spans — wider than deck.gl's own far plane`);
-    assert.ok(reach / span > 0.4, 'a box this tight cuts into the building\'s own ground');
+    const buildingWidth = span / 4;
+    assert.ok(reach * 2 < span * 0.8,
+      `the square is ${((reach * 2) / span).toFixed(2)} spans — no room left for grid`);
+    assert.ok(reach * 2 > buildingWidth * 1.2,
+      `the square is ${((reach * 2) / buildingWidth).toFixed(2)}x the footprint — too tight`);
   }
 });
 
