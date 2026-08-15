@@ -355,6 +355,104 @@
                 </button>
             </div>
 
+            <!-- The lighting bench, and it is a bench rather than a setting:
+                 five light presets crossed with four colour themes, and three
+                 numbers you can pull while looking at the result. The whole
+                 question it exists to answer — whether Standard's own lighting
+                 can carry the campus buildings without the emissive opt-out
+                 they currently carry — is written at the top of
+                 src/lighting.js. Every value here is gated on this menu being
+                 open, so a bench left at Dusk cannot follow you out.
+
+                 Third of the appearance sections rather than down with the
+                 lies, because nothing in here tells the app anything untrue. -->
+            <p class="g-layers-heading g-layers-heading--split">Lighting</p>
+            <div id="debug-lighting">
+                <div class="g-seg-row" role="radiogroup" aria-label="Light preset">
+                    <button type="button" class="g-seg" role="radio" aria-checked="false"
+                        data-light-preset="auto">Auto</button>
+                    <button type="button" class="g-seg" role="radio" aria-checked="false"
+                        data-light-preset="dawn">Dawn</button>
+                    <button type="button" class="g-seg" role="radio" aria-checked="false"
+                        data-light-preset="day">Day</button>
+                    <button type="button" class="g-seg" role="radio" aria-checked="false"
+                        data-light-preset="dusk">Dusk</button>
+                    <button type="button" class="g-seg" role="radio" aria-checked="false"
+                        data-light-preset="night">Night</button>
+                </div>
+                <div class="g-seg-row" role="radiogroup" aria-label="Colour theme">
+                    <button type="button" class="g-seg" role="radio" aria-checked="false"
+                        data-light-theme="auto">Auto</button>
+                    <button type="button" class="g-seg" role="radio" aria-checked="false"
+                        data-light-theme="default">Default</button>
+                    <button type="button" class="g-seg" role="radio" aria-checked="false"
+                        data-light-theme="faded">Faded</button>
+                    <button type="button" class="g-seg" role="radio" aria-checked="false"
+                        data-light-theme="monochrome">Mono</button>
+                </div>
+
+                <!-- Two switches for being able to SEE the thing at all. The
+                     extrusions are navigation-only — see removeBuildingsLayer —
+                     and the camera is flat outside a walk, so without these the
+                     bench asks a question about buildings while showing none,
+                     from an angle that could not tell a wall from a roof. -->
+                <label class="g-debug-row" for="debug-buildings">
+                    <span class="g-debug-text">
+                        <span class="g-debug-name">Stand the buildings up</span>
+                        <span class="g-debug-hint">The extrusions, which otherwise only exist during a walk</span>
+                    </span>
+                    <input id="debug-buildings" type="checkbox" class="g-switch">
+                </label>
+                <label class="g-debug-row" for="debug-tilt">
+                    <span class="g-debug-text">
+                        <span class="g-debug-name">Tilt the camera</span>
+                        <span class="g-debug-hint">Pitch 60, the angle navigation uses</span>
+                    </span>
+                    <input id="debug-tilt" type="checkbox" class="g-switch">
+                </label>
+
+                <!-- The number under the question. At 0 the buildings are lit
+                     entirely by the model above; at 0.75 they are the app. -->
+                <label class="g-debug-slider" for="debug-emissive">
+                    <span class="g-debug-name">Building emissive
+                        <output id="debug-emissive-out" for="debug-emissive">0.75</output></span>
+                    <input id="debug-emissive" type="range" min="0" max="1" step="0.05" class="g-range">
+                </label>
+
+                <label class="g-debug-row" for="debug-lights">
+                    <span class="g-debug-text">
+                        <span class="g-debug-name">Override the lights</span>
+                        <span class="g-debug-hint">Standard's own: ambient .5 night / .8 day, directional .5 night / .2 day</span>
+                    </span>
+                    <input id="debug-lights" type="checkbox" class="g-switch">
+                </label>
+                <label class="g-debug-slider" for="debug-ambient">
+                    <span class="g-debug-name">Ambient
+                        <output id="debug-ambient-out" for="debug-ambient">0.50</output></span>
+                    <input id="debug-ambient" type="range" min="0" max="1" step="0.05" class="g-range">
+                </label>
+                <label class="g-debug-slider" for="debug-directional">
+                    <span class="g-debug-name">Directional
+                        <output id="debug-directional-out" for="debug-directional">0.50</output></span>
+                    <input id="debug-directional" type="range" min="0" max="1" step="0.05" class="g-range">
+                </label>
+
+                <!-- The knob that actually moves at night, and the reason the
+                     two sliders above it disappoint. Standard's ambient light
+                     under the `night` preset is hsl(217,100%,11%) — the value
+                     this starts at — which is very nearly black, and scaling a
+                     black light by any intensity leaves it black. -->
+                <label class="g-debug-swatch" for="debug-ambient-color">
+                    <span class="g-debug-text">
+                        <span class="g-debug-name">Ambient colour</span>
+                        <span class="g-debug-hint">Standard's night ambient, and it is almost black</span>
+                    </span>
+                    <input id="debug-ambient-color" type="color" class="g-swatch">
+                </label>
+
+                <button id="debug-lighting-reset" type="button" class="g-seg g-seg--reset">Reset the bench</button>
+            </div>
+
             <!-- The two lies. Switches rather than buttons, because these are
                  states the app is being held in rather than actions taken. -->
             <p class="g-layers-heading g-layers-heading--split">Pretend</p>

@@ -2547,6 +2547,175 @@ body.simulating .nav-sign::after {
     cursor: default;
 }
 
+/* --- the lighting bench ---------------------------------------------------- */
+
+/* Five options in a 276px column, which is why these are not .g-layer-btn: that
+   one is a fixed 76px with an icon over a word, and five of them is twice the
+   card. A segment is text only and shares the row equally, so a row of five and
+   a row of four line up down their left and right edges without either being
+   told a width. `min-width: 0` is what actually allows the sharing — flex items
+   refuse to shrink below their content otherwise, and "Monochrome" would push
+   the row wider than the card it sits in. (It is labelled "Mono" for the same
+   reason, one step further along.)
+
+   Selected takes the same blue-on-tint the layer buttons take, because it is
+   the same question asked in less room, and a second visual language for "this
+   one is chosen" inside one card would be a card that had two. */
+.g-seg-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.g-seg {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 2px;
+    border: 1px solid var(--g-line);
+    border-radius: var(--g-radius-sm);
+    background: transparent;
+    color: var(--g-text);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.g-seg:hover {
+    background: var(--g-hover);
+}
+
+/* :not(:hover) for the reason the layer buttons carry it — a 0-2-0 hover rule
+   beating the chosen state leaves the pressed segment looking unpressed under
+   the pointer that just pressed it. */
+.g-seg[aria-checked="true"] {
+    border-color: var(--g-blue);
+    color: var(--g-blue);
+}
+
+.g-seg[aria-checked="true"]:not(:hover) {
+    background: color-mix(in srgb, var(--g-blue) 12%, transparent);
+}
+
+/* Puts everything back where an untouched bench sits. Full width and last,
+   because it undoes the section above it rather than belonging to any row. */
+.g-seg--reset {
+    width: 100%;
+    margin-top: 4px;
+    color: var(--g-text-dim);
+}
+
+/* A colour beside its name, on the debug row's own geometry — the swatch is the
+   value, so it wants the position a switch has rather than a slider's full
+   width. `appearance: none` and a zero border are what stop the platform
+   drawing its own bevelled box around it in either engine. */
+.g-debug-swatch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.g-swatch {
+    appearance: none;
+    flex-shrink: 0;
+    width: 44px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--g-line);
+    border-radius: var(--g-radius-sm);
+    background: transparent;
+    cursor: pointer;
+}
+
+.g-swatch::-webkit-color-swatch-wrapper {
+    padding: 2px;
+}
+
+.g-swatch::-webkit-color-swatch {
+    border: none;
+    border-radius: 3px;
+}
+
+.g-swatch::-moz-color-swatch {
+    border: none;
+    border-radius: 3px;
+}
+
+.g-debug-swatch:has(.g-swatch:disabled) {
+    opacity: 0.45;
+}
+
+.g-swatch:disabled {
+    cursor: default;
+}
+
+/* Label over track rather than beside it: the label carries a live number, so
+   the two together are one sentence that changes as you drag, and a value
+   drifting in a column to the right of a name is two things to read. */
+.g-debug-slider {
+    display: block;
+    padding: 6px 0 2px;
+}
+
+.g-debug-slider .g-debug-name {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+/* The number the drag is setting, in the accent, because it is the one thing in
+   this card that is being READ rather than pressed — tabular so the digits do
+   not shuffle sideways between 0.05 and 0.10. */
+.g-debug-slider output {
+    color: var(--g-blue);
+    font-variant-numeric: tabular-nums;
+}
+
+/* The two intensities are dead until the override switch is on, and they say so
+   the same way the flag switches do with the menu shut. */
+.g-debug-slider:has(.g-range:disabled) {
+    opacity: 0.45;
+}
+
+.g-debug-slider:has(.g-range:disabled) output {
+    color: var(--g-text-dim);
+}
+
+/* Drawn from the input, like .g-switch is: `appearance: none` keeps the arrow
+   keys, the label association and the focus ring, and takes only the painting.
+   Both engines need their own thumb selector and neither inherits the other's,
+   so the two blocks below are the same rule written twice — merging them into
+   one selector list would make WebKit drop the Firefox half and vice versa. */
+.g-range {
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--g-line);
+    cursor: pointer;
+}
+
+.g-range:disabled {
+    cursor: default;
+}
+
+.g-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--g-blue);
+    border: none;
+}
+
+.g-range::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--g-blue);
+    border: none;
+}
+
 /* iOS's switch, drawn from the checkbox itself rather than from a span beside
    it: `appearance: none` keeps every piece of behaviour a checkbox has — the
    label association, the focus ring, the space bar, what a screen reader calls

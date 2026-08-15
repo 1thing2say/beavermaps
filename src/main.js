@@ -44,6 +44,7 @@ import { ringOf, centreOf, trimToCampus } from './campus-clip.js';
 import { bayRake } from './bay-rake.js';
 import { createGeolocation } from './geolocation.js';
 import { createDebugMenu } from './debug.js';
+import { createLightingControl } from './lighting.js';
 import roomsData from './rooms.json';
 import { buildRoomIndex, lookupRoom } from './rooms.js';
 import { FONTS, SATELLITE, palette, styleKey } from './palette.js';
@@ -205,6 +206,28 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let userMarker = null;
   let simTimer = null;
   let simAlong = 0;
+
+  // The lighting bench, and whether anybody is standing at it. Both are read by
+  // applyLighting and nothing else: `debugOpen` is the gate that keeps a bench
+  // setting from following somebody out of the back room, and `benchLights` is
+  // Standard's own light array, captured on every style load so the override
+  // has something to be put back to. See src/lighting.js.
+  let lightingBench = null;
+  let debugOpen = false;
+  let benchLights = null;
+  let benchTilt = false;
+  // Whether there is a style under us to configure at all.
+  //
+  // NOT `map.isStyleLoaded()`, which is the obvious guard and the wrong one:
+  // inside the `style.load` handler it is still FALSE — it reports every source
+  // and sprite settled, which happens later — so guarding on it meant the bench
+  // was quietly dropped on every style swap and only came back when something
+  // else happened to touch it. Measured, after the first version of this shipped
+  // a satellite round-trip that lost the whole bench.
+  //
+  // This says the narrower thing the builders actually need: a style exists and
+  // its layers are ours to write to.
+  let styleBuilt = false;
 
   // Banner transition state
   let renderedStep = -1;
@@ -527,9 +550,129 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         // every face renders identically and a building reads as a sticker.
         // 0.75 is where the night preset stops swallowing them while the roof
         // still sits visibly lighter than the walls.
-        'fill-extrusion-emissive-strength': 0.75,
+        //
+        // It is a compromise and it is named so the bench can question it: this
+        // number is the app's answer to "can Standard light these", and the
+        // lighting section of the debug menu exists to find out whether a
+        // better answer is reachable from `setLights` instead. See
+        // src/lighting.js.
+        'fill-extrusion-emissive-strength': BUILDING_EMISSIVE,
       },
     }, 'route-casing');
+
+    // A layer that did not exist a moment ago has the palette's emissive
+    // strength on it, not the bench's. Nothing else re-runs after this.
+    applyLighting();
+  }
+
+  /**
+   * The layer's own emissive strength, and the bench's starting point.
+   *
+   * One number with one explanation, in the paint spec above where the
+   * explanation belongs, read from two places rather than written in two.
+   */
+  const BUILDING_EMISSIVE = 0.75;
+
+  /**
+   * Push the lighting bench onto the map, or take it back off.
+   *
+   * Everything here is gated on the debug menu being OPEN. That is the rule the
+   * back room is built on — with the menu shut the app is exactly the app — and
+   * it matters more for this section than for the flags it sits above, because
+   * these values are plausible. A route GUI switched off is obviously a debug
+   * state; a campus at dusk just looks like a decision somebody made.
+   *
+   * Called from addNetworkLayers rather than only from the control, because
+   * every path that rebuilds the basemap — a theme change, a provider swap, a
+   * full setStyle — re-runs the builders and would otherwise put Standard's own
+   * lighting back while the bench still showed the override.
+   */
+  function applyLighting() {
+    if (!styleBuilt) return;
+
+    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const bench = debugOpen ? lightingBench : null;
+
+    // The extrusions are navigation-only — see removeBuildingsLayer — and the
+    // question this bench asks is entirely about the extrusions, so it is
+    // allowed to stand them up outside a walk. `!navActive` on the way down is
+    // what keeps that from reaching into a real one: during navigation they are
+    // the app's, and switching the bench off must not take them.
+    //
+    // addBuildingsLayer ends by calling back here, which is how a layer created
+    // during a walk gets the bench's emissive rather than the palette's. That
+    // bounce terminates at one level: the `getLayer` guard below is false on
+    // the way in and true on the way back, so the second pass paints and stops.
+    if (bench?.buildings) {
+      if (!map.getLayer('campus-buildings')) addBuildingsLayer();
+    } else if (!navActive) {
+      removeBuildingsLayer();
+    }
+
+    // The camera, and only when the bench actually moved it. applyLighting runs
+    // on every builder pass, and an easeTo per pass is a map that drifts while
+    // you are trying to look at it. Never during navigation, which is pitched
+    // to 60 and following somebody — that camera is not the bench's to take.
+    const tilt = Boolean(bench?.tilt);
+    if (!navActive && tilt !== benchTilt) {
+      benchTilt = tilt;
+      map.easeTo({ pitch: tilt ? 60 : 0, duration: 500 });
+    }
+
+    // Ours, and present under every provider, so this half runs even when there
+    // is no Standard style underneath to configure.
+    if (map.getLayer('campus-buildings')) {
+      map.setPaintProperty(
+        'campus-buildings',
+        'fill-extrusion-emissive-strength',
+        bench ? bench.emissive : BUILDING_EMISSIVE,
+      );
+    }
+
+    // Google's ground is a raster under a blank style: no `basemap` import to
+    // name, no lights to override. `lightPreset: null` is how palette.js says
+    // so. Skipped outright rather than left to setConfig's warning, because a
+    // bench pointed at a style that has no lighting should be quiet, not noisy.
+    if (colors.lightPreset === null) return;
+
+    setConfig('lightPreset', bench && bench.preset !== 'auto' ? bench.preset : colors.lightPreset);
+    // `default` is Standard's own default and the value the app runs at — the
+    // app never sets this key, so `auto` means putting it back rather than
+    // leaving it alone.
+    setConfig('theme', bench && bench.theme !== 'auto' ? bench.theme : 'default');
+
+    if (!benchLights) return;
+    if (!bench?.lights) {
+      // A clone every time, not the captured array: setLights takes ownership
+      // of what it is handed, and giving away the only copy of Standard's own
+      // lighting means the next revert has nothing to revert to.
+      map.setLights(structuredClone(benchLights));
+      return;
+    }
+    const lights = structuredClone(benchLights);
+    for (const light of lights) {
+      // Standard writes both intensities as expressions over `lightPreset` and
+      // `theme` — that is the whole reason this override exists, since a preset
+      // is not separable from the number it implies. Replacing one property
+      // with a literal collapses that expression for the light being questioned
+      // and leaves its colour and direction still following the preset, which
+      // is the comparison worth seeing.
+      if (light.id === 'ambient') {
+        // Colour as well as intensity, and the colour is the one that matters:
+        // Standard's night ambient is hsl(217,100%,11%), so scaling it by any
+        // intensity leaves it black and the extrusions stay swallowed. Measured
+        // — ambient 0.5 to 1.0 at night moves a roof by about 1 L*.
+        light.properties = {
+          ...light.properties,
+          intensity: bench.ambient,
+          color: bench.ambientColor,
+        };
+      }
+      if (light.id === 'directional') {
+        light.properties = { ...light.properties, intensity: bench.directional };
+      }
+    }
+    map.setLights(lights);
   }
 
   /**
@@ -2991,7 +3134,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Each key is set individually rather than in one try: an unknown property
     // throws, and one Mapbox rename should cost that colour, not every colour
     // after it in the object.
-    setConfig('lightPreset', colors.lightPreset);
     for (const [key, value] of Object.entries(colors.basemapConfig ?? {})) {
       setConfig(key, value);
     }
@@ -3142,6 +3284,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     addLabelLayers();
 
     if (navActive) addBuildingsLayer();
+
+    // LAST, and it has to be. `lightPreset` used to be set at the top of this
+    // function beside the other config keys, and moving it in here gave one
+    // function ownership of the property — but applyLighting can also stand the
+    // extrusions up, and addBuildingsLayer inserts below `route-casing`, which
+    // does not exist until addNetworkLayers has finished building. Called any
+    // earlier, a bench with the buildings switched on throws mid-rebuild and
+    // takes the campus mask and the labels down with it, on every style load.
+    applyLighting();
   }
 
   // -------------------------------------------------------------------------
@@ -3511,6 +3662,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // no longer big while `hoveredPin` still says it is — and the next mousemove
     // over the same pin would match, do nothing, and leave it flat for good.
     clearHover();
+    // Standard's own lights, before anything has had a chance to override them.
+    // Captured per style load rather than once, because a setStyle replaces
+    // them wholesale — and satellite's are not the map style's.
+    benchLights = structuredClone(map.getLights() ?? null);
+    styleBuilt = true;
     addNetworkLayers();
     addGoogleGround();
   });
@@ -3528,6 +3684,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       appliedStyleKey = nextKey;
       // Invalidate any session request still in flight for the outgoing style.
       groundGeneration++;
+      // Nothing to configure between here and the next style.load: the layers
+      // the bench writes to are about to stop existing. style.load sets it back.
+      styleBuilt = false;
       // diff:false forces a full style reload. The default diffing path can
       // drop custom layers without firing style.load, leaving a bare basemap.
       // style.load re-adds our layers and re-requests the ground.
@@ -3842,6 +4001,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   function applyDebug({ open, routing, gps }) {
+    // The gate the lighting bench is read through. Set before anything else
+    // here, so applyLighting sees the new state whichever path reaches it.
+    debugOpen = open;
+    applyLighting();
+
     // "Off by default" means off once you are in the back room, not off for
     // everybody: with the panel closed this is the app, and the app gives
     // directions. `open &&` is the whole of that guarantee, twice.
@@ -3866,6 +4030,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (fixture) startLocating();
     else relockLocate();
   }
+
+  // Before createDebugMenu, so that the menu's first onChange — which can open
+  // the panel, and therefore open the gate — finds a bench to read rather than
+  // a null. The bench's own first publish is a no-op either way: `debugOpen` is
+  // still false at this point, so applyLighting puts the app's own values back
+  // over the app's own values.
+  createLightingControl({
+    root: document.getElementById('debug-lighting'),
+    emissive: BUILDING_EMISSIVE,
+    onChange: (bench) => {
+      lightingBench = bench;
+      applyLighting();
+    },
+  });
 
   createDebugMenu({
     panel: debugPanel,
