@@ -172,17 +172,72 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   import('@deck.gl/core'),
   import('@deck.gl/geo-layers'),
   import('@loaders.gl/3d-tiles'),
-]).then(([core, geo, tiles]) => ({
+  import('@deck.gl/extensions'),
+]).then(([core, geo, tiles, ext]) => ({
   Deck: core.Deck,
   MapView: core.MapView,
   Tile3DLayer: geo.Tile3DLayer,
   Tiles3DLoader: tiles.Tiles3DLoader,
+  Clip: geoClip(ext.ClipExtension, core.COORDINATE_SYSTEM),
 })).catch((error) => {
   // Not cached on failure, so a flyover opened on a dropped connection can be
   // retried by closing the card and opening it again.
   toolkit = null;
   throw error;
 }));
+
+/**
+ * deck.gl's clip extension, taught which coordinate system the bounds are in.
+ *
+ * THIS IS THE PERIMETER. Everything else in this file that mentions the box
+ * decides which TILES to ask for and which to draw; this is the thing that
+ * decides which PIXELS survive, and it is the difference between a bound and a
+ * boundary. A tile is a few dozen metres of ground either side of an arbitrary
+ * line of Google's choosing, so culling by tile leaves a ragged edge that
+ * wanders in and out of the box by the width of whatever tile straddled it.
+ * The extension discards fragments instead: it hands the shader a rectangle,
+ * every fragment tests its own 2D position against it, and what comes out is a
+ * clean square of ground with the grid around it.
+ *
+ * Wrapped rather than used directly because of one line in the stock `draw()`:
+ * it calls `this.projectPosition(clipBounds)`, and `projectPosition` reads the
+ * coordinate system off the LAYER it is called on. Tile3DLayer builds each of
+ * its sublayers as `METER_OFFSETS` around that tile's own cartographic origin,
+ * so the stock version hands a pair of longitudes and latitudes to a projection
+ * that is expecting metres, and the clip lands somewhere off the coast of
+ * Africa. Saying where the numbers come from is the whole fix.
+ *
+ * Built through a function because @deck.gl/extensions is lazily imported —
+ * there is no ClipExtension to subclass until the toolkit has landed.
+ */
+function geoClip(ClipExtension, COORDINATE_SYSTEM) {
+  return class GeoClipExtension extends ClipExtension {
+    draw() {
+      const { clipBounds } = this.props;
+      const from = {
+        fromCoordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+        fromCoordinateOrigin: [0, 0, 0],
+        // The second half of the fix, and the one that made the clip discard
+        // the entire viewport rather than merely land in the wrong place.
+        // `projectPosition` runs the point through `this.props.modelMatrix`
+        // BEFORE projecting it, and every one of these sublayers carries the
+        // tile's own ECEF transform there — so a longitude and a latitude were
+        // being multiplied by a matrix built for metres near the Earth's core.
+        modelMatrix: null,
+      };
+      const a = this.projectPosition([clipBounds[0], clipBounds[1], 0], from);
+      const b = this.projectPosition([clipBounds[2], clipBounds[3], 0], from);
+      this.setShaderModuleProps({
+        clip: {
+          bounds: [
+            Math.min(a[0], b[0]), Math.min(a[1], b[1]),
+            Math.max(a[0], b[0]), Math.max(a[1], b[1]),
+          ],
+        },
+      });
+    }
+  };
+}
 
 /** Asked each time, so a preference changed mid-session takes effect at once. */
 const prefersStill = () => Boolean(
@@ -312,15 +367,17 @@ const stage = {
   box: null,
 };
 
-function buildStage({ Deck, MapView, Tile3DLayer, Tiles3DLoader }, key, view) {
-  const host = document.createElement('div');
-  host.className = 'g-flyover-stage';
-
-  const canvas = document.createElement('canvas');
-  canvas.className = 'g-flyover-canvas';
-  host.append(canvas);
-
-  const layer = new Tile3DLayer({
+/**
+ * The tile layer, built fresh for each building because the clip is a prop.
+ *
+ * Rebuilding it is free and — importantly — does not refetch anything: deck.gl
+ * matches layers across renders by `id` and only calls `_loadTileset` when
+ * `data` actually changes. Both are constants here, so a new instance inherits
+ * the tileset already in memory. That is the difference between a clip that
+ * costs nothing and one that costs a billable root request per building.
+ */
+function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
+  return new Tile3DLayer({
     // Constant id and constant `data`, which is what stops the tileset being
     // reloaded. deck.gl matches layers across renders by id and only calls
     // `_loadTileset` when `props.data` actually changes — so every subsequent
@@ -390,22 +447,48 @@ function buildStage({ Deck, MapView, Tile3DLayer, Tiles3DLoader }, key, view) {
       stage.onReady?.();
     },
     onTileError: () => {},
+    // The perimeter, pushed down onto the layers that actually draw glTF.
+    // Tile3DLayer is a composite and renders one ScenegraphLayer per tile, so
+    // the extension has to be handed to the sublayer rather than to the parent.
+    //
+    // `clipByInstance: false` is the load-bearing half. The extension has two
+    // modes and picks by whether the layer is instanced: a ScenegraphLayer is,
+    // so left alone it would clip by each tile's ANCHOR — showing or hiding
+    // whole tiles, which is the ragged per-tile behaviour the clip exists to
+    // replace. False forces the fragment path, where every pixel tests its own
+    // position and a tile straddling the line is cut along it.
+    _subLayerProps: box ? {
+      scenegraph: {
+        extensions: [new Clip()],
+        clipBounds: [box.min[0], box.min[1], box.max[0], box.max[1]],
+        clipByInstance: false,
+      },
+    } : undefined,
   });
+}
+
+function buildStage(tools, key, view, box, farZ) {
+  const host = document.createElement('div');
+  host.className = 'g-flyover-stage';
+
+  const canvas = document.createElement('canvas');
+  canvas.className = 'g-flyover-canvas';
+  host.append(canvas);
 
   stage.host = host;
   stage.canvas = canvas;
-  stage.deck = new Deck({
+  stage.deck = new tools.Deck({
     canvas,
-    views: new MapView({ id: 'flyover' }),
+    views: new tools.MapView({ id: 'flyover', farZ }),
     // No controller, on purpose. See the note at the top of this file: it is
     // what keeps the tiles this pulls inside the campus.
     controller: false,
     initialViewState: view,
     // Nothing sets a clear colour here because deck.gl's own default is already
-    // a transparent clear, which is what this wants: the panel's surface shows
-    // through before the first tile lands, so an unloaded flyover is an empty
-    // box in the card rather than a black rectangle.
-    layers: [layer],
+    // a transparent clear, which is what this wants: the grid behind the canvas
+    // shows through everywhere the clip discarded, which is the whole point of
+    // drawing a grid there.
+    layers: [makeLayer(tools, key, box)],
   });
 }
 
@@ -497,20 +580,25 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name }) {
     const view = { longitude, latitude, zoom: zoomFor(span, width, latitude), pitch, bearing: 0 };
     const farZ = farPlaneFor({ reach, span, pitch }, width, height);
 
+    stage.box = box ?? null;
+
     if (!stage.deck) {
       try {
-        buildStage(tools, key, view);
+        buildStage(tools, key, view, box, farZ);
       } catch (error) {
         fail(error?.message ?? 'Aerial view unavailable');
         return;
       }
+    } else {
+      // Per building, because both the camera and the perimeter are. Replacing
+      // rather than mutating is what deck.gl expects of each: a View is
+      // immutable once constructed, and a layer's props are read at
+      // construction, so a new instance is how either is changed.
+      stage.deck.setProps({
+        views: new tools.MapView({ id: 'flyover', farZ }),
+        layers: [makeLayer(tools, key, box)],
+      });
     }
-
-    // Per building, because the box is. Replacing the view rather than mutating
-    // it is what deck.gl expects — a View is immutable once constructed, and
-    // handing it a new one is how its projection is changed.
-    stage.deck.setProps({ views: new tools.MapView({ id: 'flyover', farZ }) });
-    stage.box = box ?? null;
     stage.owner = token;
     // Cleared per building, not per tab. The requirement is to credit the
     // imagery being SHOWN, and the tileset outlives any one card — left to
