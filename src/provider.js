@@ -14,6 +14,8 @@
 // API, a referrer the key does not allow — and none of those can be detected
 // until a session is actually requested. See `revert` below.
 
+import { spin } from './spinner.js';
+
 const STORAGE_KEY = 'mapper-provider';
 
 const ICON_ATTRS =
@@ -97,7 +99,38 @@ export function createProviderToggle({ surfaces, onChange }) {
 
   apply(provider, { persist: false });
 
+  /** Spinner stoppers, one per surface, while a session is being minted. */
+  let stops = [];
+
   return {
+    /**
+     * Say that the ground is on its way.
+     *
+     * This is the one toggle in the app whose effect is not immediate. The
+     * theme and the skin repaint on the next frame; Google's ground cannot be
+     * asked for until a session token has been minted, which is a round trip to
+     * tile.googleapis.com before the first tile can even be requested. Until it
+     * lands the map keeps drawing whatever was underneath, so a press on this
+     * button looks like a press that did nothing — and the honest reading of
+     * that is to press it again.
+     *
+     * The spinner goes in the icon slot rather than beside the label because
+     * that slot is already the right size and is already the thing that changes
+     * when the provider does. `paint()` puts the icon back, which makes the
+     * restore path the same one every other change goes through.
+     */
+    busy(on) {
+      for (const stop of stops) stop();
+      stops = [];
+      if (!on) { paint(); return; }
+      for (const { icon } of surfaces) {
+        icon.innerHTML = '';
+        // `currentColor`, so it inherits whichever of the two surfaces it is
+        // on — the rail's ink and the layers menu's are not the same.
+        stops.push(spin(icon, { size: 'sm', color: 'currentColor' }));
+      }
+    },
+
     /** Drop back to Mapbox without re-notifying the caller that asked us to. */
     revert() {
       provider = 'mapbox';

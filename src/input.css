@@ -149,9 +149,23 @@
        shorthand without a second rule to switch them off. */
     --g-rim: 0 0 0 0 rgba(0, 0, 0, 0);
     --g-sheen: linear-gradient(rgba(255, 255, 255, 0) 0 100%);
+
+    /* The flyover's placeholder ruling — the ground shown where the bounding
+       box in src/flyover.js told the renderer not to load. White with a grey
+       grid, which is what a viewport that has deliberately not drawn something
+       should look like: an empty grey box reads as a tile that failed. */
+    --g-grid-ground: #ffffff;
+    --g-grid-ink: #d8dade;
 }
 
 :root[data-theme="dark"] {
+    /* Not white. The grid IS the object; the ground it is ruled on follows the
+       surface it sits in, and a white rectangle here would be the brightest
+       thing on a night screen — in the one card that opens without being asked
+       for. Darker than --g-surface-2 so the box still reads as a window. */
+    --g-grid-ground: #16181c;
+    --g-grid-ink: #3a3f47;
+
     --g-surface: #202124;
     --g-surface-2: #303134;
     --g-text: #e8eaed;
@@ -695,6 +709,11 @@ body.navigating .app-chrome {
     height: 20px;
     flex: none;
     color: inherit;
+    /* So a spinner can be put in the slot instead of the glyph — spin.js places
+       its ring absolutely at top/left 50%, and without a positioned ancestor it
+       would centre itself on the page. The provider toggle does exactly this
+       while Google's session is being minted; see `busy` in src/provider.js. */
+    position: relative;
 }
 
 /* Every floating surface. One radius, one shadow, one background.
@@ -1280,9 +1299,195 @@ body.navigating .app-chrome {
     background: rgba(255, 255, 255, 0.22);
 }
 
-.g-place-action--primary .g-place-action-disc svg {
-    width: 15px;
-    height: 15px;
+/* The aerial view.
+   --------------------------------------------------------------------------
+   A fixed 16:10 window under the name, which is Apple's proportion for the
+   photograph at the top of a place card and is worth copying for a reason
+   beyond resemblance: the shot inside it is a camera circling a building, and
+   a tall box spends its height on sky and car park while a wide one spends it
+   on the thing you tapped.
+
+   `flex: none` because it lives in the same flex column as .g-place-body, whose
+   whole job is to give up room. Without it a long directory would squeeze the
+   view rather than scroll itself, and it is the one element here whose
+   proportions are load-bearing — the camera's zoom is computed from the box's
+   measured width in flyover-view.js.
+
+   The surface underneath shows through until the first tile lands. Not black:
+   deck.gl clears transparent, so an empty view reads as a space in the card
+   rather than as a hole in it, and a slow connection looks like something that
+   has not arrived rather than something that broke. */
+/* The ground the renderer is NOT asked to draw.
+   --------------------------------------------------------------------------
+   deck.gl clears its canvas transparent, so whatever this element paints shows
+   through wherever no tile was loaded — which, with the bounding box in
+   src/flyover.js, is a deliberate and predictable region rather than a failure:
+   the band of ground near the top of the frame that a 55-degree camera looks
+   past the building at. A grid says "nothing was loaded here" the way an empty
+   grey box cannot, which would read as a tile that failed.
+
+   A gradient rather than an image, which is the same decision the campus sheet
+   makes everywhere else: two `repeating-linear-gradient`s cost no request, no
+   bytes and no decode, they stay crisp at any DPR, and the line colour is a
+   token so it follows the theme. An actual PNG texture would be a second thing
+   to load in front of a viewport whose whole problem is loading.
+
+   28px cells, matching the turn-by-turn sign's ruling — this app already has a
+   grid and there is no reason to invent a second one at a different pitch. */
+.g-flyover {
+    position: relative;
+    flex: none;
+    margin: 4px 16px 0;
+    aspect-ratio: 16 / 10;
+    border-radius: 12px;
+    overflow: hidden;
+    background-color: var(--g-grid-ground);
+    background-image:
+        repeating-linear-gradient(to right, var(--g-grid-ink) 0 1px, transparent 1px 28px),
+        repeating-linear-gradient(to bottom, var(--g-grid-ink) 0 1px, transparent 1px 28px);
+    isolation: isolate;
+}
+
+/* The shared canvas's wrapper, moved between cards rather than rebuilt — one
+   WebGL context and one tileset for the life of the tab. See the note at the
+   top of src/flyover-view.js for why that is a billing decision and not a
+   micro-optimisation. Absolute, so it fills whichever card it is currently in
+   without that card having to lay it out. */
+.g-flyover-stage {
+    position: absolute;
+    inset: 0;
+}
+
+.g-flyover-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Google's, and required — see the note on `credits` in src/flyover-view.js.
+   Set over the imagery rather than under the box because the imagery is what it
+   is a credit for, and the scrim is what keeps it legible over a dark roof and
+   a bright car park alike without knowing which is under it. */
+.g-flyover-credit {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: 10px 8px 4px;
+    font-size: 10px;
+    line-height: 1.2;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.86);
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.55);
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.28), transparent);
+    pointer-events: none;
+}
+
+/* A view that will not load keeps its box and says why, rather than collapsing.
+   The card's layout does not shift, and "no aerial view" is information. */
+.g-flyover--failed {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 16 / 5;
+}
+
+.g-flyover--failed .g-flyover-stage,
+.g-flyover--failed .g-flyover-credit {
+    display: none;
+}
+
+.g-flyover-note {
+    margin: 0;
+    padding: 0 12px;
+    font-size: 12px;
+    line-height: 1.35;
+    text-align: center;
+    color: var(--g-text-dim);
+}
+
+/* The spinner, and the positioning context spin.js needs — it places its ring
+   absolutely at top/left 50%, so without a positioned ancestor the ring lands
+   halfway across the page. */
+.g-spin-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 30px;
+}
+
+/* Sized here rather than in JS so the ring's box and the gap under it are one
+   decision. The height is what the caption is spaced from; the ring itself is
+   drawn from the centre outwards and overflows this box on every side. */
+.g-spin-ring {
+    position: relative;
+    width: 0;
+    height: 0;
+}
+
+.g-spin-label {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.2;
+    color: var(--g-text-dim);
+}
+
+/* The press-and-hold ring.
+   --------------------------------------------------------------------------
+   Grows under the finger for exactly as long as the hold has to last — the
+   duration is written from JS so the animation and the timer cannot drift — and
+   is removed the moment the gesture completes or is abandoned. That makes it a
+   progress bar rather than a flourish: a press let go too early is a ring that
+   visibly did not finish.
+
+   Centred on the touch point by its own transform, so the JS only has to write
+   two coordinates and never has to know how big the ring is. */
+.g-press-ring {
+    position: absolute;
+    z-index: 2;
+    width: 54px;
+    height: 54px;
+    margin: -27px 0 0 -27px;
+    border-radius: 9999px;
+    border: 2px solid var(--g-blue);
+    background: color-mix(in srgb, var(--g-blue) 16%, transparent);
+    pointer-events: none;
+    animation-name: g-press-grow;
+    animation-timing-function: cubic-bezier(0.25, 0.6, 0.35, 1);
+    animation-fill-mode: both;
+}
+
+@keyframes g-press-grow {
+    from { transform: scale(0.25); opacity: 0; }
+    30%  { opacity: 1; }
+    to   { transform: scale(1); opacity: 1; }
+}
+
+/* Somebody who has asked for less motion still needs to know the press
+   registered — so the ring appears at its full size and simply sits there. */
+@media (prefers-reduced-motion: reduce) {
+    .g-press-ring { animation-name: none; }
+}
+
+/* iOS puts a selection callout under a long press on anything it thinks is
+   content, which would land on top of the gesture that press is for. */
+.mapboxgl-canvas {
+    -webkit-touch-callout: none;
+}
+
+/* Beside a line of text rather than over a box: the status line's spinner sits
+   in the flow and holds its own width, so the message does not jump sideways
+   when it stops. */
+.g-spin-inline {
+    position: relative;
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    flex: none;
+    vertical-align: -2px;
 }
 
 .g-row {

@@ -187,9 +187,10 @@ export function pinCard({ coords, kind, name }, { onStart, onEnd, onClose }) {
 
 /**
  * @param {object} props        a feature from src/directory.json
- * @param {object} handlers     { onStart, onEnd, onClose }
+ * @param {object} handlers     { onStart, onEnd, onClose, media }
+ * @param {HTMLElement} [handlers.media]  aerial view, for the places that earn one
  */
-export function buildingCard(props, { onStart, onEnd, onClose }) {
+export function buildingCard(props, { onStart, onEnd, onClose, media }) {
   const {
     name, officialName, parts, area_m2: area, height, contents = [], facilities = [], entrance,
   } = props;
@@ -210,6 +211,14 @@ export function buildingCard(props, { onStart, onEnd, onClose }) {
   if (qualifiers.length) text.append(el('p', 'g-place-cat', qualifiers.join(' · ')));
 
   card.append(row);
+
+  // The aerial view, directly under the name and above everything you can
+  // press. That is where Apple puts a place's photographs and it is the right
+  // place for the same reason: it is the half of the card that answers "is this
+  // the building I meant" without being read, and a picture that has to be
+  // scrolled to has been answered too late. Absent for most things on this map
+  // — see src/flyover.js for who earns one and why.
+  if (media) card.append(media);
 
   // Above the body rather than at the foot of the card. It was last, under
   // everything, which put the one thing the card is FOR behind a scroll on any

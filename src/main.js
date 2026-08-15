@@ -34,6 +34,9 @@ import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
 import { createSkinControl, preferredSkin, applySkinAttribute } from './skin.js';
 import { googleGround } from './google-tiles.js';
+import { canFlyOver, framing, boxOf } from './flyover.js';
+import { createFlyover } from './flyover-view.js';
+import { spin } from './spinner.js';
 import { paintIcons } from './g-icons.js';
 import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
 import {
@@ -162,6 +165,25 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // campus fills the frame on a phone and a desktop alike.
     bounds: CAMPUS_BOUNDS,
     fitBoundsOptions: { padding: FIT_MARGIN },
+    // The largest single thing this app holds in memory, and it was unbounded.
+    //
+    // Mapbox sizes its default cache as (ceil(w/tile)+1) * (ceil(h/tile)+1) * 5
+    // — five screenfuls. On a 1512x893 window against Google's 256-unit raster
+    // that is 175 tiles, and under the Google provider each one arrives as a
+    // 512px image, which is a megabyte of decoded pixels. A hundred and seventy
+    // megabytes of basemap, to look at one college.
+    //
+    // 60 is a bit under two screenfuls: the visible set here is about 35 tiles,
+    // so the whole current view plus headroom stays resident and only a change
+    // of zoom level evicts anything.
+    //
+    // THE TRADE IS REAL AND IS NOT FREE. Google's 2D tiles bill per tile
+    // request — see the note on `scale` in src/google-tiles.js — so a smaller
+    // cache is more requests. It is a good trade *here* specifically because
+    // the camera cannot leave CAMPUS_BOUNDS: there is no long pan across a
+    // city to refetch, only one campus at two or three zooms. Raise this first
+    // if the tile bill ever looks wrong.
+    maxTileCacheSize: 60,
   });
 
   // Dev-only handle, stripped from the production bundle by the constant fold.
@@ -236,7 +258,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let liveCard = null;      // the sign currently showing; owns the countdown
 
   // GUI Elements
+  // Three refs for one line of text: the paragraph carries the error class, the
+  // span inside it carries the words, and the span beside that holds the
+  // spinner. See setStatus and setBusy.
   const instructionText = document.getElementById('instruction-text');
+  const instructionMessage = document.getElementById('instruction-message');
+  const instructionBusy = document.getElementById('instruction-busy');
   const startCoordText = document.getElementById('start-coord');
   const endCoordText = document.getElementById('end-coord');
   const distanceText = document.getElementById('distance-text');
@@ -396,12 +423,63 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // both states where the app looks merely broken until the sentence
     // explaining it is on screen.
     if (isError) showRoutePanel();
-    instructionText.textContent = message;
+    instructionMessage.textContent = message;
     // One class rather than the five Tailwind toggles this used to need. The
     // hint's normal and error colours are both stated in the stylesheet, so
     // there is no specificity race between a muted class and a red one.
     instructionText.classList.toggle('is-error', isError);
   }
+
+  /**
+   * The spinner beside the status line.
+   *
+   * Two things use it and both are network waits with no knowable length: the
+   * campus data on the way in, and a route being computed by the server. The
+   * text already says what is happening in both cases; what it cannot say is
+   * that the app is still TRYING, which is the whole difference between a slow
+   * connection and a dead one.
+   *
+   * Reference-counted rather than a boolean, because the two overlap on a cold
+   * load: a route asked for before the overlays have landed would otherwise
+   * have its spinner switched off by the overlays finishing. Every caller pairs
+   * its `setBusy(true)` with a `setBusy(false)` in a `finally`, which is what
+   * keeps the count honest across the error paths.
+   */
+  let busyDepth = 0;
+  let stopBusy = null;
+
+  function setBusy(on) {
+    busyDepth = on ? busyDepth + 1 : Math.max(0, busyDepth - 1);
+    const wanted = busyDepth > 0;
+    if (wanted === Boolean(stopBusy)) return;
+    if (wanted) {
+      instructionBusy.classList.remove('hidden');
+      stopBusy = spin(instructionBusy, { size: 'sm' });
+    } else {
+      stopBusy();
+      stopBusy = null;
+      instructionBusy.classList.add('hidden');
+    }
+  }
+
+  /**
+   * What the map is waiting for when it is waiting for nothing.
+   *
+   * A function rather than a constant because the virtual location changes the
+   * answer: with a fix on the campus there is nowhere to set a start FROM, so
+   * the press is a destination, and saying otherwise sends people looking for a
+   * step that is not there.
+   *
+   * "Press and hold" rather than "click", and this line is now carrying the
+   * whole discoverability of that gesture — see LONG_PRESS_MS. A hold is not a
+   * thing anybody tries unprompted on a map they have not used before. Shared
+   * with the end of the cold load, which is the other place this has to be
+   * said: the hint is wrong until the network has landed, so it is written
+   * again once it has.
+   */
+  const idleHint = () => (geolocation.fixture
+    ? 'Press and hold on the map to set a destination.'
+    : 'Press and hold on the map to set a start point.');
 
   function resetMap() {
     endNavigation();
@@ -434,13 +512,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       searchClear.classList.add('hidden');
       closeResults();
     }
-    // What the next click will actually do, which the virtual location changes:
-    // with a fix on the campus there is nowhere to set a start FROM, so the
-    // click is a destination and saying otherwise sends people looking for a
-    // step that is not there.
-    setStatus(geolocation.fixture
-      ? 'Click on the map to set a destination.'
-      : 'Click on the map to set a start point.');
+    setStatus(idleHint());
     startCoordText.textContent = "Not set";
     endCoordText.textContent = "Not set";
     setDistanceFeet(0);
@@ -2536,6 +2608,17 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   /**
+   * The aerial view currently on screen, if there is one.
+   *
+   * Exactly one can exist, and it is held here rather than inside the card
+   * because the flyover borrows a single shared canvas — see the note at the
+   * top of src/flyover-view.js. A card is replaced by the next card without
+   * anything being told, so releasing that canvas has to hang off the panel
+   * rather than off the card that is going away.
+   */
+  let activeFlyover = null;
+
+  /**
    * Put a card in the left column, or take whatever is there away.
    *
    * One panel for both kinds — a building's card and a pin's — because from the
@@ -2544,8 +2627,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * which is why opening the LRC covered the campus with a list of what is
    * inside the LRC. The tie to the marker survives without the anchor: the pin
    * itself is lifted and stays lifted for as long as this is up.
+   *
+   * @param {HTMLElement} card
+   * @param {object} [flyover] the `{ el, destroy }` this card's media came from
    */
-  function showPlaceCard(card) {
+  function showPlaceCard(card, flyover = null) {
+    // Swapped in one step, and in this order, because the incoming card may
+    // already hold a live flyover of its own: tearing down after adopting would
+    // destroy the one just built, and adopting before tearing down would leak
+    // the one going away.
+    activeFlyover?.destroy();
+    activeFlyover = flyover;
+
     const was = !placePanel.classList.contains('hidden');
     placePanel.replaceChildren(card);
     placePanel.classList.remove('hidden');
@@ -2557,6 +2650,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
   function closePlaceCard() {
     if (placePanel.classList.contains('hidden')) return;
+    activeFlyover?.destroy();
+    activeFlyover = null;
     placePanel.classList.add('hidden');
     placePanel.replaceChildren();
     map.easeTo({ padding: campusPadding(), duration: 300 });
@@ -2597,7 +2692,28 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       }
     }
 
+    // The helicopter shot, for the things that have something to fly around.
+    // `poi` is derived here rather than stored, exactly as the card's own
+    // subtitle derives it, so the disc on the map, the line under the name and
+    // the decision to show an aerial view are all one classification and cannot
+    // disagree. `anchor` is a point known to be inside the footprint, which
+    // `entrance` is not — an entrance sits on the wall, and orbiting it would
+    // put the camera's centre half in the building and half in the path.
+    const flyover = googleKey && canFlyOver({ ...props, poi: poiFor(props.name) })
+      ? (() => {
+        const centre = props.anchor ?? props.entrance;
+        const frame = framing(props.area_m2);
+        // The box the renderer is told to stop at, built here rather than
+        // inside the view so the policy — how much ground a place is worth
+        // loading — stays in one file with the rest of it.
+        return createFlyover({
+          key: googleKey, centre, name: props.name, ...frame, box: boxOf(centre, frame.reach),
+        });
+      })()
+      : null;
+
     showPlaceCard(buildingCard(props, {
+      media: flyover?.el,
       onStart: (coords, name) => {
         if (startPoint && endPoint) resetMap();
         clearSelection();
@@ -2612,14 +2728,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         if (!startPoint) {
           pendingEnd = { coords, name };
           showRoutePanel();
-          setStatus(`${name} set as the destination. Click the map to set a start point.`);
+          setStatus(`${name} set as the destination. Press and hold the map to set a start point.`);
           return;
         }
         if (endPoint) resetMap0(coords, name);
         else await placeEnd(coords, name);
       },
       onClose: clearSelection,
-    }));
+    }), flyover);
     highlightBuilding(props.officialName);
   }
 
@@ -3606,6 +3722,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (currentProvider !== 'google') return;
     const generation = ++groundGeneration;
 
+    // Only while THIS request is the current one. A toggle away and back mints
+    // a second session, and the first one resolving must not take the spinner
+    // off a request that is still in flight — hence the generation check in the
+    // finally rather than an unconditional clear.
+    providerControl?.busy(true);
     try {
       const source = await googleGround({
         key: googleKey,
@@ -3651,6 +3772,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       currentProvider = 'mapbox';
       providerControl?.revert();
       syncBasemapStyle();
+    } finally {
+      // `revert()` above already repainted the buttons, and `busy(false)` calls
+      // the same `paint()`, so the failure path is idempotent rather than
+      // fighting itself.
+      if (generation === groundGeneration) providerControl?.busy(false);
     }
   }
 
@@ -3845,10 +3971,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * Bring the route panel up because something needs to be read in it.
    *
    * The panel starts closed, which means every message this app writes about a
-   * route — the distance, "Now click to set an end point", a routing server
-   * that is down — is being written into a hidden card. Anything that sets an
-   * endpoint or reports an error opens it first, so the panel appears at the
-   * moment it acquires something to say and not before.
+   * route — the distance, "Now press and hold to set an end point", a routing
+   * server that is down — is being written into a hidden card. Anything that
+   * sets an endpoint or reports an error opens it first, so the panel appears
+   * at the moment it acquires something to say and not before.
    */
   function showRoutePanel() {
     toggleRoutePanel(true);
@@ -4318,6 +4444,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // All from the same server, so ask together. They are settled separately
     // because only the network is load-bearing: without it nothing can be
     // routed, whereas every overlay is decoration and its loss costs one layer.
+    //
+    // Said out loud while it happens, because until it settles the map is a
+    // picture — and the hint under the distance is describing a gesture that
+    // will not do anything yet. Eight requests over a phone connection is a
+    // real wait, and the failure mode without this is somebody pressing and
+    // holding on a map that has not finished arriving and concluding the app
+    // is broken.
+    setBusy(true);
+    setStatus('Loading the campus…');
     const [networkResult, vertexResult, buildings, basemap, amenities, places, labels, directory] =
       await Promise.allSettled([
         fetchNetwork(),
@@ -4328,7 +4463,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         fetchOverlay('places'),
         fetchOverlay('labels'),
         fetchOverlay('directory'),
-      ]);
+      ]).finally(() => setBusy(false));
 
     if (buildings.status === 'fulfilled') {
       campusBuildings = buildings.value;
@@ -4444,6 +4579,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (vertexResult.status === 'rejected') console.error(vertexResult.reason);
     networkPoints = featureCollection(vertices.map(v => point(v)));
 
+    // The moment a press-and-hold starts meaning something, and therefore the
+    // moment it is honest to advertise one. Everything above this line has been
+    // showing "Loading the campus…" over a map that could not be routed on.
+    setStatus(idleHint());
+
     // Drawn only as far as the fence. my campus's driveways are drawn running out to
     // the public road, and past the boundary that white ribbon lands on top of
     // a road the basemap is already drawing. Cut rather than dropped, so a
@@ -4543,6 +4683,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Guard against a stale response landing after the user has moved on.
     const seq = ++requestSeq;
     let result;
+    // The only wait in this app the user asked for directly. "Calculating
+    // route…" has been the whole of the feedback here, and a sentence that does
+    // not change cannot distinguish a server thinking from a server gone.
+    setBusy(true);
     try {
       result = await requestRoute(startPoint.geometry.coordinates, coords);
     } catch (error) {
@@ -4552,6 +4696,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       endMarker.remove();
       endMarker = null;
       return;
+    } finally {
+      setBusy(false);
     }
     if (seq !== requestSeq) return;
 
@@ -4698,8 +4844,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (e.key === 'Escape') clearSelection();
   });
 
-  map.on('click', async (e) => {
+  map.on('click', (e) => {
     if (navActive || !networkPoints) return;
+    // The release at the end of a press-and-hold. That gesture has already done
+    // its work; without this the same finger would drop a route point and then
+    // immediately clear the selection on the way back up.
+    if (swallowClick) { swallowClick = false; return; }
 
     // A tap on a pin lifts it rather than dropping a second one beside it.
     // Tested before buildings because pins sit on top of them and half of them
@@ -4725,10 +4875,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // fell through to the router and dropped a start point on the map instead.
     //
     // CONSUMED, not passed on: this returns rather than carrying on to the
-    // building card and the route below. One tap should do one thing, and a tap
-    // that both cleared the restrooms and opened whatever building was behind
-    // them would leave the map in a state nobody asked for. The second tap gets
-    // the building.
+    // building card below. One tap should do one thing, and a tap that both
+    // cleared the restrooms and opened whatever building was behind them would
+    // leave the map in a state nobody asked for. The second tap gets the
+    // building.
     if (activeCategory) { clearCategory(); return; }
 
     // A tap on a building asks what it is rather than dropping a pin on it.
@@ -4741,7 +4891,66 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
     closeBuildingCard();
 
-    const clicked = point([e.lngLat.lng, e.lngLat.lat]);
+    // ...and a tap on bare ground now does nothing else. Route points are the
+    // press-and-hold below, and a double-click is Mapbox's own zoom. See the
+    // note on LONG_PRESS_MS for why that trade is the right way round.
+  });
+
+  // -------------------------------------------------------------------------
+  // Dropping a route point
+  //
+  // Press and hold, the way Apple Maps does it, rather than on a plain tap.
+  //
+  // A tap used to place a start or an end, and it was the wrong gesture for a
+  // map at this zoom: the two things a finger most wants to do to a campus are
+  // "what is that" and "get closer", and both of them were spending a route
+  // marker to find out. Double-tapping to zoom in was actively broken by it —
+  // the first tap dropped a start point, the second dropped an end point, and
+  // the map zoomed while drawing a route between two places nobody chose.
+  //
+  // Making the deliberate thing deliberate fixes both at once. A tap is now
+  // free to mean "tell me about this", a double-tap is free to mean "closer",
+  // and the one gesture that changes state is the one you have to mean.
+  // -------------------------------------------------------------------------
+
+  /** How long the press has to be held. Apple's own is around half a second. */
+  const LONG_PRESS_MS = 500;
+
+  /**
+   * ...and how far the finger may travel first, in px.
+   *
+   * Generous, because this is competing with dragging the map and the two are
+   * told apart by intent rather than by distance: somebody panning moves a long
+   * way immediately, and somebody holding still on a phone in one hand wobbles
+   * by a few pixels the whole time. Under about 8 the gesture is unusable while
+   * walking, which is the condition this app is used in.
+   */
+  const LONG_PRESS_SLOP = 10;
+
+  let pressTimer = 0;
+  let pressAt = null;
+  let swallowClick = false;
+
+  /** The growing ring under the finger. Removed by whichever end comes first. */
+  let pressRing = null;
+
+  function endPress() {
+    clearTimeout(pressTimer);
+    pressTimer = 0;
+    pressAt = null;
+    pressRing?.remove();
+    pressRing = null;
+  }
+
+  /**
+   * What a completed hold does, which is what a tap used to do.
+   *
+   * Lifted out of the click handler unchanged — the ordering here is load
+   * bearing and was worked out over several rounds of the routing UI, so it is
+   * moved rather than rewritten.
+   */
+  async function dropRoutePoint(lngLat) {
+    const clicked = point([lngLat.lng, lngLat.lat]);
     // Snapping the click locally keeps the marker instant; the server snaps
     // again on its own side, and lands on the same vertex.
     const snapped = nearestPoint(clicked, networkPoints).geometry.coordinates;
@@ -4749,7 +4958,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Both ends already set: start over rather than accumulating markers.
     if (startPoint && endPoint) resetMap();
 
-    // With the virtual location on, every click is a destination — you are
+    // With the virtual location on, every press is a destination — you are
     // already standing somewhere and the dot says where. Asked here rather than
     // baked into placeStart so an explicit "Start here" on a building's card
     // still overrides it: that is somebody saying they want to leave from
@@ -4767,13 +4976,78 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         pendingEnd = null;
         await placeEnd(coords, name);
       } else {
-        setStatus('Great! Now click to set an end point.');
+        setStatus('Great! Now press and hold to set an end point.');
       }
       return;
     }
 
     await placeEnd(snapped);
+  }
+
+  function beginPress(e) {
+    if (navActive || !networkPoints) return;
+    endPress();
+    // A new gesture starts clean. This is also the recovery path for a hold
+    // that ended without a click at all — a finger lifted over the sidebar, or
+    // outside the window — where the flag would otherwise still be set and
+    // would eat the next real tap.
+    swallowClick = false;
+    pressAt = e.point;
+
+    // Feedback, and it is not decoration: a gesture with no visible response
+    // until it has already fired is a gesture nobody discovers. The ring grows
+    // for exactly as long as the hold lasts, so the animation IS the progress
+    // bar — let go early and you can see you let go early.
+    pressRing = document.createElement('div');
+    pressRing.className = 'g-press-ring';
+    pressRing.style.left = `${e.point.x}px`;
+    pressRing.style.top = `${e.point.y}px`;
+    pressRing.style.animationDuration = `${LONG_PRESS_MS}ms`;
+    map.getContainer().append(pressRing);
+
+    pressTimer = window.setTimeout(() => {
+      endPress();
+      // Set before the call, not after: dropRoutePoint is asynchronous and the
+      // finger comes up long before it settles, so a flag set on the far side
+      // of it would be set after the click it exists to swallow.
+      //
+      // Cleared by that click, or by the next press if none arrives. NOT on a
+      // timer — the fire happens while the finger is still down, and there is
+      // no upper bound on how long somebody holds it there, so any timeout
+      // short enough to be useful is one a slow hand beats.
+      swallowClick = true;
+      // A hold does not clear a category or open a building the way a tap does
+      // — it is a different gesture and means only one thing.
+      dropRoutePoint(e.lngLat);
+    }, LONG_PRESS_MS);
+  }
+
+  map.on('mousedown', (e) => {
+    // Left button only. A right-press is the context menu, and on a trackpad a
+    // two-finger press arrives here as button 2 while the hand is still.
+    if (e.originalEvent.button === 0) beginPress(e);
   });
+  map.on('touchstart', (e) => {
+    // One finger. Two is a pinch or a two-finger rotate, and both of those are
+    // held still for a moment at the start.
+    if (e.points.length === 1) beginPress(e);
+  });
+
+  // Any travel past the slop is a drag, and a drag is panning.
+  for (const moved of ['mousemove', 'touchmove']) {
+    map.on(moved, (e) => {
+      if (!pressAt) return;
+      const at = e.point ?? e.points?.[0];
+      if (at && Math.hypot(at.x - pressAt.x, at.y - pressAt.y) > LONG_PRESS_SLOP) endPress();
+    });
+  }
+
+  // Every way a press can stop being one. `dragstart` and `zoomstart` are not
+  // redundant with the movement test above: a momentum pan or a pinch can move
+  // the map without the pointer itself travelling anywhere.
+  for (const over of ['mouseup', 'touchend', 'touchcancel', 'dragstart', 'zoomstart']) {
+    map.on(over, endPress);
+  }
 
   // -------------------------------------------------------------------------
   // Destination search

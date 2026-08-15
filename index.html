@@ -153,7 +153,14 @@
                         <div>
                             <div id="distance-text" class="g-route-distance">0 <span class="g-route-unit">ft</span>
                             </div>
-                            <p id="instruction-text" class="g-route-hint">Click on the map to set a start point.</p>
+                            <!-- The message is a child rather than the paragraph's own text so a
+                                 spinner can sit beside it: setStatus writes textContent, which
+                                 would wipe any sibling element out of the paragraph itself. The
+                                 `is-error` class stays on the paragraph, where .g-route-hint is. -->
+                            <p id="instruction-text" class="g-route-hint"><span id="instruction-busy"
+                                    class="g-spin-inline hidden" aria-hidden="true"></span><span
+                                    id="instruction-message">Press and hold on the map to set a start
+                                    point.</span></p>
                         </div>
                     </div>
                 </div>
