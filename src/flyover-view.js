@@ -137,8 +137,15 @@ const MAX_TILES_DRAWN = 48;
  */
 const GRID_SPANS = 1.5;
 
-/** Grid cells across the frame. Constant, so every building rules the same. */
-const GRID_CELLS = 12;
+/**
+ * Grid cells across the frame.
+ *
+ * A count rather than a cell size in metres, so the ruling looks the same over
+ * Adaptive PE and over the Parking Garage — those differ by a factor of seven
+ * in width, and a fixed 20 m cell would be a fine mesh on one and four squares
+ * on the other.
+ */
+const GRID_CELLS = 24;
 
 /**
  * How far below the ground the grid is drawn, in metres.
