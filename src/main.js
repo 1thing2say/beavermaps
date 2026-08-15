@@ -28,6 +28,7 @@ import {
   mountSelectedPin, sizeExpr, sizeAt, LABEL_MAX_EM,
   AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE,
   growEase, shrinkEase, swayAt, scaleStops, GROW_MS, SHRINK_MS, SWAY_MS,
+  GHOSTS, GHOST_LAG_MS, GHOST_ALPHA,
 } from './pin-select.js';
 import { createThemeControl, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
@@ -1760,6 +1761,71 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   /**
+   * The arriving pins' ghost trail, as layers rather than as elements.
+   *
+   * The same idea as the one behind a lifted pin — see GHOSTS in
+   * src/pin-select.js — and it has to be built differently, because there is no
+   * element here to clone. A whole category arrives at once on ONE symbol layer,
+   * animated by pushing `icon-size` and `icon-translate` at Mapbox frame by
+   * frame. So a ghost is a second symbol layer over the SAME source, handed the
+   * values the real one held `k * GHOST_LAG_MS` ago. Five of them, beneath the
+   * real layer, oldest at the bottom.
+   *
+   * NO NAMES ON A GHOST, and not for taste: a symbol layer's text competes for
+   * placement, so five ghost layers carrying `text-field` would put six copies
+   * of every name into the collision index and shove the real labels out of the
+   * positions they had won. `text-field` is dropped entirely rather than faded
+   * out, because an invisible label still collides. What trails is the disc.
+   *
+   * They exist only for the length of the entrance. Nothing here is part of the
+   * map's own style — the layers are added when the run starts and removed when
+   * it settles, so a cancelled run cannot leave a ghost behind.
+   */
+  const GHOST_PIN_LAYERS = Array.from(
+    { length: GHOSTS }, (unused, k) => `category-pins-ghost-${k + 1}`,
+  );
+
+  function addPinGhosts() {
+    if (!map.getLayer('category-pins')) return false;
+    // Counting DOWN, because each is inserted directly beneath the real layer:
+    // the oldest goes in first and everything after it lands on top, which
+    // leaves the trail stacked back-to-front without a second pass.
+    for (let k = GHOSTS; k >= 1; k -= 1) {
+      const id = GHOST_PIN_LAYERS[k - 1];
+      if (map.getLayer(id)) continue;
+      map.addLayer({
+        id,
+        type: 'symbol',
+        source: 'category-pins',
+        slot: 'middle',
+        layout: {
+          'icon-image': ['get', 'icon'],
+          'icon-size': sizeExpr(scaleStops(CATEGORY_SIZE, ENTRANCE_START)),
+          'icon-anchor': 'center',
+          'icon-allow-overlap': true,
+        },
+        paint: {
+          'icon-emissive-strength': 1,
+          'icon-opacity': 0,
+          'icon-translate': [0, 0],
+          'icon-translate-anchor': 'viewport',
+        },
+      }, 'category-pins');
+      // The same selection the real layer is drawing, including the pin a
+      // selection has taken out of it — a ghost of a pin that is not there is a
+      // pin that is there.
+      map.setFilter(id, map.getFilter('category-pins') ?? null);
+    }
+    return true;
+  }
+
+  function removePinGhosts() {
+    for (const id of GHOST_PIN_LAYERS) {
+      if (map.getLayer(id)) map.removeLayer(id);
+    }
+  }
+
+  /**
    * The category's pins arriving, on the same curve a tapped pin is lifted on.
    *
    * `icon-size` stays a zoom expression the whole way rather than becoming a
@@ -1800,6 +1866,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     const settle = () => {
       pinsArriving = false;
+      removePinGhosts();
       if (!map.getLayer(layer)) return;
       map.setLayoutProperty(layer, 'icon-size', base);
       map.setPaintProperty(layer, 'icon-translate', [0, 0]);
@@ -1825,6 +1892,34 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // changing and the rest of the run is paint alone.
     let growing = true;
 
+    // One flag per ghost, for the same reason: a ghost stops writing `icon-size`
+    // once its own copy of the growth is over, which is what keeps five extra
+    // symbol layers from re-laying out for the 780 ms of pure sway.
+    const trailing = pinBlur && addPinGhosts();
+    const ghostGrowing = GHOST_PIN_LAYERS.map(() => true);
+
+    // WHAT THIS TRAIL CANNOT DO, measured rather than assumed, because the
+    // obvious extension is wrong and looks right on paper.
+    //
+    // Two things move when a category arrives, and they are three orders of
+    // magnitude apart. Sampled over 150 ms — the trail's own length — the pins'
+    // own entrance travels 2.2 px, while the camera travels 162 px framing the
+    // bike racks and 247 px framing the restrooms. So the trail is drawing the
+    // negligible one, and it is: a category entrance is a concentric SCALE plus
+    // a 2 px settle, and every past sample of a growing disc hides behind the
+    // present one.
+    //
+    // Putting the camera's own travel into the ghosts was built, measured and
+    // taken out again. It works — the trail fanned out to 92 px — and it is a
+    // lie. When the camera moves, the buildings, the roads and the labels move
+    // with it; smearing only the pins says the pins are sliding across a map
+    // that is holding still, which is the opposite of what is happening. Camera
+    // blur is a whole-frame effect or it is nothing, and nothing here can apply
+    // one: Mapbox draws to its own canvas and hands out no post-processing hook.
+    //
+    // So this stays as it is — the pins' own motion, honestly, at whatever size
+    // that motion happens to be.
+
     await overFrames(SWAY_MS, (p) => {
       if (!map.getLayer(layer)) return;
       const ms = p * SWAY_MS;
@@ -1846,6 +1941,30 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       const appearing = Math.min(ms / APPEAR_MS, 1);
       map.setPaintProperty(layer, 'icon-opacity', appearing);
       map.setPaintProperty(layer, 'text-opacity', appearing);
+
+      // ...and the same three values again, five times, each read at an earlier
+      // clock. `width` is deliberately the one just measured rather than the one
+      // at the ghost's own time: it is a function of the CURRENT zoom, because
+      // that is the zoom every layer is being drawn at this frame.
+      if (!trailing) return;
+      for (let k = 1; k <= GHOSTS; k += 1) {
+        const id = GHOST_PIN_LAYERS[k - 1];
+        if (!map.getLayer(id)) continue;
+        const then = ms - k * GHOST_LAG_MS;
+        // Before its turn a ghost has nothing to show: the pins had not arrived.
+        if (then <= 0) continue;
+        if (ghostGrowing[k - 1]) {
+          const done = then >= GROW_MS;
+          const grown = ENTRANCE_START
+            + (1 - ENTRANCE_START) * growEase(Math.min(then / GROW_MS, 1));
+          map.setLayoutProperty(id, 'icon-size', done ? base
+            : sizeExpr(scaleStops(CATEGORY_SIZE, grown)));
+          ghostGrowing[k - 1] = !done;
+        }
+        map.setPaintProperty(id, 'icon-translate', [swayAt(then, width), 0]);
+        map.setPaintProperty(id, 'icon-opacity',
+          Math.min(then / APPEAR_MS, 1) * GHOST_ALPHA * (1 - (k - 1) / GHOSTS));
+      }
     });
 
     // Back to the declarative values, so a later zoom is the expression's job
@@ -1863,6 +1982,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    */
   async function playCategorySwap() {
     choreography += 1;
+    // The one place a superseded entrance is swept up. `overFrames` abandons a
+    // cancelled run without resolving, on purpose — see `choreography` — so the
+    // `settle()` that would have taken the ghosts down never runs. Anything that
+    // bumps the counter has to assume it has just orphaned a trail.
+    removePinGhosts();
     const clearing = pinLayers();
     const hadPins = Boolean(map.getLayer('category-pins'));
     const wasAt = hadPins ? fadeFrom('category-pins') : 0;
@@ -1888,6 +2012,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /** The way back: the answer goes, and the campus comes up behind it. */
   async function playCategoryClear() {
     choreography += 1;
+    // As in playCategorySwap: bumping the counter can orphan a trail.
+    removePinGhosts();
     const still = prefersStill();
 
     if (!still && map.getLayer('category-pins')) {
