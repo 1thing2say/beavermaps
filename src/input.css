@@ -2288,14 +2288,41 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
 /* The turn-by-turn sign is a homage to a drifting grid menu, which is a
    different design language again — under Apple it is simply a card. The grid
    layer is switched off rather than recoloured: it is the one decoration here
-   with no counterpart on the other side. */
+   with no counterpart on the other side.
+
+   SOLID, and the one card in this look that is. Everything else here is glass
+   because everything else here is optional: you opened it, you read it, you
+   dismissed it, and seeing the map through it is part of knowing where it sits.
+   This is the opposite kind of thing. It is the only card that appears without
+   being asked for, it says the one fact you need before the next turn, and it
+   is read at a glance by somebody walking — so what is behind it is noise, and
+   a blurred campus behind white text is noise with the same values as the text.
+   Legibility outranks the material.
+
+   Black in BOTH themes, and white text with it, which is why the palette is
+   pinned here rather than left to the tokens. The precedent is one element
+   away: #nav-footer, the strip at the other end of the same screen, has always
+   been dark with white text whatever the theme says. Navigation is its own
+   little night, and the sign and the footer are the two halves of it. */
 [data-skin="apple"] .nav-sign {
+    --g-text: #ffffff;
+    --g-text-dim: rgba(235, 235, 245, 0.6);
+    /* End's pill, and it is deliberately dim: systemBlue on white-at-14% over
+       black is 4.3:1, which is under the line for text this size. Taking the
+       pill down to 10% takes the blue up to 4.8:1 — the fix belongs in the
+       surface rather than in a lightened blue that no other control uses. */
+    --g-tint: rgba(255, 255, 255, 0.10);
+    --g-blue: #0a84ff;
+    /* The ruling takes the night ink too: the light theme's is near-white and
+       would print a bright lattice across a black sign. */
+    --sign-grid-solid: #353a43;
+
     border-radius: var(--g-radius);
     color: var(--g-text);
     text-shadow: none;
-    background-color: var(--g-card-bg);
-    -webkit-backdrop-filter: var(--g-card-filter);
-    backdrop-filter: var(--g-card-filter);
+    background-color: #000000;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
     box-shadow: var(--g-shadow);
 }
 
@@ -2324,15 +2351,37 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
    for this one state, because a demo of the route is the place a decoration
    earns its keep.
 
-   Both rulings are drawn FLAT here — `--sign-grid-solid` rather than the
+   Both rulings are drawn with FLAT ink — `--sign-grid-solid` rather than the
    translucent `--sign-grid`, set on the sign so both pseudo-elements inherit
-   it. Two translucent grids over each other is four levels of the same colour
-   depending on how they happen to overlap, and under the Apple skin the card
-   they sit on is itself translucent, so the lines were letting the map through.
-   Flat lines cross flat lines, and the only thing that changes where they meet
-   is which one is on top. */
+   it. That is about what happens INSIDE one layer: each layer is two crossing
+   gradients, and translucent ink there means a crossing is darker than the two
+   lines that made it, at every intersection, on both layers, for no reason
+   anybody could name. Flat ink crosses flat ink and a crossing is just a
+   crossing. */
 body.simulating .nav-sign {
     --sign-grid: var(--sign-grid-solid);
+}
+
+/* And then the whole ruling is faded, once, on the layer. The pane under it is
+   solid black now, so this is not about seeing the map through the lines — it
+   is about how loud they are. A 3px line on a 28px cell, crossed both ways and
+   doubled, is a lot of ink for a decoration: at full strength the lattice is
+   the first thing the sign says, with the distance and the turn behind it. At a
+   third it is a texture you notice second, which is the right order for the one
+   card somebody reads while walking. This is the number to move if it wants to
+   be louder or quieter.
+
+   Fading the LAYER rather than the ink is what keeps a crossing one colour —
+   the ruling is composed opaque and then made faint as a whole. Two levels do
+   survive, the near grid over the far one, and those are wanted: that is the
+   parallax made visible, and it lands at about twice this value.
+
+   Apple only. The classic sign is its own thing, a charcoal or white slab whose
+   grid is the point rather than a texture, and it is drawn at the strength it
+   was designed at. */
+[data-skin="apple"] body.simulating .nav-sign::before,
+[data-skin="apple"] body.simulating .nav-sign::after {
+    opacity: 0.32;
 }
 
 /* Anchored to the sign's CENTRE, like the stationary copy below, so the two are
