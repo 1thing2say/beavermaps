@@ -3862,11 +3862,16 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (map.getLayer('campus-buildings')) addBuildingsLayer();
   }
 
-  // No `cycle` any more: that was the rail's one-glyph version of this, which
-  // had to guess a next value because a rail button has room for one word. The
-  // layers menu asks the question outright, three buttons for three answers.
+  // Two surfaces, like the three controls below it: the layers menu's
+  // radiogroup and the debug menu's. Both are handed over rather than copied,
+  // because the control holds the only `mode` there is and repaints every button
+  // in every group from it.
+  //
+  // (There used to be a third form — a one-glyph rail button that cycled through
+  // the modes, guessing a next value because a rail button has room for one
+  // word. A menu can ask the question outright, three buttons for three answers.)
   createThemeControl({
-    group: themeModes,
+    groups: [themeModes, document.getElementById('debug-theme-modes')],
     onChange: (theme) => {
       currentTheme = theme;
       syncBasemapStyle();

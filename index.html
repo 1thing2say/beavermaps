@@ -350,6 +350,29 @@
                 </button>
             </div>
 
+            <!-- The same three modes the layers menu carries, and the same
+                 radiogroup markup, because createThemeControl reads every group
+                 it is handed for [data-theme-mode] and repaints all of them from
+                 one value. Nothing here remembers which one you pressed. -->
+            <p class="g-layers-heading g-layers-heading--split">Appearance</p>
+            <div id="debug-theme-modes" class="g-layers-row" role="radiogroup" aria-label="Appearance">
+                <button type="button" class="g-layer-btn" role="radio" aria-checked="false"
+                    data-theme-mode="light">
+                    <span class="g-layer-icon" data-icon="light"></span>
+                    Light
+                </button>
+                <button type="button" class="g-layer-btn" role="radio" aria-checked="false"
+                    data-theme-mode="dark">
+                    <span class="g-layer-icon" data-icon="dark"></span>
+                    Dark
+                </button>
+                <button type="button" class="g-layer-btn" role="radio" aria-checked="false"
+                    data-theme-mode="auto">
+                    <span class="g-layer-icon" data-icon="auto"></span>
+                    Auto
+                </button>
+            </div>
+
             <p class="g-layers-heading g-layers-heading--split">Look</p>
             <div class="g-layers-row">
                 <button id="debug-skin" type="button" class="g-layer-btn g-layer-btn--wide">

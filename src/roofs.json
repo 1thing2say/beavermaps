@@ -1,0 +1,428 @@
+{
+ "generated": "2026-08-15",
+ "source": "Google Photorealistic 3D Tiles, geometric error 2.01 m",
+ "datum": "metres above the WGS84 ellipsoid",
+ "note": "centre is [longitude, latitude, roof_m]. roof_m is the median of the highest mesh sample in each 3 m cell inside the footprint, inset 2.5 m from its edge; ground_m is the median of the lowest sample per cell in the 14 m collar outside it; height_m is the difference. peak_m is the tallest cell, so it holds stair cores, aerials and overhanging trees. cells is how many cells the roof figure rests on. See scripts/build-roofs.mjs.",
+ "buildings": [
+  {
+   "name": "Adaptive PE",
+   "area_m2": 173,
+   "centre": [
+    -121.3458854,
+    38.649306,
+    -1
+   ],
+   "roof_m": -1,
+   "ground_m": -4.7,
+   "height_m": 3.7,
+   "peak_m": -0.9,
+   "cells": 3
+  },
+  {
+   "name": "Admin Bldg.",
+   "area_m2": 2836,
+   "centre": [
+    -121.3493922,
+    38.6509426,
+    3.7
+   ],
+   "roof_m": 3.7,
+   "ground_m": -1.1,
+   "height_m": 4.8,
+   "peak_m": 22.5,
+   "cells": 121
+  },
+  {
+   "name": "Arts & Sci",
+   "area_m2": 1312,
+   "centre": [
+    -121.3479197,
+    38.6525699,
+    5.3
+   ],
+   "roof_m": 5.3,
+   "ground_m": -0.3,
+   "height_m": 5.6,
+   "peak_m": 7.9,
+   "cells": 98
+  },
+  {
+   "name": "Baseball and Softball Field",
+   "area_m2": 483,
+   "centre": [
+    -121.3456381,
+    38.6466154,
+    -2.2
+   ],
+   "roof_m": -2.2,
+   "ground_m": -6.7,
+   "height_m": 4.5,
+   "peak_m": 0.8,
+   "cells": 14
+  },
+  {
+   "name": "Bookstore",
+   "area_m2": 1232,
+   "centre": [
+    -121.3466547,
+    38.6505099,
+    2.2
+   ],
+   "roof_m": 2.2,
+   "ground_m": -3.3,
+   "height_m": 5.5,
+   "peak_m": 4.1,
+   "cells": 74
+  },
+  {
+   "name": "Career Technical Education (CTE)",
+   "area_m2": 6963,
+   "centre": [
+    -121.3455395,
+    38.6515254,
+    6.4
+   ],
+   "roof_m": 6.4,
+   "ground_m": -3.3,
+   "height_m": 9.6,
+   "peak_m": 9.2,
+   "cells": 582
+  },
+  {
+   "name": "Child Development Center (CDC)",
+   "area_m2": 2465,
+   "centre": [
+    -121.3455587,
+    38.6503977,
+    1.3
+   ],
+   "roof_m": 1.3,
+   "ground_m": -4.1,
+   "height_m": 5.4,
+   "peak_m": 3,
+   "cells": 193
+  },
+  {
+   "name": "College Police",
+   "area_m2": 291,
+   "centre": [
+    -121.348968,
+    38.6489637,
+    0.8
+   ],
+   "roof_m": 0.8,
+   "ground_m": -3.1,
+   "height_m": 3.8,
+   "peak_m": 0.8,
+   "cells": 13
+  },
+  {
+   "name": "Diane Bryant STEM Innovation Center",
+   "area_m2": 1909,
+   "centre": [
+    -121.3485176,
+    38.6502209,
+    11.3
+   ],
+   "roof_m": 11.3,
+   "ground_m": -2.6,
+   "height_m": 13.9,
+   "peak_m": 12.1,
+   "cells": 118
+  },
+  {
+   "name": "Environmental Resources (ER)",
+   "area_m2": 935,
+   "centre": [
+    -121.3441513,
+    38.6508315,
+    0
+   ],
+   "roof_m": 0,
+   "ground_m": -4.2,
+   "height_m": 4.2,
+   "peak_m": 1.6,
+   "cells": 30
+  },
+  {
+   "name": "Evangelisti Culinary Arts Center",
+   "area_m2": 2907,
+   "centre": [
+    -121.3488906,
+    38.6522838,
+    5.7
+   ],
+   "roof_m": 5.7,
+   "ground_m": -0.2,
+   "height_m": 5.9,
+   "peak_m": 9.3,
+   "cells": 234
+  },
+  {
+   "name": "Fine & Applied Arts",
+   "area_m2": 4960,
+   "centre": [
+    -121.3496938,
+    38.6522777,
+    8.2
+   ],
+   "roof_m": 8.2,
+   "ground_m": -0.3,
+   "height_m": 8.5,
+   "peak_m": 19.8,
+   "cells": 334
+  },
+  {
+   "name": "Gallery",
+   "area_m2": 684,
+   "centre": [
+    -121.3489473,
+    38.6520625,
+    5.4
+   ],
+   "roof_m": 5.4,
+   "ground_m": -0.1,
+   "height_m": 5.6,
+   "peak_m": 6.3,
+   "cells": 39
+  },
+  {
+   "name": "Gym",
+   "area_m2": 5403,
+   "centre": [
+    -121.346486,
+    38.6490994,
+    2.5
+   ],
+   "roof_m": 2.5,
+   "ground_m": -4.8,
+   "height_m": 7.3,
+   "peak_m": 6.8,
+   "cells": 430
+  },
+  {
+   "name": "Health Education Complex",
+   "area_m2": 1141,
+   "centre": [
+    -121.3471205,
+    38.6486646,
+    -0.3
+   ],
+   "roof_m": -0.3,
+   "ground_m": -5,
+   "height_m": 4.8,
+   "peak_m": 5,
+   "cells": 39
+  },
+  {
+   "name": "Howard Hall",
+   "area_m2": 1211,
+   "centre": [
+    -121.3497157,
+    38.6505073,
+    3.7
+   ],
+   "roof_m": 3.7,
+   "ground_m": -1.8,
+   "height_m": 5.6,
+   "peak_m": 5.7,
+   "cells": 76
+  },
+  {
+   "name": "ITC",
+   "area_m2": 631,
+   "centre": [
+    -121.3476112,
+    38.650585,
+    4.3
+   ],
+   "roof_m": 4.3,
+   "ground_m": -2.5,
+   "height_m": 6.7,
+   "peak_m": 5.4,
+   "cells": 34
+  },
+  {
+   "name": "Kinesiology & Athletics (Physical Education)",
+   "area_m2": 2609,
+   "centre": [
+    -121.3460388,
+    38.649902,
+    1.1
+   ],
+   "roof_m": 1.1,
+   "ground_m": -4.4,
+   "height_m": 5.6,
+   "peak_m": 2.7,
+   "cells": 208
+  },
+  {
+   "name": "Learning Resource Center (LRC)",
+   "area_m2": 2790,
+   "centre": [
+    -121.3473671,
+    38.6498709,
+    3
+   ],
+   "roof_m": 3,
+   "ground_m": -3.5,
+   "height_m": 6.5,
+   "peak_m": 7.2,
+   "cells": 158
+  },
+  {
+   "name": "Library",
+   "area_m2": 1772,
+   "centre": [
+    -121.3477156,
+    38.6509886,
+    12.8
+   ],
+   "roof_m": 12.8,
+   "ground_m": -1.4,
+   "height_m": 14.2,
+   "peak_m": 14.1,
+   "cells": 115
+  },
+  {
+   "name": "Operations",
+   "area_m2": 247,
+   "centre": [
+    -121.3500652,
+    38.6487451,
+    3.7
+   ],
+   "roof_m": 3.7,
+   "ground_m": -1.4,
+   "height_m": 5.1,
+   "peak_m": 7.7,
+   "cells": 19
+  },
+  {
+   "name": "Parking Garage",
+   "area_m2": 8629,
+   "centre": [
+    -121.347313,
+    38.6479507,
+    7.8
+   ],
+   "roof_m": 7.8,
+   "ground_m": -5.1,
+   "height_m": 12.9,
+   "peak_m": 13.8,
+   "cells": 489
+  },
+  {
+   "name": "Portable Village",
+   "area_m2": 2673,
+   "centre": [
+    -121.3480153,
+    38.6490283,
+    -0.7
+   ],
+   "roof_m": -0.7,
+   "ground_m": -4.2,
+   "height_m": 3.4,
+   "peak_m": -0.1,
+   "cells": 112
+  },
+  {
+   "name": "Printing Services",
+   "area_m2": 530,
+   "centre": [
+    -121.350079,
+    38.6483451,
+    0
+   ],
+   "roof_m": 0,
+   "ground_m": -3.3,
+   "height_m": 3.2,
+   "peak_m": 0.4,
+   "cells": 33
+  },
+  {
+   "name": "Raef Hall",
+   "area_m2": 1182,
+   "centre": [
+    -121.3491318,
+    38.6505138,
+    2.3
+   ],
+   "roof_m": 2.3,
+   "ground_m": -2,
+   "height_m": 4.3,
+   "peak_m": 3.1,
+   "cells": 67
+  },
+  {
+   "name": "Rec.",
+   "area_m2": 519,
+   "centre": [
+    -121.349293,
+    38.6492693,
+    3.5
+   ],
+   "roof_m": 3.5,
+   "ground_m": -2.5,
+   "height_m": 6,
+   "peak_m": 5.4,
+   "cells": 35
+  },
+  {
+   "name": "Science & Engineering",
+   "area_m2": 4965,
+   "centre": [
+    -121.3474106,
+    38.652214,
+    3.7
+   ],
+   "roof_m": 3.7,
+   "ground_m": -0.9,
+   "height_m": 4.6,
+   "peak_m": 15.3,
+   "cells": 390
+  },
+  {
+   "name": "Science Success Center",
+   "area_m2": 607,
+   "centre": [
+    -121.3472105,
+    38.6526542,
+    2.5
+   ],
+   "roof_m": 2.5,
+   "ground_m": -0.7,
+   "height_m": 3.2,
+   "peak_m": 2.7,
+   "cells": 19
+  },
+  {
+   "name": "Student Center",
+   "area_m2": 4464,
+   "centre": [
+    -121.3468098,
+    38.6512225,
+    6.1
+   ],
+   "roof_m": 6.1,
+   "ground_m": -2.6,
+   "height_m": 8.7,
+   "peak_m": 10.4,
+   "cells": 338
+  },
+  {
+   "name": "Welcome and Support Center",
+   "area_m2": 2880,
+   "centre": [
+    -121.348477,
+    38.651312,
+    4
+   ],
+   "roof_m": 4,
+   "ground_m": -1.4,
+   "height_m": 5.4,
+   "peak_m": 5.2,
+   "cells": 215
+  }
+ ]
+}

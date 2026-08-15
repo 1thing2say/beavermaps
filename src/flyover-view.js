@@ -86,11 +86,10 @@ const SCREEN_SPACE_ERROR = 8;
  * The ceiling on decoded geometry held on the GPU, in MB.
  *
  * This is the answer to "will it bog the device down", and the answer is no
- * because the tileset evicts. loaders.gl keeps an LRU of loaded tiles against
- * this budget and unloads the least recently used ones past it; over budget it
- * also raises its own working screen-space error, so a device under pressure
- * degrades to coarser tiles instead of failing. Both behaviours are in
- * Tileset3D — see `_unloadTiles` and `memoryAdjustedScreenSpaceError`.
+ * because the tileset evicts: loaders.gl keeps an LRU of loaded tiles and
+ * unloads the least recently used ones past this budget. A tile touched by the
+ * current traversal is never evicted, so what this gives up is always a
+ * building somebody has stopped looking at.
  *
  * Never unloading was the alternative and would have been a real problem, not a
  * theoretical one: this is DECODED geometry, several times the 124 KiB the tile
@@ -99,6 +98,15 @@ const SCREEN_SPACE_ERROR = 8;
  *
  * 24 rather than the library's 32 because this viewport is a fifth of the
  * screen at most and never needs the working set a full-page globe does.
+ *
+ * IT HAS TO BE SET ON THE TILESET, not passed in its options, and it was not:
+ * the number lands in `tileset.options.maximumMemoryUsage`, while the eviction
+ * loop reads `tileset.maximumMemoryUsage` — a class field initialised to 32 that
+ * the constructor never assigns from the options (see TilesetCache.unloadTiles
+ * against Tileset3D's field declaration). So this was inert and the real budget
+ * was the library's default. Applied in `onTilesetLoad` instead. Measured over a
+ * campus sweep, that is the difference between settling around 90 MB and
+ * settling around 30.
  */
 const MAX_GPU_MB = 24;
 
@@ -109,11 +117,21 @@ const MAX_GPU_MB = 24;
  * decoded geometry is already on the GPU. This is the one that acts before
  * anything is drawn, and it is what a low-end device actually needs: a phone
  * that cannot hold sixty draw calls at 60fps does not want to find that out by
- * making them. loaders.gl keeps the closest N and drops the rest (see
- * `limitSelectedTiles`, which sorts by distance to camera), so what is given up
- * is always the farthest ground rather than the building in the middle.
+ * making them.
  *
- * Zero is the library's default and means unlimited.
+ * ENFORCED HERE RATHER THAN BY loaders.gl, AND THAT IS NOT A PREFERENCE. Passing
+ * it as `maximumTilesSelected` hands the job to `limitSelectedTiles`, which
+ * ranks tiles by `tile.header.mbs` — the I3S minimum bounding sphere. 3D Tiles
+ * headers have no such field, so the moment a traversal selects more tiles than
+ * the cap, that helper destructures `undefined` and throws.
+ *
+ * The throw is what made this worth chasing rather than merely worth avoiding.
+ * It lands inside `traverse()`, so `_onTraversalEnd` never runs, so
+ * `traverseCounter` never comes back down from 1 — and `doUpdate` opens with
+ * `if (this.traverseCounter > 0) return`. One exception therefore stops every
+ * future traversal for the life of the tab: no selection, no requests, a
+ * viewport frozen on whatever it happened to be holding. Cycling buildings
+ * quickly is simply how you get past 48 selected tiles.
  */
 const MAX_TILES_DRAWN = 48;
 
@@ -485,8 +503,10 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
       // defaults and asked for them.
       tileset: {
         maximumScreenSpaceError: SCREEN_SPACE_ERROR,
-        maximumMemoryUsage: MAX_GPU_MB,
-        maximumTilesSelected: MAX_TILES_DRAWN,
+        // Deliberately not `maximumTilesSelected` and not `maximumMemoryUsage`.
+        // Both are applied elsewhere — see the notes on MAX_TILES_DRAWN, which
+        // the library cannot enforce without throwing, and on MAX_GPU_MB, which
+        // it accepts here and then ignores.
         // A traversal always completes, which is why this rather than
         // `onTileLoad` is what takes the spinner off: now that the tileset is
         // shared, a building standing on tiles already in the cache loads
@@ -505,8 +525,29 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
           // camera looking further, not sideways, so ground beside the building
           // still arrives. This is the exact test, and what it excludes is
           // where the grid shows through.
+          //
+          // `unselect()` rather than only dropping it from the returned list,
+          // because dropping it is not what stops it being drawn. Tile3DLayer
+          // walks `tileset.tiles` and draws whatever still answers `tile.selected`
+          // — a flag the traversal set before this callback ran — so a tile
+          // merely left out of this array keeps its draw call and is hidden only
+          // by the clip. Clearing the flag is what makes the box cost nothing.
           const box = stage.box;
-          const kept = box ? selected.filter((tile) => inBox(tile, box)) : selected;
+          const kept = [];
+          for (const tile of selected) {
+            if (box && !inBox(tile, box)) tile.unselect();
+            else kept.push(tile);
+          }
+
+          // The drawn-tile cap. Nearest first, so what is given up is always the
+          // farthest ground rather than the building in the middle.
+          // `_distanceToCamera` is the traversal's own metric, refreshed for
+          // every tile it visits this frame.
+          if (kept.length > MAX_TILES_DRAWN) {
+            kept.sort((a, b) => a._distanceToCamera - b._distanceToCamera);
+            for (const tile of kept.splice(MAX_TILES_DRAWN)) tile.unselect();
+          }
+
           if (kept.some((tile) => tile.contentAvailable)) stage.onReady?.();
           return kept;
         },
@@ -535,6 +576,13 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
       stage.onReady?.();
     },
     onTileError: () => {},
+    // The one moment the tileset exists and nothing has traversed it yet. Fires
+    // once for the tab, because `_loadTileset` runs once — see the note on `id`
+    // above. This is where MAX_GPU_MB has to be applied to bite; the option of
+    // the same name does nothing.
+    onTilesetLoad: (tileset) => {
+      tileset.maximumMemoryUsage = MAX_GPU_MB;
+    },
     // The perimeter, pushed down onto the layers that actually draw glTF.
     // Tile3DLayer is a composite and renders one ScenegraphLayer per tile, so
     // the extension has to be handed to the sublayer rather than to the parent.
