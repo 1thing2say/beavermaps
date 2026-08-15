@@ -35,9 +35,9 @@
 const STORAGE_KEY = 'mapper-debug';
 
 /** The lies, and what each says when it is on. */
-export const DEBUG_FLAGS = ['routing', 'gps'];
+export const DEBUG_FLAGS = ['routing', 'gps', 'blur'];
 
-const CLOSED = { open: false, routing: false, gps: false };
+const CLOSED = { open: false, routing: false, gps: false, blur: false };
 
 /**
  * What was stored, sanitised.

@@ -570,6 +570,21 @@
    place, so it is the one part of this drawing that must not move — see
    mountSelectedPin. Fades in rather than appearing, because at the start of the
    animation the head is sitting on top of it. */
+/* One copy of the pin, a few milliseconds behind it. Laid over the marker's own
+   box rather than in flow, so a ghost and the pin share an origin and the same
+   keyframes put them in the same place. See GHOSTS in pin-select.js. */
+.pin-selected-ghost {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    pointer-events: none;
+}
+.pin-selected-scale--ghost {
+    /* No shadow. Five of them stacked under a moving pin read as smoke rather
+       than as speed, and the pin's own shadow is still down there. */
+    filter: none;
+}
 .pin-selected-dot {
     position: absolute;
     left: 50%;

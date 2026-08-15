@@ -501,6 +501,19 @@
                 <input id="debug-gps" type="checkbox" class="g-switch">
             </label>
 
+            <!-- Motion blur on the selected pin, which the browser will not do
+                 for you: CSS has no directional blur and nothing hands out a
+                 velocity. The trail is five copies of the pin running the same
+                 spring and the same swing a few milliseconds behind it. See
+                 GHOSTS in src/pin-select.js. -->
+            <label class="g-debug-row" for="debug-blur">
+                <span class="g-debug-text">
+                    <span class="g-debug-name">Blur the pin as it moves</span>
+                    <span class="g-debug-hint">A ghost trail behind the lift and the swing</span>
+                </span>
+                <input id="debug-blur" type="checkbox" class="g-switch">
+            </label>
+
             <!-- The campus directory, off src/directory.json. It held the
                  sidebar until it did not earn the room; the note where it used
                  to be says why. It is here rather than deleted because this is

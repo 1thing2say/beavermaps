@@ -236,6 +236,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // has something to be put back to. See src/lighting.js.
   let lightingBench = null;
   let debugOpen = false;
+  /** Whether a selected pin trails a ghost of itself. Debug menu only. */
+  let pinBlur = false;
   let benchLights = null;
   let benchTilt = false;
   // Whether there is a style under us to configure at all.
@@ -2251,6 +2253,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       ink: currentBasemap === 'satellite' ? SATELLITE.label : pinInk(hit.kind, currentTheme),
       ring: palette(currentProvider, currentBasemap, currentTheme, currentSkin).pinRing,
       from,
+      blur: pinBlur,
     });
 
     if (!card) return;
@@ -4154,7 +4157,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     geolocateControl.trigger();
   }
 
-  function applyDebug({ open, routing, gps }) {
+  function applyDebug({ open, routing, gps, blur }) {
+    // Read by the next selection rather than applied to the current one: the
+    // trail is made of animations that start when the pin is mounted, and there
+    // is nothing sensible to do to a pin that is already standing still.
+    pinBlur = open && blur;
+
     // The gate the lighting bench is read through. Set before anything else
     // here, so applyLighting sees the new state whichever path reaches it.
     debugOpen = open;
@@ -4205,6 +4213,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     switches: {
       routing: document.getElementById('debug-routing'),
       gps: document.getElementById('debug-gps'),
+      blur: document.getElementById('debug-blur'),
     },
     onChange: applyDebug,
   });

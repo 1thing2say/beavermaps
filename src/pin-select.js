@@ -193,6 +193,52 @@ export const SELECTED_W = 55;
  * with the sign broken out, on the grounds that a marker that picked its own
  * direction per tap would be the more surprising claim to make from one sample.
  */
+/**
+ * The ghost trail — motion blur, done the only way a DOM element can have it.
+ *
+ * There is no directional blur in CSS. `filter: blur()` is isotropic, so a pin
+ * blurred while it swings looks like a pin that has been smudged in every
+ * direction at once, which reads as fog rather than as speed. And the browser
+ * hands nothing else out: no velocity buffer, no per-object motion vectors, no
+ * shutter. Every one of those needs a renderer that knows where the thing was
+ * on the previous frame, and for a DOM element nothing does.
+ *
+ * So it is done by SAMPLING TIME instead of by filtering space, which is what a
+ * camera shutter actually is. Behind the real pin sit five copies of it, each
+ * running the SAME two animations with a delay — so ghost k is not an
+ * approximation of where the pin has been, it is literally the pin as it was
+ * `k * GHOST_LAG_MS` ago, on the identical spring and the identical swing. Stack
+ * them at falling opacity and the composite is the marker integrated over the
+ * last 150 milliseconds, which is a shutter.
+ *
+ * WHY 150 MS AND NOT 17. A 60 fps shutter is 16.7 ms and is invisible here,
+ * because this pin barely moves. The sway travels 7.13 px over a 758 ms period,
+ * so its peak speed is 0.059 px/ms — three and a half pixels per frame on a
+ * 55 px marker, and it damps: by halfway through the swing one frame of it is
+ * under a pixel. The lift is the faster of the two motions and still only
+ * reaches about eight.
+ *
+ * 60 ms was the first setting, and it was photographed and rejected. At 260 ms
+ * into a selection the trail was a faint edge tucked under the pin's own
+ * outline, because the lift is mostly a SCALE and every past sample of a growing
+ * object is smaller than the present one and hides behind it. 150 ms is long
+ * enough that the oldest ghost is small enough, and low enough, to clear the
+ * head — which is what makes the motion legible at all.
+ *
+ * That is the honest description of this effect, then: not photographic blur but
+ * a deliberate exaggeration of one, nine shutters long, sized to be seen at the
+ * speed this particular pin actually moves. It costs nothing once the pin is
+ * still — every ghost converges on the resting pose and vanishes underneath it.
+ *
+ * Five copies rather than more because the trail is short. Spaced 30 ms apart
+ * they still overlap into a smear; spaced much further they separate into
+ * countable pins, which is a strobe and not a blur.
+ */
+export const GHOSTS = 5;
+export const GHOST_LAG_MS = 30;
+/** The nearest ghost's opacity. The rest fall away linearly behind it. */
+export const GHOST_ALPHA = 0.45;
+
 export const SWAY_AMP = 0.1297;
 export const SWAY_DECAY_MS = 344;
 export const SWAY_PERIOD_MS = 758;
@@ -461,7 +507,9 @@ export function sizeAt(stops, zoom) {
  *   wins that outright, so sharing the property would not blend the two — it
  *   would delete the growth for the duration of the swing.
  */
-export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink, ring, from }) {
+export function mountSelectedPin({
+  map, marker: Marker, kind, coords, label, ink, ring, from, blur = false,
+}) {
   const el = document.createElement('div');
   el.className = 'pin-selected';
 
@@ -497,6 +545,31 @@ export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink
   // below this element's own box, hence a percentage over 100.
   sway.style.transformOrigin = origin;
   sway.append(scaler);
+
+  // The trail, appended BEFORE the pin so it is behind it. Same structure, same
+  // origins, so a ghost handed the same keyframes lands where the pin landed.
+  const ghosts = [];
+  if (blur) {
+    for (let k = 1; k <= GHOSTS; k += 1) {
+      const layer = document.createElement('div');
+      layer.className = 'pin-selected-ghost';
+      layer.style.opacity = (GHOST_ALPHA * (1 - (k - 1) / GHOSTS)).toFixed(3);
+
+      const ghostSway = document.createElement('div');
+      ghostSway.className = 'pin-selected-sway';
+      ghostSway.style.transformOrigin = origin;
+      const ghostScale = document.createElement('div');
+      ghostScale.className = 'pin-selected-scale pin-selected-scale--ghost';
+      ghostScale.style.transformOrigin = origin;
+      ghostScale.append(pinElement(kind, SELECTED_W, ring));
+      ghostSway.append(ghostScale);
+      layer.append(ghostSway);
+
+      el.append(layer);
+      ghosts.push({ sway: ghostSway, scale: ghostScale, lag: k * GHOST_LAG_MS });
+    }
+  }
+
   el.append(sway);
 
   // The dot: placed once, at the place, and left alone.
@@ -569,6 +642,26 @@ export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink
     { duration: SWAY_MS, easing: 'linear' },
   );
 
+  // The same grow and the same swing, each one lagged. `fill: 'both'` is what
+  // makes the delay mean "earlier" rather than "not started": before its turn a
+  // ghost holds the opening pose, which is where the pin genuinely was.
+  //
+  // The pin's own grow is a CSS transition and these are WAAPI, which is a
+  // difference in mechanism and not in motion — same duration, same easing
+  // string, same two transforms.
+  for (const ghost of ghosts) {
+    ghost.scale.animate(
+      [{ transform: resting(start) }, { transform: LIFTED }],
+      { duration: GROW_MS, easing: GROW_EASE, delay: ghost.lag, fill: 'both' },
+    );
+    if (!still) {
+      ghost.sway.animate(
+        swayKeyframes(SELECTED_W),
+        { duration: SWAY_MS, easing: 'linear', delay: ghost.lag, fill: 'both' },
+      );
+    }
+  }
+
   return {
     element: el,
     /** Shrink back to the ambient size, then take the marker down. */
@@ -577,6 +670,13 @@ export function mountSelectedPin({ map, marker: Marker, kind, coords, label, ink
       // should shrink from where it is on the way to the place, not carry a
       // sideways wobble down into a marker that has stopped being selected.
       swaying?.cancel();
+      for (const ghost of ghosts) {
+        for (const running of ghost.sway.getAnimations()) running.cancel();
+        ghost.scale.animate(
+          [{ transform: LIFTED }, { transform: resting(to / SELECTED_W) }],
+          { duration: SHRINK_MS, easing: SHRINK_EASE, delay: ghost.lag, fill: 'both' },
+        );
+      }
       scaler.style.transition = `transform ${SHRINK_MS}ms ${SHRINK_EASE}`;
       scaler.style.transform = resting(to / SELECTED_W);
       el.classList.remove('is-in');
