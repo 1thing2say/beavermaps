@@ -190,36 +190,56 @@ export const canFlyOver = (thing) => tierOf(thing) >= FLYOVER_TIER.SOLID;
 /**
  * How wide a piece of ground the camera should hold in frame, in metres.
  *
- * A footprint's area is the only size this map records — there is no bounding
- * box in src/directory.json — so the width is taken as its square root, which
- * is exact for a square and low for a long thin one. Low is the safe direction:
- * it pulls the camera in, and a building that slightly overfills the frame is a
- * better shot than one sitting small in the middle of a car park.
+ * SIZED FROM THE FOOTPRINT WHEN THERE IS ONE, and this is the whole of the fix
+ * for the clip cutting through buildings. The old version had only `area_m2` to
+ * work with and took its square root as the building's width, which is exact
+ * for a square and too small for everything else — and my campus's buildings are not
+ * squares. The Parking Garage is 118 m by 73 m, so its long half-extent is 59 m
+ * against the 46 m that root-of-area implies, and a square built from the
+ * smaller number cannot contain it. Nine of the twenty-eight buildings that fly
+ * were being sliced this way; see `footprintExtent`, which measures it properly.
  *
- * 2.6x that width, clamped at both ends. The multiple leaves the building
- * across roughly two fifths of the frame with its own ground around it, which
- * is what makes the shot read as a place rather than as an object on a
- * turntable. The clamps matter more than the multiple: the Parking Garage and
- * Adaptive PE are a factor of fifty apart in area and seven in width, and
- * without a floor the small ones get orbited from so close that the camera
- * sweeps faster than the tiles can stream.
+ * The area path is kept as the fallback rather than deleted, because `tierOf`
+ * will classify a thing that has no footprint at all — a pin with a name and a
+ * class — and a camera is still owed for it.
  *
  * `pitch` is the camera's tilt off straight down. 55 degrees is high enough to
  * see roofs — which is how you recognise a building from the air — and low
  * enough that the far side of the orbit is not looking through the near wall.
  *
- * @param {number} [area] footprint in m2
+ * @param {number}  [area]   footprint in m2, for something with no geometry
+ * @param {object}  [extent] from `footprintExtent`, when the footprint is known
  */
-export function framing(area) {
-  const width = Math.sqrt(Math.max(area ?? 0, MIN_AREA_M2));
-  const span = Math.max(230, Math.min(800, width * FRAME_WIDTHS));
+export function framing(area, extent) {
+  // The half-extent the square has to hold. The LONGER of the two axes, because
+  // the square is square and the camera goes all the way round: a box that fits
+  // the garage across its 73 m width is still cutting it across its 118 m
+  // length, and the orbit spends half its time looking down that length.
+  const half = extent
+    ? Math.max(extent.halfWidth, extent.halfHeight)
+    : Math.sqrt(Math.max(area ?? 0, MIN_AREA_M2)) / 2;
+  const required = half * BOX_MARGIN;
+
+  // The span follows from the square rather than the other way round, which is
+  // the inversion that makes this work. The old order — pick a span from the
+  // area, take a fifth of it as the reach — could only ever produce a square
+  // proportional to sqrt(area), so no clamp on it could rescue a long building.
+  const span = Math.max(230, Math.min(800, required / BOX_REACH));
   return {
     /** Ground width the viewport should span, in metres. */
     span,
     /** Camera tilt off nadir, in degrees. */
     pitch: 55,
-    /** Half-width of the box tiles are loaded inside, in metres. See `boxOf`. */
-    reach: span * BOX_REACH,
+    /**
+     * Half-width of the box tiles are loaded inside, in metres. See `boxOf`.
+     *
+     * `required` wins where the span was clamped, so a building bigger than the
+     * 800 m ceiling still gets a square that holds it — the frame stops backing
+     * off, the perimeter does not stop growing, and what gives is the margin of
+     * grid around it rather than the subject. Below the 230 m floor the clamp
+     * wins instead, which only makes the square larger than it needed to be.
+     */
+    reach: Math.max(required, span * BOX_REACH),
   };
 }
 
@@ -248,27 +268,28 @@ export function framing(area) {
 const BOX_REACH = 0.2;
 
 /**
- * How many building-widths of ground the camera holds in frame.
+ * How much ground the square holds around the building, in half-extents.
  *
- * This exists to make room for the perimeter, and it is the second half of a
- * fix whose first half was not enough. Shrinking the square alone cannot put
- * grid on all four sides of it: the camera is tilted 55 degrees off nadir, so
- * the bottom of the frame is the NEAREST ground and is only a fraction of a
- * span in front of the target. A square big enough to contain the building runs
- * off that bottom edge before it closes.
+ * NOT A NEW NUMBER — it is the one the old arithmetic already produced, pulled
+ * out where it can be read. The span was `sqrt(area) * 4` and the reach a fifth
+ * of that, so the square came out at `sqrt(area) * 1.6`: 1.6 half-extents of
+ * ground on every side of a square building. Naming it is what lets the same
+ * framing be built from a measured footprint instead of a guessed one, and
+ * keeping it identical is deliberate — everything downstream was tuned at this
+ * framing, including SCREEN_SPACE_ERROR in src/flyover-view.js, which is
+ * derived from how many metres of ground land on a pixel.
  *
- * Backing the camera off is what opens the gap. At four building-widths the
- * square — 1.6 building-widths across, see BOX_REACH — sits at half the frame's
- * width with its near edge inside the bottom of the picture, which is the
- * arrangement that reads as a boundary rather than as a crop.
- *
- * It costs apparent size: the building is a quarter of the frame rather than
- * the two fifths it was. That is the trade, and it is the right way round for
- * this feature — the shot is meant to answer "what is around this building",
- * and a boundary you can see is worth more than a roof you can see slightly
- * larger.
+ * What it buys, which is why the camera sits as far back as it does: the square
+ * has to close on all four sides of the frame or it reads as a crop rather than
+ * a boundary. The camera is tilted 55 degrees off nadir, so the bottom of the
+ * picture is the NEAREST ground and only a fraction of a span in front of the
+ * target — a square sized to contain the building runs off that bottom edge
+ * before it closes. Backing off to four building-widths is what opens the gap,
+ * and it costs apparent size: the building is a quarter of the frame rather
+ * than the two fifths it would be. That is the right way round for a shot meant
+ * to answer "what is around this building".
  */
-const FRAME_WIDTHS = 4;
+const BOX_MARGIN = 1.6;
 
 /**
  * Metres per degree at my campus's latitude.
@@ -280,6 +301,64 @@ const FRAME_WIDTHS = 4;
  */
 export const M_PER_DEG_LAT = 111_132;
 export const M_PER_DEG_LON = 86_900; // 111_320 * cos(38.65 degrees)
+
+/**
+ * Where a footprint's middle actually is, and how far it reaches from there.
+ *
+ * Two numbers the rest of this file used to have to guess, and it guessed both
+ * wrong in the same direction on the same building.
+ *
+ * THE SIZE. `area_m2` is one number and a footprint has two dimensions, so
+ * every square built from an area is a claim that the building is square. The
+ * Parking Garage is 118 m by 73 m and the claim is out by 13 m on the long
+ * axis, which is 13 m of concrete deck outside the clip and therefore not
+ * drawn. See `framing`.
+ *
+ * THE CENTRE, which was the larger error of the two and the less obvious.
+ * Cards are opened at `anchor`, the pole of inaccessibility — the point
+ * furthest inside the footprint. That is the correct place to hang a label and
+ * the wrong place to centre a square: it is a point of maximum clearance, not a
+ * middle, and on the garage it sits 22 m west of the bounding box's centre. A
+ * square perfectly sized to hold the building still cut the east end off it.
+ *
+ * The bounding box rather than a true centroid, because the bounding box is
+ * what has to be contained. They differ on an L-shaped block — the bbox centre
+ * can fall in the courtyard — and for framing that is the answer wanted anyway:
+ * the camera should be pointed at the middle of the thing's EXTENT, which is
+ * what fills the picture, rather than at the middle of its mass.
+ *
+ * @param {object} [geometry] GeoJSON Polygon or MultiPolygon
+ * @returns {{ centre: number[], halfWidth: number, halfHeight: number } | null}
+ */
+export function footprintExtent(geometry) {
+  let west = Infinity; let south = Infinity;
+  let east = -Infinity; let north = -Infinity;
+
+  // Depth-agnostic, because the directory holds both Polygon and MultiPolygon
+  // and a building whose parts were folded together is exactly the case that
+  // needs its real extent. A position is the first array whose head is a
+  // number, which is true at every nesting level any of them use.
+  const walk = (node) => {
+    if (!Array.isArray(node)) return;
+    if (typeof node[0] === 'number') {
+      const [lon, lat] = node;
+      if (lon < west) west = lon;
+      if (lon > east) east = lon;
+      if (lat < south) south = lat;
+      if (lat > north) north = lat;
+      return;
+    }
+    for (const child of node) walk(child);
+  };
+  walk(geometry?.coordinates);
+
+  if (!Number.isFinite(west) || !Number.isFinite(south)) return null;
+  return {
+    centre: [(west + east) / 2, (south + north) / 2],
+    halfWidth: ((east - west) / 2) * M_PER_DEG_LON,
+    halfHeight: ((north - south) / 2) * M_PER_DEG_LAT,
+  };
+}
 
 /**
  * How far the box reaches below and above the campus, in metres.

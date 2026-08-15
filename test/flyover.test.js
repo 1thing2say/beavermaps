@@ -17,12 +17,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { load } from './helpers.js';
 import {
-  tierOf, canFlyOver, framing, boxOf, FLYOVER_TIER, MIN_AREA_M2, STALE_IMAGERY,
+  tierOf, canFlyOver, framing, boxOf, footprintExtent, FLYOVER_TIER, MIN_AREA_M2, STALE_IMAGERY,
   M_PER_DEG_LAT, M_PER_DEG_LON,
 } from '../src/flyover.js';
 import { poiFor } from '../src/poi.js';
 
-const directory = load('directory').features.map((f) => f.properties ?? f);
+const buildings = load('directory').features;
+const directory = buildings.map((f) => f.properties ?? f);
 const labels = load('labels').features;
 
 /** A directory row as showBuildingCard hands it to the hierarchy. */
@@ -128,9 +129,13 @@ test('the perimeter fits inside the frame and still holds the building', () => {
   // invisible. That is the bug this pair of assertions exists to catch — it
   // shipped once at 0.55 and read as a feature that did not work.
   //
-  // Too narrow and it cuts the subject. `framing` sets the span at
-  // FRAME_WIDTHS times the footprint's width, so the building occupies that
-  // fraction of the frame and the square has to be wider to contain it at all.
+  // Too narrow and it cuts the subject. `framing` holds BOX_MARGIN half-extents
+  // of ground around the building, which puts a square one at four times its
+  // width, so the square has to be wider than the footprint to contain it.
+  //
+  // This is the area-only path — no footprint — so `span / 4` is the building's
+  // width by construction. The footprint path is checked properly in "no
+  // building is cut by its own perimeter", against real geometry.
   for (const area of [173, 631, 5403, 8629, 50_000]) {
     const { span, reach } = framing(area);
     const buildingWidth = span / 4;
@@ -139,6 +144,98 @@ test('the perimeter fits inside the frame and still holds the building', () => {
     assert.ok(reach * 2 > buildingWidth * 1.2,
       `the square is ${((reach * 2) / buildingWidth).toFixed(2)}x the footprint — too tight`);
   }
+});
+
+test('no building is cut by its own perimeter', () => {
+  // The regression this exists for, photographed before it was fixed: the clip
+  // square was sized from sqrt(area) and centred on `anchor`, so it sliced the
+  // east end off the Parking Garage — and off eight other buildings. Both
+  // errors pushed the same way, which is why it read as one bug.
+  //
+  // Every corner of every footprint, against the square that building actually
+  // gets. Corners rather than the bounding box because the square is axis
+  // aligned and so is the test: if a corner is outside, a wall is missing.
+  for (const feature of buildings) {
+    const props = feature.properties;
+    if (!canFlyOver(asCard(props))) continue;
+
+    const extent = footprintExtent(feature.geometry);
+    assert.ok(extent, `${props.name} has no readable footprint`);
+
+    const { reach } = framing(props.area_m2, extent);
+    const { min, max } = boxOf(extent.centre, reach);
+
+    const walk = (node) => {
+      if (typeof node[0] === 'number') {
+        assert.ok(node[0] >= min[0] && node[0] <= max[0],
+          `${props.name} runs ${((Math.max(min[0] - node[0], node[0] - max[0])) * M_PER_DEG_LON).toFixed(1)} m past the east/west edge of its perimeter`);
+        assert.ok(node[1] >= min[1] && node[1] <= max[1],
+          `${props.name} runs ${((Math.max(min[1] - node[1], node[1] - max[1])) * M_PER_DEG_LAT).toFixed(1)} m past the north/south edge of its perimeter`);
+        return;
+      }
+      for (const child of node) walk(child);
+    };
+    walk(feature.geometry.coordinates);
+  }
+});
+
+test('the perimeter still leaves grid around the building it holds', () => {
+  // The other half of the same trade, and the reason this cannot be fixed by
+  // simply enlarging the square: a perimeter wider than the frame is invisible,
+  // which is the bug that shipped once at BOX_REACH 0.55. Growing the square to
+  // fit a long building has to grow the frame with it.
+  for (const feature of buildings) {
+    const props = feature.properties;
+    if (!canFlyOver(asCard(props))) continue;
+    const extent = footprintExtent(feature.geometry);
+    const { span, reach } = framing(props.area_m2, extent);
+    assert.ok(reach * 2 < span * 0.8,
+      `${props.name}'s square is ${((reach * 2) / span).toFixed(2)} spans — no room left for grid`);
+  }
+});
+
+test('footprintExtent measures the footprint, not the properties', () => {
+  const garage = buildings.find((f) => f.properties.name === 'Parking Garage');
+  const extent = footprintExtent(garage.geometry);
+  // The measurements quoted in the comments on `footprintExtent` and `framing`, which
+  // is the whole case for having either.
+  assert.ok(Math.abs(extent.halfWidth * 2 - 118) < 2, `garage is ${(extent.halfWidth * 2).toFixed(0)} m wide, expected 118`);
+  assert.ok(Math.abs(extent.halfHeight * 2 - 73) < 2, `garage is ${(extent.halfHeight * 2).toFixed(0)} m deep, expected 73`);
+
+  // ...and the anchor is NOT the middle, which was the larger of the two errors.
+  const off = Math.abs(garage.properties.anchor[0] - extent.centre[0]) * M_PER_DEG_LON;
+  assert.ok(off > 15, `the anchor is ${off.toFixed(0)} m off centre — if this is now small, the fix is untestable here`);
+
+  // Degenerate input is a null rather than a throw: the caller falls back to
+  // the anchor, which is what it did before any of this existed.
+  assert.equal(footprintExtent(undefined), null);
+  assert.equal(footprintExtent({ coordinates: [] }), null);
+});
+
+test('a building with no footprint still gets the framing it always had', () => {
+  // The fallback path, which is the one thing here that must not have changed:
+  // for a square building the new arithmetic has to reproduce the old numbers
+  // exactly, or every constant measured at that framing is now measured at
+  // something else. See BOX_MARGIN.
+  //
+  // Every real my campus building is in this range — the largest is the garage at
+  // 8,629 m2 — so in practice this is the whole of the fallback.
+  for (const area of [173, 631, 5403, 8629]) {
+    const expected = Math.max(230, Math.min(800, Math.sqrt(area) * 4));
+    assert.equal(framing(area).span, expected);
+    assert.ok(Math.abs(framing(area).reach - expected * 0.2) < 1e-9);
+  }
+
+  // Above the span ceiling the two DO part, and deliberately: the frame stops
+  // backing off at 800 m and the square does not stop growing, because a
+  // perimeter that fits the frame but not the building is the bug all of this
+  // is about. Nothing at my campus is this big; the behaviour is asserted so that the
+  // next campus to arrive with a 50,000 m2 building is not silently cut.
+  const huge = framing(50_000);
+  assert.equal(huge.span, 800);
+  assert.ok(huge.reach > 800 * 0.2, 'the square stopped growing with the building');
+  assert.ok(huge.reach >= Math.sqrt(50_000) / 2, 'the square no longer holds the building');
+  assert.ok(huge.reach * 2 < huge.span * 0.8, 'the square outgrew the frame');
 });
 
 test('the box surrounds its centre and is the right size on the ground', () => {

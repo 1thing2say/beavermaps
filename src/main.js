@@ -34,7 +34,7 @@ import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
 import { createSkinControl, preferredSkin, applySkinAttribute } from './skin.js';
 import { googleGround } from './google-tiles.js';
-import { canFlyOver, framing, boxOf } from './flyover.js';
+import { canFlyOver, framing, boxOf, footprintExtent } from './flyover.js';
 import { createFlyover } from './flyover-view.js';
 import { spin } from './spinner.js';
 import { paintIcons } from './g-icons.js';
@@ -2683,6 +2683,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return hit?.properties ?? null;
   }
 
+  /**
+   * A building's traced outline, by the name on its card.
+   *
+   * Read from the loaded directory rather than from the rendered feature, and
+   * the difference matters here: `queryRenderedFeatures` returns geometry
+   * clipped to the tile it was drawn in, so a footprint straddling a tile seam
+   * comes back cut — which is precisely the measurement this feeds. The source
+   * data is whole.
+   */
+  function footprintOf(name) {
+    if (!campusDirectory || !name) return null;
+    return campusDirectory.features.find((f) => f.properties?.name === name)?.geometry ?? null;
+  }
+
   function showBuildingCard(raw) {
     // Vector tiles hand nested properties back as JSON strings.
     const props = { ...raw };
@@ -2696,13 +2710,22 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // `poi` is derived here rather than stored, exactly as the card's own
     // subtitle derives it, so the disc on the map, the line under the name and
     // the decision to show an aerial view are all one classification and cannot
-    // disagree. `anchor` is a point known to be inside the footprint, which
-    // `entrance` is not — an entrance sits on the wall, and orbiting it would
-    // put the camera's centre half in the building and half in the path.
+    // disagree.
     const flyover = googleKey && canFlyOver({ ...props, poi: poiFor(props.name) })
       ? (() => {
-        const centre = props.anchor ?? props.entrance;
-        const frame = framing(props.area_m2);
+        // THE FOOTPRINT, not the properties, and this is what stops the
+        // perimeter cutting through the building. A tapped feature arrives here
+        // as properties alone — `buildingAt` returns `hit.properties` — so the
+        // geometry has to be fetched back out of the source by name. Everything
+        // that reaches this function is a directory row, by all three paths
+        // into it, so the lookup finds one.
+        const extent = footprintExtent(footprintOf(props.name));
+        // The middle of the footprint if it is known, and only otherwise the
+        // anchor. Both are points inside the building, but an anchor is the
+        // point furthest INSIDE it rather than its middle, and centring a
+        // square on one puts the far wall outside the square — see `footprintExtent`.
+        const centre = extent?.centre ?? props.anchor ?? props.entrance;
+        const frame = framing(props.area_m2, extent);
         // The box the renderer is told to stop at, built here rather than
         // inside the view so the policy — how much ground a place is worth
         // loading — stays in one file with the rest of it.
