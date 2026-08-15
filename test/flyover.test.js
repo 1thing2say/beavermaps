@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import { load } from './helpers.js';
 import {
   tierOf, canFlyOver, framing, boxOf, FLYOVER_TIER, MIN_AREA_M2, STALE_IMAGERY,
+  M_PER_DEG_LAT, M_PER_DEG_LON,
 } from '../src/flyover.js';
 import { poiFor } from '../src/poi.js';
 
@@ -134,14 +135,50 @@ test('the tile box is tight enough to actually bind', () => {
 
 test('the box surrounds its centre and is the right size on the ground', () => {
   const centre = [-121.3475, 38.6479];
-  const [[west, south], [east, north]] = boxOf(centre, 120);
-  assert.ok(west < centre[0] && east > centre[0]);
-  assert.ok(south < centre[1] && north > centre[1]);
+  const { min, max } = boxOf(centre, 120);
+  assert.ok(min[0] < centre[0] && max[0] > centre[0]);
+  assert.ok(min[1] < centre[1] && max[1] > centre[1]);
   // 120 m of reach is a 240 m box. Checked in metres, because a degree of
   // longitude at my campus is about 0.78 of a degree of latitude and a box that was
   // square in DEGREES would be visibly oblong on the ground.
-  const wide = (east - west) * 86_900;
-  const tall = (north - south) * 111_132;
+  const wide = (max[0] - min[0]) * M_PER_DEG_LON;
+  const tall = (max[1] - min[1]) * M_PER_DEG_LAT;
   assert.ok(Math.abs(wide - 240) < 1, `box is ${wide.toFixed(0)} m wide, expected 240`);
   assert.ok(Math.abs(tall - 240) < 1, `box is ${tall.toFixed(0)} m tall, expected 240`);
+});
+
+test('the box is a volume, not a column', () => {
+  // The defect this replaced: two corners of a lon/lat rectangle, which over a
+  // tileset whose coarse levels are kilometres tall is a bound in name only.
+  const { min, max } = boxOf([-121.3475, 38.6479], 120);
+  assert.equal(min.length, 3, 'the box has no floor');
+  assert.equal(max.length, 3, 'the box has no ceiling');
+  assert.ok(Number.isFinite(min[2]) && Number.isFinite(max[2]));
+  assert.ok(min[2] < max[2], 'the box is inside out');
+});
+
+test('the vertical band clears every tile Google actually serves over my campus', () => {
+  // Measured off the live tileset at the Parking Garage — see BOX_FLOOR_M.
+  // Each row is [geometricError, minAlt, maxAlt] in metres ellipsoidal.
+  const measured = [
+    [4.01, -6.4, 13.8], [8.03, -8.8, 13.8], [16.05, -10.7, 30.5],
+    [32.10, -16.8, 32.2], [64.20, -24.4, 36.9],
+  ];
+  const { min, max } = boxOf([-121.3475, 38.6479], 120);
+  for (const [err, lo, hi] of measured) {
+    assert.ok(lo > min[2], `the ${err} m level starts at ${lo} m, below the box floor ${min[2]}`);
+    assert.ok(hi < max[2], `the ${err} m level reaches ${hi} m, above the box ceiling ${max[2]}`);
+  }
+});
+
+test('the size bound rejects a planet-scale slab and keeps a building-scale tile', () => {
+  const { maxTileSpan, span } = boxOf([-121.3475, 38.6479], 120);
+  assert.equal(span, 240);
+  // Four box-widths. A 60 m leaf and a 953 m tile are in; the 30 km slab that
+  // covers half of California is not.
+  assert.equal(maxTileSpan, 960);
+  assert.ok(60 <= maxTileSpan);
+  assert.ok(953 <= maxTileSpan);
+  assert.ok(3812 > maxTileSpan);
+  assert.ok(30_630 > maxTileSpan);
 });

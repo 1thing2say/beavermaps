@@ -46,6 +46,10 @@
 // to do.
 
 import { spinnerOverlay } from './spinner.js';
+// The same scale the box was built with. Imported rather than restated,
+// because a tile measured on one scale against a box built on another is a
+// comparison of two different things that happen to share a unit.
+import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
@@ -222,23 +226,40 @@ function zoomFor(span, width, latitude) {
 }
 
 /**
- * Whether any part of a tile falls inside the building's box.
+ * Whether a tile belongs inside the building's box — in all three dimensions.
  *
- * `boundingBox` is loaders.gl's own cartographic extent of the tile —
- * `[[west, south, minHeight], [east, north, maxHeight]]` in degrees — computed
- * from whichever volume type the tile declared and cached on first access, so
- * asking every frame costs one comparison rather than a projection.
+ * `boundingBox` is loaders.gl's own cartographic extent of the tile,
+ * `[[west, south, minHeight], [east, north, maxHeight]]`, with the heights in
+ * metres above the WGS84 ellipsoid. It is computed from whichever volume type
+ * the tile declared and cached on first access, so asking every frame costs
+ * three comparisons rather than a projection.
  *
- * Overlap rather than containment, and it has to be: Google's tiles do not line
- * up with anything, and a tile that holds half the building also holds ground
- * well outside the box. Requiring containment would drop exactly the tiles the
- * building is standing on.
+ * TWO TESTS, because one is not enough and the reason is specific to how a
+ * tile pyramid is shaped.
+ *
+ *   OVERLAP, on all three axes. This is the box proper. The vertical axis was
+ *   missing from the first version, which made the bound a column of infinite
+ *   height — over a tileset whose coarse levels are literally kilometres tall
+ *   (the depth-2 slab over my campus starts 742 km up) that is not a rounding error.
+ *
+ *   SIZE, because overlap alone rejects almost nothing. Every ancestor of a
+ *   tile over the campus contains the campus — that is what makes it an
+ *   ancestor — so no overlap test can ever reject one. Measured against the
+ *   live tileset, overlap rejects one of the eighteen tiles covering the
+ *   Parking Garage. The size test rejects the ones that are mostly not the
+ *   building: kilometre-wide slabs drawn at a few pixels of detail, which exist
+ *   only to be replaced by their children.
+ *
+ * Overlap rather than containment for the first test, and it has to be:
+ * Google's tiles line up with nothing, so a tile holding half the building also
+ * holds ground well outside the box. Containment would drop exactly the tiles
+ * the building is standing on.
  *
  * A tile that cannot say where it is, is kept. The failure this guards against
  * is a tileset shape this does not know how to read, and losing the picture
  * over one is worse than drawing a little too much of it.
  */
-function inBox(tile, [[west, south], [east, north]]) {
+function inBox(tile, box) {
   let extent;
   try {
     extent = tile.boundingBox;
@@ -246,8 +267,17 @@ function inBox(tile, [[west, south], [east, north]]) {
     return true;
   }
   if (!extent) return true;
-  const [[minLon, minLat], [maxLon, maxLat]] = extent;
-  return minLon <= east && maxLon >= west && minLat <= north && maxLat >= south;
+
+  const [lo, hi] = extent;
+  const { min, max, maxTileSpan } = box;
+  for (let axis = 0; axis < 3; axis += 1) {
+    if (lo[axis] > max[axis] || hi[axis] < min[axis]) return false;
+  }
+
+  // Degrees to metres on the ground. Latitude is the tighter of the two here
+  // and the cheaper to be wrong about, so the wider span decides.
+  const wide = Math.max((hi[0] - lo[0]) * M_PER_DEG_LON, (hi[1] - lo[1]) * M_PER_DEG_LAT);
+  return wide <= maxTileSpan;
 }
 
 // ---------------------------------------------------------------------------
