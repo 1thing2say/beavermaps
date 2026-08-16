@@ -252,8 +252,21 @@ export function framing(area, extent) {
   return {
     /** Ground width the viewport should span, in metres. */
     span,
-    /** Camera tilt off nadir, in degrees. */
-    pitch: 55,
+    /**
+     * Camera tilt off nadir, in degrees.
+     *
+     * 63 rather than the 55 this flew at, which is a lower camera and a more
+     * oblique look. What it buys is the FACES: at 55 the shot is mostly roof,
+     * and a roof is the one view of a building nobody arrives on foot with. Ten
+     * degrees down puts the walls, the entrance and the depth of the thing in
+     * frame, which is what a wayfinder is for.
+     *
+     * It is not free and the ceiling is real. Everything past about 70 is
+     * horizon: the frustum's far plane runs away from the target, the traversal
+     * starts selecting tiles a kilometre off, and the ground plane's own cut
+     * edge walks into the middle of the picture. 63 is inside that with room.
+     */
+    pitch: 63,
     /**
      * Half-width of the box tiles are loaded inside, in metres. See `boxOf`.
      *
@@ -334,7 +347,7 @@ export const MIN_SPAN_M = 130;
  * here is scale-dependent — every term is a multiple of the span — so one value
  * holds from Adaptive PE at 173 m2 to the Parking Garage at 8,629.
  */
-const BOX_REACH = 0.24;
+const BOX_REACH = 0.26;
 
 /**
  * How much ground the square holds around the building, in half-extents.
@@ -358,7 +371,7 @@ const BOX_REACH = 0.24;
  * than the two fifths it would be. That is the right way round for a shot meant
  * to answer "what is around this building".
  */
-const BOX_MARGIN = 1.6;
+const BOX_MARGIN = 1.8;
 
 /**
  * Metres per degree at my campus's latitude.

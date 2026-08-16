@@ -57,6 +57,18 @@ import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
 export const DROP_MS = 220;
 
 /**
+ * How long the finished picture is held before the pin falls into it, in ms.
+ *
+ * A BEAT, not a wait, and the difference is what it is measured against. The
+ * gate this replaced timed itself from the last tile to arrive, so it was
+ * whatever the network happened to make it; this one starts when the building
+ * is on screen and always lasts the same half second. Half a second is about how
+ * long it takes to register that a picture has appeared, so the drop lands on
+ * somebody who is already looking rather than on somebody still arriving.
+ */
+export const HOLD_MS = 500;
+
+/**
  * How much of the fall already happened before the first frame, as a multiple of
  * the part that is drawn.
  *
@@ -219,6 +231,24 @@ const PIN_MIN_PX = 34;
 const PIN_MAX_PX = 110;
 
 /**
+ * How much of the sky above the roof the LANDED pin may fill.
+ *
+ * The headroom constraint, which came back the moment the camera dropped to 63
+ * degrees off nadir. Starting the fall off camera retired it for the FALLING
+ * pin — there is no upper bound on a sky the pin is not waiting in — but the
+ * landed one still has to fit between the roof it stands on and the top edge,
+ * and at a low angle a tall building's roof rides close to that edge: altitude
+ * projects further the more oblique the shot, so the Library's roof sits within
+ * a pin height of the top of its own picture. Photographed at a flat 0.28 of the
+ * viewport, the ball was cut in half by the frame — and the ball is the marker.
+ *
+ * So the size is the smaller of what legibility wants and what the shot has.
+ * 0.9 leaves a tenth of the gap as air above the ball, because a marker touching
+ * the edge reads as cropped even when it is whole.
+ */
+const HEADROOM = 0.9;
+
+/**
  * The cast shadow: the shortest and longest it may reach in pin heights of
  * ground, how quickly height fades it, and how dark it is at contact.
  *
@@ -307,9 +337,16 @@ export function fallen(ms, drop) {
   return drop * (((l + 1) ** 2 - (u + l) ** 2) / (1 + 2 * l));
 }
 
-/** How tall to draw the pin in a viewport of this height, in CSS pixels. */
-export const pinHeight = (viewportHeight) =>
-  Math.round(Math.max(PIN_MIN_PX, Math.min(PIN_MAX_PX, viewportHeight * PIN_FRAC)));
+/**
+ * How tall to draw the pin, in CSS pixels.
+ *
+ * `roofY` is the roof's own distance below the top edge — the sky the landed pin
+ * has to stand in. Omitting it asks for the unconstrained size, which is what a
+ * caller with no projection to hand can know.
+ */
+export const pinHeight = (viewportHeight, roofY = Infinity) => Math.round(
+  Math.max(PIN_MIN_PX, Math.min(PIN_MAX_PX, viewportHeight * PIN_FRAC, roofY * HEADROOM)),
+);
 
 /**
  * How far the pin falls, in CSS pixels, given where the roof projects.
@@ -320,7 +357,7 @@ export const pinHeight = (viewportHeight) =>
  * zoom, which is the point: they are all already inside `roofY`.
  */
 export function dropPixels(roofY, viewportHeight) {
-  const px = pinHeight(viewportHeight);
+  const px = pinHeight(viewportHeight, roofY);
   return Math.max(MIN_DROP_PINS * px, roofY + CLEAR_PINS * px);
 }
 
@@ -408,6 +445,7 @@ export const pinShadowIcon = () => (shadowIcon ??= {
  * @param {number[]} options.roof   [lon, lat, z] from src/roofs.json
  * @param {number}   options.drop   the fall's length in CSS pixels, from dropPixels
  * @param {number}   options.clear  what CLEAR_M of altitude is worth, in CSS pixels
+ * @param {number}   options.px     the pin's drawn height, from `pinHeight`
  * @param {number}   options.span   the framed span in metres, for the shadow's size
  * @param {number}   options.width  the viewport's width in CSS pixels
  * @param {number}   options.height the viewport's height in CSS pixels
@@ -416,9 +454,8 @@ export const pinShadowIcon = () => (shadowIcon ??= {
  */
 export function pinLayers(
   { IconLayer },
-  { roof, drop, clear, span, width, height, ms, colour = PUSH_PIN_RED },
+  { roof, drop, clear, px, span, width, height, ms, colour = PUSH_PIN_RED },
 ) {
-  const px = pinHeight(height);
   const icon = pinIcon(colour, px);
   const shutter = shutterMs(drop, px);
 

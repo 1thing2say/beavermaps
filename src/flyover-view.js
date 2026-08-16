@@ -50,7 +50,9 @@ import { spinnerOverlay } from './spinner.js';
 // because a tile measured on one scale against a box built on another is a
 // comparison of two different things that happen to share a unit.
 import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
-import { pinLayers, dropPixels, CLEAR_M, SETTLED_MS } from './flyover-pin.js';
+import {
+  pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS,
+} from './flyover-pin.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
@@ -60,8 +62,29 @@ const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
  */
 const TILES_ID = 'flyover-tiles';
 
-/** One full circle, in ms. */
-const ORBIT_MS = 30_000;
+/**
+ * How much sky the roof should have over it, as a share of the frame's height.
+ *
+ * What the camera's aim is solved for — see the padding in `createFlyover`. The
+ * pin is 0.28 of the height and wants a little air over its ball, so 0.4 is that
+ * with room; below it the pin starts being shortened to fit, which it can do
+ * (see HEADROOM in src/flyover-pin.js) but should not have to.
+ */
+const WANT_SKY = 0.4;
+
+/**
+ * One full circle, in ms.
+ *
+ * 45 seconds rather than 30. A helicopter holding a subject does not hurry, and
+ * the faster circle read as a turntable — 12 degrees a second is quick enough
+ * that the building's own faces swing past before you have looked at one. At 8
+ * a second the shot has time to be a shot.
+ *
+ * It costs nothing. The orbit is wall-clock rather than per-frame, tiles are
+ * requested by what the frustum contains rather than by how fast it moves, and
+ * the traversal is the same set of tiles either way — just held longer.
+ */
+const ORBIT_MS = 45_000;
 
 /**
  * How much detail to ask for, as loaders.gl's screen-space error in pixels.
@@ -734,6 +757,8 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
   let dropAt = 0;
   /** Whether the roof this pin is aimed at has actually loaded. */
   let roofReady = false;
+  /** When the building first appeared, which HOLD_MS is counted from. */
+  let shownAt = 0;
 
   const el = document.createElement('figure');
   el.className = 'g-flyover';
@@ -798,7 +823,46 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
     // camera instead of a division by zero.
     const width = el.clientWidth || 320;
     const height = el.clientHeight || Math.round(width * 0.625);
-    const view = { longitude, latitude, zoom: zoomFor(span, width, latitude), pitch, bearing: 0 };
+    /**
+     * How far down the frame the camera's target sits, in pixels of padding.
+     *
+     * WHY THE CAMERA IS NOT AIMED AT THE MIDDLE. deck.gl's MapView aims at a
+     * geographic point, which is on the GROUND — so the building grows upward
+     * from the centre of the picture and everything above it is sky the shot
+     * does not have. At 55 degrees off nadir that was survivable. At 63 it is
+     * not: altitude projects further the more oblique the shot, and the
+     * Library's roof went out of the top of its own frame, taking the pin
+     * standing on it with it.
+     *
+     * `padding` is deck.gl's own answer and the only one — there is no target
+     * altitude to set. It says which box the target is centred in, so top
+     * padding puts the ground low in the picture and gives the building the
+     * rest of it, moving the target down by half of whatever is asked for.
+     *
+     * MEASURED PER BUILDING rather than fixed, because a constant is wrong at
+     * both ends. Enough padding for the Library, which is tall enough to leave
+     * the frame, is half a picture of empty horizon over the Parking Garage,
+     * which is a flat deck. So the roof is projected once with no padding at
+     * all, and the shot is given exactly the difference between where that put
+     * it and where a pin needs it to be. A building with no measured roof asks
+     * for nothing, which is what it needs: nothing is standing on it.
+     */
+    const bare = { longitude, latitude, zoom: zoomFor(span, width, latitude), pitch, bearing: 0 };
+    const roofY = roof
+      ? new tools.WebMercatorViewport({ ...bare, width, height }).project(roof)[1]
+      : height;
+    const view = {
+      ...bare,
+      // Clamped, because a roof projecting above the frame entirely — which the
+      // projection can produce even if the framing does not — would otherwise
+      // ask for a padding that leaves no viewport to draw in.
+      padding: {
+        top: Math.round(Math.min(height * 0.6, Math.max(0, WANT_SKY * height - roofY) * 2)),
+        bottom: 0,
+        left: 0,
+        right: 0,
+      },
+    };
 
     stage.box = box ?? null;
     stage.roof = roof ?? null;
@@ -880,12 +944,14 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
     // `clear` goes with it: what CLEAR_M of altitude is worth in pixels here, so
     // the pin can be anchored that far above the roof for the depth test and put
     // straight back where it belongs on screen.
-    let fall = { drop: 0, clear: 0 };
+    let fall = { drop: 0, clear: 0, px: 0 };
     const measureDrop = (bearing) => {
       const seen = new tools.WebMercatorViewport({ ...view, bearing, width, height });
       const at = seen.project(roof)[1];
       const above = seen.project([roof[0], roof[1], roof[2] + CLEAR_M])[1];
-      return { drop: dropPixels(at, height), clear: at - above };
+      // The pin's size comes from here too, because it is the only place that
+      // knows how much sky the roof has over it. See HEADROOM.
+      return { drop: dropPixels(at, height), clear: at - above, px: pinHeight(height, at) };
     };
 
     // `ms` of null means "not yet": before the drop has a reason to start there
@@ -954,7 +1020,8 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
       // is a better wait than watching a ring turn. The pin waits for the roof's
       // own tile on top of that, because it is about to stand on it.
       if (busy.isConnected && drawn()) reveal();
-      if (!dropAt && roofReady && drawn()) {
+      if (!shownAt && roofReady && drawn()) shownAt = now;
+      if (shownAt && !dropAt && now - shownAt >= HOLD_MS) {
         dropAt = now;
         if (roof) fall = measureDrop(bearing);
       }

@@ -21,7 +21,7 @@ import {
   M_PER_DEG_LAT, M_PER_DEG_LON, MIN_SPAN_M, roofOf,
 } from '../src/flyover.js';
 import {
-  fallen, bounced, DROP_MS, SETTLED_MS, pinHeight, dropPixels, pinIcon, pinShadowIcon,
+  fallen, bounced, DROP_MS, SETTLED_MS, HOLD_MS, pinHeight, dropPixels, pinIcon, pinShadowIcon,
 } from '../src/flyover-pin.js';
 import {
   pushPinSvg, pinShadowSvg, SHADOW_BOX, PUSH_PIN, PUSH_PIN_RED,
@@ -469,7 +469,20 @@ test('the pin starts off camera and spends most of the fall on it', () => {
   // floor is what stops that being literally nothing — the trail's spacing is
   // solved by dividing by it. There is no framing that produces this; it is the
   // projection's edge case rather than the app's.
-  assert.ok(dropPixels(0, height) >= px, 'a high roof gets no drop at all');
+  assert.ok(dropPixels(0, height) >= pinHeight(height, 0), 'a high roof gets no drop at all');
+
+  // THE LANDED PIN HAS TO FIT IN THE SKY IT STANDS IN, which is a constraint the
+  // off-camera start retired for the FALLING pin and left in place for this one.
+  // At 63 degrees off nadir a tall building's roof rides within a pin height of
+  // the top edge, and a ball cut in half by the frame is not a marker.
+  for (const sky of [40, 60, 85, 140, 400]) {
+    assert.ok(pinHeight(height, sky) <= Math.max(sky, pinHeight(height, 0)),
+      `a ${pinHeight(height, sky)} px pin does not fit under a ${sky} px sky`);
+  }
+  // ...and it only ever costs size where the sky is short: given room, the
+  // headroom must not be what decides.
+  assert.equal(pinHeight(height, 400), pinHeight(height));
+  assert.ok(pinHeight(height, 60) < pinHeight(height), 'a short sky did not shrink the pin');
 });
 
 test('the push pin marks a place with its foot', () => {
