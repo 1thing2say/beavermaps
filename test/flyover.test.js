@@ -20,8 +20,12 @@ import {
   tierOf, canFlyOver, framing, boxOf, footprintExtent, FLYOVER_TIER, MIN_AREA_M2, STALE_IMAGERY,
   M_PER_DEG_LAT, M_PER_DEG_LON, MIN_SPAN_M, roofOf,
 } from '../src/flyover.js';
-import { fallen, DROP_MS, SETTLED_MS, pinHeight, dropMetres } from '../src/flyover-pin.js';
-import { pushPinSvg, PUSH_PIN, PUSH_PIN_RED } from '../src/push-pin.js';
+import {
+  fallen, bounced, DROP_MS, SETTLED_MS, pinHeight, dropPixels, pinIcon, pinShadowIcon,
+} from '../src/flyover-pin.js';
+import {
+  pushPinSvg, pinShadowSvg, SHADOW_BOX, PUSH_PIN, PUSH_PIN_RED,
+} from '../src/push-pin.js';
 import { poiFor } from '../src/poi.js';
 
 const buildings = load('directory').features;
@@ -390,51 +394,73 @@ test('the pin falls rather than easing, and lands exactly on the roof', () => {
     assert.ok(height <= previous, `the pin rose between ${ms - 20} and ${ms} ms`);
     previous = height;
   }
-  assert.ok(fallen(DROP_MS / 2, drop) > drop * 0.7, 'the fall is not accelerating');
+  // ACCELERATING, checked as acceleration rather than as a shape. The pin is
+  // caught part-way down an existing fall rather than released at the first
+  // frame — see PRE_FALL — so it is already moving at ms 0 and the old test for
+  // that, "half the time is a quarter of the way down", is a property of the
+  // other end of the same parabola. What has to hold either way is that every
+  // step is longer than the one before it: an ease-out would arrive slowest
+  // exactly where the motion blur has to read.
+  let step = 0;
+  for (let ms = 20; ms <= DROP_MS; ms += 20) {
+    const next = fallen(ms - 20, drop) - fallen(ms, drop);
+    assert.ok(next >= step, `the pin slowed down between ${ms - 20} and ${ms} ms`);
+    step = next;
+  }
 
   // The shutter has to outlast the fall or the trail is cut off mid-flight.
   assert.ok(SETTLED_MS > DROP_MS);
 });
 
-test('the pin and its fall both fit in the sky the shot actually has', () => {
-  // THE MEASUREMENT THIS FILE EXISTS TO PROTECT. The flyover is a pitched
-  // three-quarter shot of a building that fills a quarter of the frame, so
-  // there is very little sky in it: photographed at 368x230, the Library's roof
-  // projects about 85 px below the top edge. Everything above that is
-  // off-camera, and the pin plus its whole fall have to live inside it — the
-  // first version dropped 88 m, which was ten times the room available, and the
-  // pin was invisible for the entire drop and simply appeared, landed.
+test('the pin starts off camera and spends most of the fall on it', () => {
+  // THE TWO REQUIREMENTS THIS FILE EXISTS TO PROTECT, and they pull against
+  // each other. The pin has to enter from ABOVE the window — a marker that
+  // materialises in mid-air says nothing about where it came from — and it has
+  // to be watchable, which it is not if it clears the top edge by so far that
+  // the whole drop happens off camera. Both are facts about screen pixels.
   //
-  // These are the two numbers that failure would move, checked against the
-  // headroom rather than against themselves.
-  const HEADROOM_PX = 85;
-  const [width, height] = [368, 230];
+  // 85 is measured: photographed at 368x230, the Library's roof projects about
+  // 85 px below the top edge. It is a property of the framing rather than of
+  // the pin, so it survives every change to the pin's size.
+  const ROOF_Y = 85;
+  const height = 230;
   const px = pinHeight(height);
-  assert.ok(px < HEADROOM_PX, `a ${px} px pin does not fit under a ${HEADROOM_PX} px sky`);
+  const drop = dropPixels(ROOF_Y, height);
 
-  // The fall, converted back into pixels the way the renderer will draw it.
-  // ALTITUDE_GAIN is folded into `dropMetres`, so this round-trips through the
-  // real arithmetic rather than restating it.
-  const fallPx = dropMetres(196, width, height) * 2.11 * (width / 196);
-  assert.ok(fallPx > px * 1.5,
-    `a ${fallPx.toFixed(0)} px fall on a ${px} px pin is a hop, not a drop`);
-  // Most of the fall has to be ON SCREEN. The pin may start just above the top
-  // edge — a thing falling INTO a picture does — but if it clears the frame by
-  // more than its own height the drop happens where nobody can see it.
-  assert.ok(px + fallPx < HEADROOM_PX + px,
-    `the fall starts ${(px + fallPx - HEADROOM_PX).toFixed(0)} px above the frame`);
+  // Off camera at the first frame: the pin's FOOT starts at or above the top
+  // edge, which puts everything above it — the whole drawing — out of shot.
+  assert.ok(drop >= ROOF_Y + px,
+    `a ${drop.toFixed(0)} px fall leaves ${(ROOF_Y + px - drop).toFixed(0)} px of pin on screen`);
+
+  // ...and then most of the drop is spent where it can be seen. The pin's foot
+  // crosses the top edge when it has fallen to ROOF_Y, so this is the fraction
+  // of the animation with some pin in frame.
+  let entered = DROP_MS;
+  for (let ms = 0; ms <= DROP_MS; ms += 5) {
+    if (fallen(ms, drop) < ROOF_Y) { entered = ms; break; }
+  }
+  const onScreen = 1 - entered / DROP_MS;
+  assert.ok(onScreen > 0.4,
+    `only ${(onScreen * 100).toFixed(0)}% of the fall happens inside the frame`);
 
   // A viewport of nothing must not produce a pin of nothing: the flyover
   // measures its own element, and a card built into a hidden panel measures 0.
   assert.ok(pinHeight(0) > 0);
   assert.ok(pinHeight(4000) < 120, 'the pin grows without limit on a large screen');
+  // A roof already at the top edge would otherwise ask for no fall at all.
+  assert.ok(dropPixels(0, height) > px, 'a high roof gets no drop');
 });
 
-test('the push pin marks a place with its point', () => {
-  // `anchorY: height` in src/flyover-pin.js is only correct because the tip is
-  // at the very bottom of the box. If the drawing ever gains padding under the
-  // point, every pin on the campus rises off its roof by that much.
-  assert.equal(PUSH_PIN.tipY, PUSH_PIN.h);
+test('the push pin marks a place with its foot', () => {
+  // The foot is NOT the bottom of the box — there is a sliver of padding under
+  // it so its antialiasing is not clipped — so anchoring the icon to the box
+  // stands every pin on the campus off its roof by that much. The anchor has to
+  // come from the drawing's own measurement of where its foot is.
+  assert.ok(PUSH_PIN.tipY < PUSH_PIN.h);
+  assert.equal(PUSH_PIN.anchor, Number((PUSH_PIN.tipY / PUSH_PIN.h).toFixed(3)));
+  const icon = pinIcon(PUSH_PIN_RED, 40);
+  assert.ok(Math.abs(icon.anchorY / icon.height - PUSH_PIN.anchor) < 1e-9,
+    'the icon anchors to its box rather than to the pin');
   assert.ok(PUSH_PIN.aspect > 1, 'the pin is not taller than it is wide');
 });
 
@@ -444,28 +470,73 @@ test('the push pin rasterises: intrinsic size on demand, percentages otherwise',
   // deck.gl loads icons exactly that way, so the pin would reach the atlas
   // squashed and blurred with nothing in the console to say so.
   const sized = pushPinSvg({ height: 128 });
-  assert.match(sized, /width="62\.\d+" height="128"/);
+  assert.match(sized, new RegExp(`width="${(128 / PUSH_PIN.aspect).toFixed(3)}" height="128"`));
   assert.ok(!sized.includes('100%'));
   assert.match(pushPinSvg(), /width="100%" height="100%"/);
 
   // Every gradient the drawing refers to has to exist under the key it was
-  // asked for, or the browser paints the shape black and says nothing.
-  const svg = pushPinSvg({ id: 'probe' });
-  for (const [, ref] of svg.matchAll(/url\(#([^)]+)\)/g)) {
-    assert.ok(svg.includes(`id="${ref}"`), `no gradient defined for ${ref}`);
+  // asked for, or the browser paints the shape black and says nothing. The
+  // shadow is checked the same way and for the same reason: it is one circle
+  // whose entire appearance is a gradient it names.
+  for (const svg of [pushPinSvg({ id: 'probe' }), pinShadowSvg({ id: 'probe' })]) {
+    for (const [, ref] of svg.matchAll(/url\(#([^)]+)\)/g)) {
+      assert.ok(svg.includes(`id="${ref}"`), `no gradient defined for ${ref}`);
+    }
+    assert.ok(svg.startsWith('<svg') && svg.endsWith('</svg>'));
   }
-  assert.ok(svg.startsWith('<svg') && svg.endsWith('</svg>'));
+  // The shadow is rasterised the same way the pin is and needs the same
+  // intrinsic size, but it is one shape at one size and never asks for another.
+  assert.match(pinShadowSvg(), new RegExp(`width="${SHADOW_BOX.w}" height="${SHADOW_BOX.h}"`));
 });
 
-test('recolouring the pin spins the hue and leaves the steel alone', () => {
+test('the cast shadow is anchored at the foot and declared at its own size', () => {
+  // THE DEFECT THIS CATCHES, because it was shipped once and found by looking:
+  // deck.gl packs an icon into the box the icon DECLARES and stretches the image
+  // to fill it, so an icon that says 300 for a drawing that is 240 is silently a
+  // quarter longer — and this shadow's length is what says how high the pin is.
+  // Nothing in the console, nothing in the shape, just a shadow reaching past
+  // the building it belongs to.
+  const icon = pinShadowIcon();
+  assert.equal(icon.width, SHADOW_BOX.w);
+  assert.equal(icon.height, SHADOW_BOX.h);
+  // Anchored at the FOOT, which is the bottom of the box: that end of a cast
+  // shadow is the one point that does not move when its caster rises.
+  assert.equal(icon.anchorY, SHADOW_BOX.h);
+  assert.equal(icon.anchorX, SHADOW_BOX.w / 2);
+  // ...and the ball's blot is out along it, not at either end.
+  assert.ok(SHADOW_BOX.at > 0.5 && SHADOW_BOX.at < 1);
+  // Slender, which is the whole point of drawing the pin's silhouette rather
+  // than a puddle under it.
+  assert.ok(SHADOW_BOX.h / SHADOW_BOX.w > 2);
+});
+
+test('the pin takes the landing on its legs', () => {
+  // Full height for the whole fall: nothing compresses a pin in mid-air.
+  for (const ms of [0, DROP_MS / 2, DROP_MS]) assert.equal(bounced(ms), 1);
+
+  // Then it compresses, springs back PAST full height, and rings down. The
+  // overshoot is the part that separates a bounce from a dip, so it is the part
+  // worth asserting.
+  const low = bounced(DROP_MS + 30);
+  assert.ok(low > 0.7 && low < 0.95, `a landing that squashes to ${low} is a collapse`);
+  assert.ok(Math.max(...[80, 100, 120, 140].map((d) => bounced(DROP_MS + d))) > 1.02,
+    'the pin never springs back past its own height');
+
+  // ...and is done by the time anything else asks for a settled frame.
+  assert.ok(Math.abs(bounced(SETTLED_MS) - 1) < 0.005);
+  assert.equal(bounced(SETTLED_MS * 10), 1);
+});
+
+test('recolouring the pin spins the hue and leaves the needle alone', () => {
   const red = pushPinSvg({ colour: PUSH_PIN_RED });
   const green = pushPinSvg({ colour: '#1e8e3e' });
   assert.notEqual(red, green);
-  // The needle is measured chrome and must not follow the ball: a green pin
-  // with a green spike is a drawing of a different object.
-  for (const steel of ['#65615a', '#524c42', '#bdb5af']) {
-    assert.ok(green.includes(steel), `the needle lost ${steel} when recoloured`);
+  // The needle is measured grey and must not follow the ball: a green pin with
+  // a green spike is a drawing of a different object. Same for the white dot,
+  // which is a sticker on the ball rather than a highlight of its colour.
+  for (const neutral of ['#a5a7a9', '#bebfc1', '#484745', '#fafafa']) {
+    assert.ok(green.includes(neutral), `the needle lost ${neutral} when recoloured`);
   }
-  // ...while the body did move.
-  assert.ok(!green.includes('#e60313'));
+  // ...while the ball did move.
+  assert.ok(!green.includes(PUSH_PIN_RED));
 });

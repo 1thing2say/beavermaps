@@ -1,4 +1,4 @@
-// The pin the flyover drops on the building you tapped.
+// The pin the flyover drops on the building you tapped, and its shadow.
 //
 // The problem it solves is that the aerial view arrives with no subject. A
 // helicopter shot of a campus is a roof among roofs, and at the framing this app
@@ -18,31 +18,75 @@
 // The alternative was the footprint's centre, which is what the camera already
 // aims at, and it is wrong for this: a footprint centre is a point on the GROUND
 // and the pin would sink through the roof of every building it marked.
+//
+// THE FALL IS IN SCREEN PIXELS, and that is the whole lesson of this file. It
+// was first written in metres of altitude, which needed a measured constant —
+// how many pixels deck.gl draws a metre of height as, against a metre of ground
+// — and gave a drop that was invisible for its whole length because there is
+// almost no sky in this shot. Fixing that with a smaller number in the same
+// units only moved the problem: the requirement is "start above the top edge of
+// the window", the top edge is a fact about pixels, and every conversion between
+// the two was a place to be wrong. IconLayer takes a `getPixelOffset` that is
+// applied after projection, in exactly the units the icon's own size is in, so
+// the pin is positioned ON the roof and lifted off it in pixels. The perspective
+// no longer has an opinion about how far it falls.
 
-import { pushPinSvg, PUSH_PIN, PUSH_PIN_RED } from './push-pin.js';
+import {
+  pushPinSvg, pinShadowSvg, SHADOW_BOX, PUSH_PIN, PUSH_PIN_RED,
+} from './push-pin.js';
+// The same scale the flyover's own box is built with. Imported rather than
+// restated, because a shadow slid on one scale across a building framed on
+// another is a picture of two different campuses.
+import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
+
+/** How long the fall takes, in ms. */
+export const DROP_MS = 420;
 
 /**
- * How far the pin falls, IN PIXELS OF SCREEN, and how long it takes.
+ * How much of the fall already happened before the first frame, as a multiple of
+ * the part that is drawn.
  *
- * Pixels rather than metres, and that is the whole lesson of this file. The
- * first version dropped the pin 0.45 of the framed span — 88 m over the Library
- * — on the reasoning that a vertical rod of height H covers H * sin(55) of the
- * picture. Photographed, the pin was invisible for the entire fall and simply
- * appeared, landed, at the end. There is very little sky in this shot: the
- * camera is pitched 55 degrees at a building it fills a quarter of the frame
- * with, so the roof projects about 85 px below the top edge of a 225 px picture
- * and everything above that is off-camera. A drop measured in metres cannot know
- * that, and 88 m is ten times more than there is room for.
+ * A dropped object under gravity covers a quarter of its fall in the first half
+ * of the time, so a pure `1 - u^2` from a standing start spends most of the
+ * animation crawling — and since the pin starts ABOVE the top of the window, all
+ * of that crawl is off camera. Measured against the framing this app uses, only
+ * about a third of the drop was ever on screen.
  *
- * So the height is expressed as a multiple of the PIN's own drawn height, which
- * is in pixels by construction and therefore already in the units the headroom
- * is measured in. At 1.6 pin-heights the fall is 66 px against 44 px of sky
- * above a landed 41 px pin: it starts a little over the top edge and is on
- * screen for the last 260 ms, with the trail reaching up out of shot behind it,
- * which is what a thing falling INTO a picture looks like.
+ * So the pin is not released at the first frame; it is CAUGHT at one, already
+ * moving, which is also the literal truth of a thing that comes in from above
+ * the picture. One unit of pre-fall — it has been falling for as long again as
+ * we watch it — puts half the animation on screen instead of a third, and the
+ * motion is still constant acceleration throughout. It is the same parabola,
+ * joined later.
  */
-const DROP_PINS = 1.6;
-export const DROP_MS = 620;
+const PRE_FALL = 1;
+
+/**
+ * Speed at the moment of landing, in units of `drop / DROP_MS`.
+ *
+ * Derived rather than measured: the fall is `((l+1)^2 - (u+l)^2) / (1+2l)` of
+ * the drop, whose slope at u = 1 is `2(l+1) / (1+2l)`. It is here because the
+ * shutter length is chosen from it — see SHUTTER below — and a PRE_FALL changed
+ * without this changing with it would silently lengthen or shorten the trail.
+ */
+const LANDING_SPEED = (2 * (PRE_FALL + 1)) / (1 + 2 * PRE_FALL);
+
+/**
+ * How much clearance the pin gets above the top of the window, as a multiple of
+ * its own drawn height, and the shortest fall that is still a fall.
+ *
+ * 1 would put the pin exactly at the edge at the first frame: its foot on the
+ * top edge, its head just above. That is enough in principle and not in
+ * practice, because the first frame is drawn at whatever moment the tileset went
+ * quiet and a device pixel ratio can put a half-pixel of ball back on screen.
+ * 1.15 is a sixth of a pin of margin and costs 15% of the fall's length.
+ *
+ * The floor is for the case the projection can produce and the framing normally
+ * does not: a roof that is already at or above the top edge, where "start above
+ * it" asks for no fall at all.
+ */
+const CLEAR_PINS = 1.15;
+const MIN_DROP_PINS = 2;
 
 /**
  * How long the tileset has to go quiet — no tile arriving — before the pin is
@@ -73,25 +117,6 @@ export const DROP_MS = 620;
 export const QUIET_MS = 300;
 
 /**
- * Screen pixels per metre of ALTITUDE, as a multiple of pixels per metre of
- * ground — because those are not the same number and assuming they were is what
- * made the first drop invisible.
- *
- * Measured, by holding the pin at a known height above the Library's roof and
- * reading the ball's centroid off a screenshot: 0 m put it at row 160.2, 10 m at
- * row 120.6, so 10 m of altitude is 39.6 px. The same view draws 196 m of ground
- * across 368 px, or 1.878 px per ground metre, so altitude is drawn 2.11 times
- * larger.
- *
- * Most of that is Mercator — deck.gl scales z by the same factor as x and y, and
- * at my campus's latitude that is 1/cos(38.65) = 1.28 — and the rest is the pitched
- * perspective, where a point above the target is nearer the camera than the
- * target is. Both terms are fixed for this viewport: one latitude, one pitch. It
- * is a constant here, and it would not be in an app that let either move.
- */
-const ALTITUDE_GAIN = 2.11;
-
-/**
  * The shutter, in the sense a camera means it: how far back in TIME the trail
  * reaches, and how many samples of it are drawn.
  *
@@ -99,27 +124,78 @@ const ALTITUDE_GAIN = 2.11;
  * isotropic and reads as fog rather than as speed — so this does what
  * src/pin-select.js does for the map's own marker and samples time instead of
  * filtering space. Each ghost is not an approximation of where the pin has
- * been; it is the pin as it was, SHUTTER_MS per step, running the same fall.
+ * been; it is the pin as it was, one shutter step earlier, running the same fall.
  *
- * The span is chosen from the pin's actual speed, which is now the same on every
- * building by construction: the fall is DROP_PINS pin-heights and the pin is a
- * fixed fraction of the viewport, so nothing about the building enters it. A
- * 41 px pin falls 66 px in DROP_MS and peaks at 2 * 66 / 620 = 0.21 px/ms, so
- * five samples 26 ms apart trail about 28 px behind it — two thirds of a pin
- * length, which is what reads as speed rather than as a smudge.
+ * The LENGTH of the trail is what has to be right, and it is specified here in
+ * pin heights rather than in milliseconds. A trail is only legible between two
+ * bounds: shorter than about half a pin and it hides under the pin's own
+ * outline, longer than about one and a half and the ghosts separate into a
+ * column of stamps. Fixing the time instead — which the first version did — sets
+ * the length only for one particular speed, and this drop is now more than twice
+ * as fast as that one was. So the step is solved for: distance over speed, with
+ * the landing speed the trail is wanted at.
  */
-const GHOSTS = 5;
-const SHUTTER_MS = 26;
+const GHOSTS = 6;
+const TRAIL_PINS = 0.85;
 /** The nearest ghost's opacity; the rest fall off linearly behind it. */
 const GHOST_ALPHA = 0.34;
+const shutterMs = (drop, px) => (TRAIL_PINS * px * DROP_MS) / (LANDING_SPEED * drop * GHOSTS);
 
 /**
- * The moment nothing is moving any more: the fall, plus the shutter emptying.
+ * The landing: how far the pin compresses at the moment of contact, how long one
+ * swing of the recovery takes, and how fast the swings die away.
+ *
+ * A falling object that simply stops has no weight. A decaying sine gives the
+ * whole gesture in one expression: the pin arrives at full height, compresses
+ * over the next sixty milliseconds, springs back PAST full height, and rings
+ * down through two or three smaller swings — which is what separates something
+ * springy from something being resized.
+ *
+ * A SINE RATHER THAN A COSINE, which is the difference between a bounce and a
+ * flicker and was found by photographing it. A cosine is at its deepest
+ * compression at the instant of contact and has recovered half of it 50 ms
+ * later, so the frame that actually gets drawn — this runs at whatever rate the
+ * tileset leaves the renderer — catches maybe half the squash and the other half
+ * happens between frames. Measured on the Library, a nominal 22% compression
+ * reached the screen as 11% and a 4 px flinch. Starting at rest and taking a
+ * quarter of a swing to reach the bottom puts the deepest part of it in the
+ * middle of the motion, where frames are, and it is a compression that is
+ * WATCHED rather than one that is inferred.
+ *
+ * UNIFORM rather than a squash, and that is a deliberate limit rather than an
+ * oversight. A real squash keeps the width while the height drops, which for
+ * IconLayer means a differently-proportioned ICON — a separate atlas entry per
+ * step of the compression, and a texture atlas repacked a dozen times in the
+ * half second after every landing. The pin gets shorter and springs back, which
+ * is the read; it gets narrower at the same time, which nobody watches for.
+ */
+const BOUNCE = 0.34;
+const BOUNCE_MS = 260;
+const BOUNCE_DECAY = 130;
+
+/**
+ * How tall the pin stands at `ms`, as a fraction of its drawn height.
+ *
+ * One before it lands, because nothing is compressing a pin in mid-air.
+ */
+export function bounced(ms) {
+  const t = ms - DROP_MS;
+  if (!(t > 0)) return 1;
+  return 1 - BOUNCE * Math.exp(-t / BOUNCE_DECAY) * Math.sin((2 * Math.PI * t) / BOUNCE_MS);
+}
+
+/**
+ * A time past the end of everything: the fall, the longest shutter it can ask
+ * for, and the bounce ringing itself out.
  *
  * For callers that want the pin where it ends up without playing the drop —
- * `prefers-reduced-motion`, and a test that wants a stable frame.
+ * `prefers-reduced-motion`, and a test that wants a stable frame. The trail is
+ * the shorter of the two: the shutter totals `TRAIL_PINS * px * DROP_MS /
+ * (LANDING_SPEED * drop)` and `drop` is never less than `CLEAR_PINS * px`, which
+ * caps it at well under half of DROP_MS whatever the viewport is. Six decay
+ * constants leave the bounce at a quarter of one part in a thousand.
  */
-export const SETTLED_MS = DROP_MS + GHOSTS * SHUTTER_MS;
+export const SETTLED_MS = DROP_MS + BOUNCE_DECAY * 6;
 
 /**
  * How tall the pin is drawn, as a fraction of the viewport's height.
@@ -132,30 +208,105 @@ export const SETTLED_MS = DROP_MS + GHOSTS * SHUTTER_MS;
  * the trail vanishes under the pin's own outline. A pure translation has nowhere
  * to hide, so the blur reads.
  *
- * 0.18 is a compromise against the headroom rather than a size that was liked.
- * The pin has to fit UNDER the top of the frame with room to fall into it, and
- * there is only about 85 px between the roof and the top edge — see DROP_PINS.
- * At 0.3 the pin was 69 px of that 85 and there was nowhere left to fall from;
- * at 0.18 it is 41 px and leaves 44, which is a fall worth watching and still a
- * marker worth seeing.
+ * 0.28 rather than the 0.18 this started at, and the change was affordable
+ * rather than merely wanted. The old number was a compromise against headroom:
+ * the pin had to fit BETWEEN the roof and the top of the frame with room to fall
+ * in, and there is only about 85 px of that. Starting the fall off camera
+ * retires the constraint completely — there is no upper bound on the sky when
+ * the sky is not where the pin waits — so the size is now free to be chosen for
+ * legibility, which at these viewport sizes wants about a quarter of the height.
  */
-const PIN_FRAC = 0.18;
-const PIN_MIN_PX = 26;
-const PIN_MAX_PX = 60;
+const PIN_FRAC = 0.28;
+const PIN_MIN_PX = 34;
+const PIN_MAX_PX = 110;
 
 /**
- * Metres above the roof at `ms` into the drop.
+ * The cast shadow: the shortest and longest it may reach in pin heights of
+ * ground, how quickly height fades it, and how dark it is at contact.
  *
- * `1 - u^2` rather than an ease, because this is a fall and a fall is constant
- * acceleration: distance goes as the square of time. It also puts the pin at its
- * fastest at the moment it lands, which is where the trail is wanted — an
- * ease-out would arrive slowest exactly where the motion has to read.
+ * A shadow that only fades is a fade; a shadow that only moves is a decal. Both
+ * happen here and they are reciprocal on purpose — the same light spread over
+ * more ground — so the shadow's total darkness is roughly conserved and what
+ * moves is its concentration.
+ *
+ * SOFTEN is in pin heights of lift, and 2 is not arbitrary either: the fall is
+ * around two and a half pin heights at this framing, so the shadow starts at
+ * about a third of its landed strength and gathers the whole way down.
+ *
+ * THE STRENGTH IS ALMOST FULL, which looks wrong written down and is not. The
+ * softening is in the DRAWING — see CAST_STOPS in src/push-pin.js, whose alpha
+ * is already a penumbra falling to nothing at the edges — so this multiplies a
+ * shape that is only briefly opaque at its own core. Photographed at 0.55 over
+ * the Library's roof, which is bright mottled gravel with dark plant on it, the
+ * shadow lost to the texture at most bearings and simply was not there.
+ */
+const SHADOW_MIN_PINS = 1.35;
+const SHADOW_MAX_PINS = 1.5;
+const SHADOW_SOFTEN = 2;
+const SHADOW_ALPHA = 0.9;
+
+/**
+ * Where the sun is: how far a shadow slides across the ground per unit of its
+ * caster's height, and the compass bearing it slides TOWARD.
+ *
+ * A shadow directly under its object is what an object under a studio softbox
+ * does, and on a roof it reads as a dark halo rather than as a shadow at all —
+ * there is nothing in it to say the pin is standing up. Sliding it out gives it
+ * the one thing a cast shadow is for.
+ *
+ * NEITHER NUMBER IS A TASTE. The imagery under this pin has its own sun baked
+ * into it — every tree in a Google 3D tile carries the shadow it had at capture
+ * — so a pin lit from somewhere else is a composite that looks like one. my campus is
+ * at 38.65 N, where the sun is due south at noon and shadows therefore run due
+ * north; aerial capture runs from mid-morning to mid-afternoon, which swings
+ * that a little either way. 15 degrees is that band's middle. The slope is
+ * 1/tan of the sun's elevation, and 0.84 is a sun about 50 degrees up — high,
+ * as it is when this imagery is flown, and short enough to keep the shadow on
+ * the building it belongs to.
+ */
+const SUN_TOWARD_DEG = 15;
+const SUN_SLIDE = 0.7;
+
+/**
+ * How far above the roof the pin's anchor sits, in metres, so it can be
+ * OCCLUDED without being buried.
+ *
+ * The pin is depth-tested, which is a reversal: it used to draw over everything
+ * so that it could never disappear behind the building it was marking. A tree in
+ * front of it drew through it, and a marker that ignores a tree is a sticker on
+ * the lens rather than a thing in the shot.
+ *
+ * A billboard makes that a coarse test rather than a per-pixel one, and it is
+ * worth knowing exactly how coarse: every fragment of one carries the depth of
+ * its ANCHOR, because deck.gl projects the anchor and then adds the quad's size
+ * and offset in clip space. So this pin is at the depth of the point it stands
+ * on, and it is hidden by anything nearer the camera than THAT — which is the
+ * tree the request is about, and is not, say, a branch that only overlaps the
+ * ball. The whole pin goes at once.
+ *
+ * The clearance is what stops the other failure: an anchor exactly on the roof
+ * z-fights with it, and src/roofs.json holds z to one decimal, so a roof written
+ * as 0 could be a hand's width under its own surface and swallow the pin
+ * entirely. Two metres is past both. It is paid back exactly — see `clear` in
+ * `pinLayers`, which pushes the pin back down by however many pixels those two
+ * metres bought — so nothing moves on screen for it.
+ */
+export const CLEAR_M = 2;
+/** The same, for the shadow, which is a flat quad lying ON the roof it z-fights. */
+const SHADOW_CLEAR_M = 1;
+
+/**
+ * Pixels above the roof at `ms` into the drop.
+ *
+ * Constant acceleration, observed from PRE_FALL of the way down — see there. At
+ * `l = 0` this is the plain `1 - u^2` of an object let go at the first frame.
  */
 export function fallen(ms, drop) {
   if (!(ms > 0)) return drop;
   if (ms >= DROP_MS) return 0;
   const u = ms / DROP_MS;
-  return drop * (1 - u * u);
+  const l = PRE_FALL;
+  return drop * (((l + 1) ** 2 - (u + l) ** 2) / (1 + 2 * l));
 }
 
 /** How tall to draw the pin in a viewport of this height, in CSS pixels. */
@@ -163,16 +314,16 @@ export const pinHeight = (viewportHeight) =>
   Math.round(Math.max(PIN_MIN_PX, Math.min(PIN_MAX_PX, viewportHeight * PIN_FRAC)));
 
 /**
- * How far the pin falls, in METRES, for a drop that covers DROP_PINS pin-heights
- * of screen.
+ * How far the pin falls, in CSS pixels, given where the roof projects.
  *
- * The conversion the first version did not have. `width / span` is what one
- * ground metre is worth in pixels — the framing's own scale — and ALTITUDE_GAIN
- * is how much more a metre of height is worth than that.
+ * `roofY` is the roof's own screen position measured down from the top edge, so
+ * the fall is that distance plus enough pin to have the drawing entirely off
+ * camera at the first frame. Nothing here knows the pitch, the latitude or the
+ * zoom, which is the point: they are all already inside `roofY`.
  */
-export function dropMetres(span, width, height) {
-  const perGroundMetre = width / span;
-  return (DROP_PINS * pinHeight(height)) / (ALTITUDE_GAIN * perGroundMetre);
+export function dropPixels(roofY, viewportHeight) {
+  const px = pinHeight(viewportHeight);
+  return Math.max(MIN_DROP_PINS * px, roofY + CLEAR_PINS * px);
 }
 
 /**
@@ -184,11 +335,13 @@ export function dropMetres(span, width, height) {
  * `pushPinSvg`, which exists for this call.
  *
  * `anchorY` is the whole point of the geometry in push-pin.js: the pin marks a
- * place with its POINT, and the point is at the very bottom of its box, so the
- * anchor is the box's full height rather than the middle of a head.
+ * place with its FOOT, and the foot is NOT at the bottom of the box — there is a
+ * sliver of padding under it so its antialiasing is not clipped. Anchoring to
+ * the box would stand every pin on the campus off its roof by that much, so the
+ * anchor comes from the drawing's own measurement of where its foot is.
  */
 const icons = new Map();
-function iconFor(colour, px) {
+export function pinIcon(colour, px) {
   const key = `${colour}@${px}`;
   const cached = icons.get(key);
   if (cached) return cached;
@@ -201,73 +354,180 @@ function iconFor(colour, px) {
     width,
     height,
     anchorX: width / 2,
-    anchorY: height,
+    anchorY: height * PUSH_PIN.anchor,
   };
   icons.set(key, icon);
   return icon;
 }
 
 /**
- * The pin and its trail, as one layer.
+ * The shadow, which is one shape at one size: the layer scales and turns it.
  *
- * One layer rather than one per ghost because deck.gl draws a layer's items in
- * data order, so putting the oldest sample first and the pin last gets the
- * back-to-front order a trail needs without any depth sorting — which would not
- * work here anyway, since every sample is on the same vertical line and the
- * depth test is off.
+ * Anchored at the BOTTOM of its box, because that end of it is the pin's foot —
+ * the one point of a cast shadow that does not move when the caster rises. The
+ * rest of the shape stretches away from there.
+ */
+let shadowIcon = null;
+export const pinShadowIcon = () => (shadowIcon ??= {
+  id: 'pin-shadow',
+  url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(pinShadowSvg({}))}`,
+  width: SHADOW_BOX.w,
+  height: SHADOW_BOX.h,
+  anchorX: SHADOW_BOX.w / 2,
+  anchorY: SHADOW_BOX.h,
+  // A MASK, so `getColor` alone decides how dark it is. The drawing is a stencil
+  // — black shapes whose whole content is their alpha — and letting the layer
+  // own the colour is what lets one shape serve a shadow that fades as its
+  // caster rises.
+  mask: true,
+});
+
+/**
+ * The shadow and the pin, as two layers, back to front.
  *
- * OFF, deliberately. The pin is a marker, not an object in the scene: its job is
- * to say which building this is, and a marker that disappears behind a roof for
- * half of every orbit has stopped doing that job. Turning the test off also
- * sidesteps a billboard's real limitation — every fragment of one carries the
- * depth of its anchor, so a pin standing ON a roof either passes or fails the
- * test as a whole and z-fights while it decides.
+ * The pin's own samples are one layer rather than one per ghost because deck.gl
+ * draws a layer's items in data order, so putting the oldest sample first and
+ * the pin last gets the back-to-front order a trail needs without any depth
+ * sorting — which would not work here anyway, since every sample is on the same
+ * vertical line and they all share one depth.
+ *
+ * BOTH ARE DEPTH-TESTED and neither writes depth. Tested, so a tree between the
+ * camera and the building hides them — see CLEAR_M for how coarsely a billboard
+ * can manage that, and for the two metres of clearance that stop the pin being
+ * swallowed by the roof it stands on. Not written, because seven overlapping
+ * copies of one pin at one depth have nothing to say to each other and a shadow
+ * has nothing to say to the pin above it.
+ *
+ * The shadow is the one thing here that is NOT a billboard. It is drawn with
+ * `billboard: false` and sized in metres, which puts its quad flat in the ground
+ * plane at the roof's own height — so the pitch squashes it into an ellipse and
+ * the orbit turns it, for free and correctly, instead of it following the camera
+ * around like a sticker on the lens. That is what "projected onto the building"
+ * has to mean for it to read as a shadow at all.
  *
  * @param {object}   tools    the deck.gl toolkit, for IconLayer
  * @param {object}   options
  * @param {number[]} options.roof   [lon, lat, z] from src/roofs.json
- * @param {number}   options.span   the framed span in metres, for the drop height
+ * @param {number}   options.drop   the fall's length in CSS pixels, from dropPixels
+ * @param {number}   options.clear  what CLEAR_M of altitude is worth, in CSS pixels
+ * @param {number}   options.span   the framed span in metres, for the shadow's size
  * @param {number}   options.width  the viewport's width in CSS pixels
  * @param {number}   options.height the viewport's height in CSS pixels
  * @param {number}   options.ms     time since the drop began; <=0 holds it up
  * @param {string}  [options.colour]
  */
-export function pinLayer({ IconLayer }, { roof, span, width, height, ms, colour = PUSH_PIN_RED }) {
+export function pinLayers(
+  { IconLayer },
+  { roof, drop, clear, span, width, height, ms, colour = PUSH_PIN_RED },
+) {
   const px = pinHeight(height);
-  const icon = iconFor(colour, px);
-  const drop = dropMetres(span, width, height);
-  const [lon, lat, z] = roof;
+  const icon = pinIcon(colour, px);
+  const shutter = shutterMs(drop, px);
 
-  const landed = z + fallen(ms, drop);
+  const lift = fallen(ms, drop);
   const samples = [];
   for (let k = GHOSTS; k >= 1; k -= 1) {
-    const at = z + fallen(ms - k * SHUTTER_MS, drop);
+    const at = fallen(ms - k * shutter, drop);
     // A ghost that has caught up with the pin is not a fainter copy of it, it is
-    // extra alpha on top of it — five of them stacked on a landed pin darken it
+    // extra alpha on top of it — six of them stacked on a landed pin darken it
     // by a third. So the shutter empties itself rather than being switched off
     // at some time that would have to be kept in step with GHOSTS.
-    if (at === landed) continue;
-    samples.push({ z: at, alpha: Math.round(255 * GHOST_ALPHA * (1 - (k - 1) / GHOSTS)) });
+    if (at === lift) continue;
+    samples.push({ lift: at, alpha: Math.round(255 * GHOST_ALPHA * (1 - (k - 1) / GHOSTS)) });
   }
-  samples.push({ z: landed, alpha: 255 });
+  samples.push({ lift, alpha: 255 });
 
-  return new IconLayer({
-    id: 'flyover-pin',
-    data: samples,
-    getPosition: (d) => [lon, lat, d.z],
-    getIcon: () => icon,
-    getSize: px,
-    // Only the alpha is read: the icon is not a mask, so the shader keeps the
-    // pin's own colours and multiplies this in. That is what a ghost needs —
-    // a fainter copy of the same photograph, not a flat silhouette of it.
-    getColor: (d) => [255, 255, 255, d.alpha],
-    billboard: true,
-    sizeUnits: 'pixels',
-    // Below deck.gl's default of 0.05 the faintest ghost survives: it is drawn
-    // at 0.068 alpha, so at the default its antialiased edge is discarded and it
-    // reads as a hard-edged stamp rather than as a blur.
-    alphaCutoff: 0.01,
-    parameters: { depthCompare: 'always', depthWriteEnabled: false },
-    updateTriggers: { getPosition: ms, getSize: px, getIcon: icon.id },
-  });
+  // Reciprocal, so the shadow's total darkness is conserved: the same light is
+  // spread over more shadow the higher its caster is.
+  const spread = 1 + lift / (SHADOW_SOFTEN * px);
+
+  // HOW FAR THE SHADOW REACHES. Only the ball casts one worth drawing, so the
+  // shadow's far end is where the ball's own height — the fall, plus how high it
+  // rides on its needle — puts it once the sun's slope has carried it out along
+  // the ground.
+  //
+  // THE HEIGHT HAS TO BE CONVERTED, and getting that wrong is what made the
+  // first version of this reach four times too far. Everything else in this file
+  // is in screen pixels, and a screen pixel of ALTITUDE is not a screen pixel of
+  // GROUND: deck.gl scales z by the Mercator factor and the pitched camera
+  // magnifies it again, which at this latitude and pitch is a little over two to
+  // one. `clear` is that ratio, already measured by the projection itself —
+  // CLEAR_M metres of altitude came out as `clear` pixels — so it converts the
+  // ball's height into metres exactly, with no constant to keep in step.
+  //
+  // Then bounded at both ends, because past a point the physics stops being the
+  // point. A pin two hundred pixels up genuinely throws its shadow fifty metres,
+  // which is off the building, into the trees, and no longer says anything about
+  // where the pin is going to land; and a landed pin under a high sun throws one
+  // barely longer than its own foot, which says nothing either.
+  const ballM = ((lift + PUSH_PIN.ride * px) * CLEAR_M) / clear;
+  const perMetre = width / span;
+  const reach = Math.min(
+    Math.max((SUN_SLIDE * ballM * perMetre) / SHADOW_BOX.at, SHADOW_MIN_PINS * px),
+    SHADOW_MAX_PINS * px,
+  );
+  // The shadow is anchored at the pin's FOOT and stretches from there, so the
+  // position is the roof itself and `getAngle` does the aiming.
+  //
+  // SIZED IN PIXELS, and it is a flat quad in the GROUND plane, which is a
+  // combination worth reading twice. `billboard: false` is what lays it down —
+  // the quad is built in the ground plane, so the pitch foreshortens it and the
+  // orbit turns it, the way it does every real shadow in the imagery, instead of
+  // it following the camera around like a sticker on the lens. `sizeUnits` then
+  // says what a unit of `getSize` means, and 'meters' is the answer that looks
+  // right and is not: measured against the roof it lies on, a shadow asked for
+  // in metres came out 1.87 times too long — the metres-to-pixels conversion is
+  // applied on the way in and the pixels-to-common one on the way out, and for a
+  // ground-plane quad those do not cancel. In pixels it is one conversion and it
+  // measures true, which is also the unit `reach` was worked out in.
+  const cast = [roof[0], roof[1], roof[2] + SHADOW_CLEAR_M];
+
+  return [
+    new IconLayer({
+      id: 'flyover-pin-shadow',
+      data: [cast],
+      getPosition: (d) => d,
+      getIcon: pinShadowIcon,
+      getSize: reach,
+      // Negative, and it is worth writing down why rather than trying it twice.
+      // The icon's own up is (0,-1); the shader rotates by `mat2(cos,-sin,sin,
+      // cos)`, flips y, and lands the result in common space where +y is north.
+      // Following (0,-1) through comes out at (-sin a, cos a) east-north, and a
+      // compass bearing B is (sin B, cos B), so a = -B.
+      getAngle: -SUN_TOWARD_DEG,
+      getColor: [0, 0, 0, Math.round((255 * SHADOW_ALPHA) / spread)],
+      billboard: false,
+      sizeUnits: 'pixels',
+      alphaCutoff: 0.01,
+      parameters: { depthCompare: 'less-equal', depthWriteEnabled: false },
+      updateTriggers: { getPosition: cast, getSize: reach, getColor: spread },
+    }),
+    new IconLayer({
+      id: 'flyover-pin',
+      data: samples,
+      // Every sample is at the SAME place, CLEAR_M above the roof so the depth
+      // test has something to work with — and pushed straight back down by
+      // `clear`, which is what those metres are worth in pixels here. The fall
+      // is the rest of the offset, so the pin's foot is exactly on the roof at
+      // the end of it rather than nearly.
+      getPosition: () => [roof[0], roof[1], roof[2] + CLEAR_M],
+      getPixelOffset: (d) => [0, clear - d.lift],
+      getIcon: () => icon,
+      // The bounce. Anchored at the foot, so compressing the pin drops its head
+      // toward the roof and leaves the point exactly where it landed.
+      getSize: px * bounced(ms),
+      // Only the alpha is read: the icon is not a mask, so the shader keeps the
+      // pin's own colours and multiplies this in. That is what a ghost needs —
+      // a fainter copy of the same drawing, not a flat silhouette of it.
+      getColor: (d) => [255, 255, 255, d.alpha],
+      billboard: true,
+      sizeUnits: 'pixels',
+      // Below deck.gl's default of 0.05 the faintest ghost survives: it is drawn
+      // at 0.057 alpha, so at the default its antialiased edge is discarded and
+      // it reads as a hard-edged stamp rather than as a blur.
+      alphaCutoff: 0.01,
+      parameters: { depthCompare: 'less-equal', depthWriteEnabled: false },
+      updateTriggers: { getPixelOffset: ms, getSize: ms, getIcon: icon.id },
+    }),
+  ];
 }

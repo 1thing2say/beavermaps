@@ -50,7 +50,7 @@ import { spinnerOverlay } from './spinner.js';
 // because a tile measured on one scale against a box built on another is a
 // comparison of two different things that happen to share a unit.
 import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
-import { pinLayer, SETTLED_MS, QUIET_MS } from './flyover-pin.js';
+import { pinLayers, dropPixels, CLEAR_M, SETTLED_MS, QUIET_MS } from './flyover-pin.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
@@ -207,6 +207,10 @@ const loadToolkit = () => (toolkit ??= Promise.all([
 ]).then(([core, geo, tiles, ext, layers]) => ({
   Deck: core.Deck,
   MapView: core.MapView,
+  // Not for rendering. The pin's fall is measured in screen pixels and needs to
+  // know where on screen the roof is, which is a question only the projection
+  // can answer — see `dropPixels` in src/flyover-pin.js.
+  WebMercatorViewport: core.WebMercatorViewport,
   Tile3DLayer: geo.Tile3DLayer,
   Tiles3DLoader: tiles.Tiles3DLoader,
   LineLayer: layers.LineLayer,
@@ -848,16 +852,29 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
       busy.remove();
     };
 
-    // The pin's layer for a given moment of the drop, or nothing at all before
-    // there is a building under it. `roof` is absent for anything src/roofs.json
-    // has no measured centre for, and an unmarked flyover is a better answer
-    // than one marking a guess.
+    // How far the pin has to fall to start off camera, in CSS pixels, worked
+    // out ONCE from where the roof actually projects — not per frame. The orbit
+    // moves the roof around the picture, so a per-frame answer would change the
+    // fall's length while the pin was in the middle of it; over the 420 ms this
+    // takes the camera turns under five degrees, which moves the roof by a few
+    // pixels of a fall that is a couple of hundred.
+    // `clear` goes with it: what CLEAR_M of altitude is worth in pixels here, so
+    // the pin can be anchored that far above the roof for the depth test and put
+    // straight back where it belongs on screen.
+    let fall = { drop: 0, clear: 0 };
+    const measureDrop = (bearing) => {
+      const seen = new tools.WebMercatorViewport({ ...view, bearing, width, height });
+      const at = seen.project(roof)[1];
+      const above = seen.project([roof[0], roof[1], roof[2] + CLEAR_M])[1];
+      return { drop: dropPixels(at, height), clear: at - above };
+    };
+
     // `ms` of null means "not yet": before the drop has a reason to start there
     // is no pin at all, rather than a pin parked somewhere. `roof` is absent for
     // anything src/roofs.json has no measured centre for, and an unmarked
     // flyover is a better answer than one marking a guess.
     const pin = (ms) => (roof && ms !== null
-      ? [pinLayer(tools, { roof, span, width, height, ms })]
+      ? pinLayers(tools, { roof, ...fall, span, width, height, ms })
       : []);
 
     // A still frame under `prefers-reduced-motion`. The three-quarter bearing
@@ -871,10 +888,15 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
     // there. It has to be redrawn on `onReady` rather than once here, because at
     // this point the tiles have not arrived and neither has the drop's clock.
     if (prefersStill()) {
-      const settle = () => stage.deck?.setProps({
-        viewState: { ...view, bearing: 35 },
-        layers: [...stage.base, ...pin(roofReady ? SETTLED_MS : null)],
-      });
+      const settle = () => {
+        // Landed, so the fall's length changes nothing on screen — but the
+        // trail's spacing is solved from it, and a zero is a division by zero.
+        if (roof && !fall.drop) fall = measureDrop(35);
+        stage.deck?.setProps({
+          viewState: { ...view, bearing: 35 },
+          layers: [...stage.base, ...pin(roofReady ? SETTLED_MS : null)],
+        });
+      };
       const ready = stage.onReady;
       stage.onReady = () => { ready(); settle(); };
       settle();
@@ -891,7 +913,10 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
       // Nothing falls onto a building that is not on screen yet. Held until the
       // roof's tile has content AND nothing has loaded for QUIET_MS, which is
       // what "the picture has stopped changing" looks like from here.
-      if (!dropAt && roofReady && now - stage.lastLoad > QUIET_MS) dropAt = now;
+      if (!dropAt && roofReady && now - stage.lastLoad > QUIET_MS) {
+        dropAt = now;
+        if (roof) fall = measureDrop(bearing);
+      }
       stage.deck.setProps({
         viewState: { ...view, bearing },
         layers: [...stage.base, ...pin(dropAt ? now - dropAt : null)],
