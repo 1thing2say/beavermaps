@@ -261,22 +261,23 @@ export function framing(area, extent) {
      * degrees down puts the walls, the entrance and the depth of the thing in
      * frame, which is what a wayfinder is for.
      *
-     * It is not free and the ceiling is real. Everything past about 70 is
-     * horizon: the frustum's far plane runs away from the target, the traversal
-     * starts selecting tiles a kilometre off, and the ground plane's own cut
-     * edge walks into the middle of the picture. 63 is inside that with room.
+     * It is not free and the ceiling is real. Everything past about 72 is
+     * horizon: the frustum's far plane runs away from the target and the
+     * traversal starts selecting tiles a kilometre off, which is why the
+     * coarse-tile limit (COARSE_SPANS) matters more the lower this goes. 68 is
+     * inside that with room, and it is as low as a shot can go while still
+     * looking DOWN at a roof — which it has to, because the roof is where the
+     * pin stands.
      */
-    pitch: 63,
+    pitch: 68,
     /**
-     * Half-width of the box tiles are loaded inside, in metres. See `boxOf`.
+     * The widest tile worth drawing, in metres. See COARSE_SPANS.
      *
      * `required` wins where the span was clamped, so a building bigger than the
-     * 800 m ceiling still gets a square that holds it — the frame stops backing
-     * off, the perimeter does not stop growing, and what gives is the margin of
-     * grid around it rather than the subject. Below the 230 m floor the clamp
-     * wins instead, which only makes the square larger than it needed to be.
+     * span ceiling is still allowed the tiles it actually stands on rather than
+     * being measured against a frame that stopped backing off.
      */
-    reach: Math.max(required, span * BOX_REACH),
+    maxTileSpan: Math.max(required, span) * COARSE_SPANS,
   };
 }
 
@@ -374,6 +375,32 @@ const BOX_REACH = 0.26;
 const BOX_MARGIN = 1.8;
 
 /**
+ * The widest tile worth drawing, in framed spans.
+ *
+ * ALL THAT IS LEFT OF THE BOX, and it is the half of it that was doing work
+ * nobody could see. The other half drew a hard square edge across the picture
+ * with grid outside it, which is gone — see the note in src/flyover-view.js.
+ *
+ * This one is not a boundary, it is a QUALITY test. Every ancestor of a tile
+ * over my campus necessarily contains my campus — that is what makes it an ancestor — so no
+ * overlap test can reject one however tall it is: of the eighteen tiles covering
+ * the Parking Garage, an overlap test rejects exactly one. The tiles worth
+ * rejecting are the ones that are mostly NOT the building: a 30 km slab covering
+ * half of California, drawn at four pixels of detail, which exists only to be
+ * replaced by its children. Drawing those is what "it rendered the planet"
+ * looks like — see SCREEN_SPACE_ERROR in src/flyover-view.js for the other time
+ * this campus turned into bathymetry.
+ *
+ * 2 reproduces exactly what the box's own version of this allowed, which was
+ * four box-widths and the box was 0.26 spans: the number changed its yardstick
+ * from the box to the frame and kept its value.
+ *
+ * Refinement is unaffected. This is applied to what gets DRAWN, and the
+ * traversal keeps descending through these tiles to reach their children.
+ */
+const COARSE_SPANS = 2;
+
+/**
  * Metres per degree at my campus's latitude.
  *
  * Fixed rather than computed per call. The campus is 1 km across and this is
@@ -442,82 +469,3 @@ export function footprintExtent(geometry) {
   };
 }
 
-/**
- * How far the box reaches below and above the campus, in metres.
- *
- * MEASURED against the live tileset over the Parking Garage, by walking every
- * tile whose footprint covers it and reading back the ellipsoidal height band
- * of each. The answer is that the real geometry here is thin:
- *
- *     finest (4.01 m)   -6.4 ..  +13.8 m      60 m footprint
- *     8.03 m            -8.8 ..  +13.8
- *     16.05 m          -10.7 ..  +30.5
- *     64.20 m          -24.4 ..  +36.9
- *
- * my campus sits near ZERO metres ellipsoidal, which is the fact that makes these
- * numbers look wrong until you know it: the campus is about 30 m above sea
- * level and the geoid over Sacramento is about -32 m below the ellipsoid, so
- * the two nearly cancel. (Verified independently — probing the tileset at h=0
- * reaches the 2.01 m leaves, and probing at h=30 stops at 32 m.)
- *
- * -50 and +60 therefore clear every tile Google actually serves here by a wide
- * margin, while still being a bound. They are set from the measurement rather
- * than from the building, because a wall of numbers this asymmetric is exactly
- * where a plausible guess goes wrong: 0 to `height` would have cut the ground
- * the building stands on.
- */
-const BOX_FLOOR_M = -50;
-const BOX_CEIL_M = 60;
-
-/**
- * The most a tile may exceed the box and still count as inside it.
- *
- * A vertical bound alone cuts almost nothing, and it is worth being clear about
- * why rather than shipping a box that reads as thorough and does nothing. Every
- * ancestor of a tile over my campus necessarily CONTAINS my campus — that is what makes it
- * an ancestor — so an overlap test can never reject one, however tall it is.
- * Of the eighteen tiles covering the Parking Garage, an overlap test against
- * the band above rejects exactly one: the depth-2 slab that starts 742 km up.
- *
- * The tiles worth rejecting are the ones that are mostly NOT the building: a
- * 30 km slab covering half of California, drawn at four pixels of detail, which
- * exists only to be replaced. A tile more than four box-widths across is that,
- * and rejecting it is a faithful reading of "stop at the box" rather than a
- * separate heuristic — a volume that is 99% outside the box is outside it.
- *
- * Refinement is unaffected. This is applied to what gets DRAWN, and the
- * traversal keeps descending through these tiles to reach their children.
- */
-const BOX_MAX_TILE_RATIO = 4;
-
-/**
- * The volume tiles are allowed inside, for one place.
- *
- * A box in three dimensions, which the first version of this was not: it
- * returned two corners of a lon/lat rectangle, and since a tile carries a
- * height range too, testing only the horizontal pair made it a column of
- * infinite height rather than a box. Over a tileset whose coarse levels are
- * kilometres tall that is not a small distinction.
- *
- * Used for both costs — see src/flyover-view.js. Loading is clamped by
- * shrinking the camera's far plane to the box, which is the only thing that
- * stops the traversal ever asking for what is outside it; drawing is clamped by
- * dropping selected tiles that fall outside, which is exact where a far plane
- * is only a plane. Whatever the box excludes shows the grid placeholder.
- *
- * @param {number[]} centre [lon, lat]
- * @param {number}   reach  half-width in metres, from `framing`
- * @returns {{ min: number[], max: number[], span: number }} lon/lat/metres
- */
-export function boxOf([lon, lat], reach) {
-  const dLon = reach / M_PER_DEG_LON;
-  const dLat = reach / M_PER_DEG_LAT;
-  return {
-    min: [lon - dLon, lat - dLat, BOX_FLOOR_M],
-    max: [lon + dLon, lat + dLat, BOX_CEIL_M],
-    /** Width on the ground in metres, for the size test. */
-    span: reach * 2,
-    /** How many box-widths a tile may span before it counts as outside. */
-    maxTileSpan: reach * 2 * BOX_MAX_TILE_RATIO,
-  };
-}

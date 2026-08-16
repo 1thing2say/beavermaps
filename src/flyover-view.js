@@ -162,6 +162,15 @@ const MAX_GPU_MB = 24;
  * future traversal for the life of the tab: no selection, no requests, a
  * viewport frozen on whatever it happened to be holding. Cycling buildings
  * quickly is simply how you get past 48 selected tiles.
+ *
+ * IT IS NOW THE BINDING CONSTRAINT, where it used to be a backstop. The clip box
+ * that bounded what was drawn is gone — see `tooCoarse` — so the fence is the
+ * frustum, and the frustum at 68 degrees off nadir holds more ground than a
+ * square around one building did. Measured after the change: the traversal
+ * selects 65 tiles over the Library and 64 over the Parking Garage, and this
+ * keeps 48 of them. That is two to three times what the box allowed, bounded
+ * rather than open, and what it gives up is the farthest ground rather than the
+ * building — the sort above is what makes that true rather than hoped for.
  */
 const MAX_TILES_DRAWN = 48;
 
@@ -231,9 +240,8 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   import('@deck.gl/core'),
   import('@deck.gl/geo-layers'),
   import('@loaders.gl/3d-tiles'),
-  import('@deck.gl/extensions'),
   import('@deck.gl/layers'),
-]).then(([core, geo, tiles, ext, layers]) => ({
+]).then(([core, geo, tiles, layers]) => ({
   Deck: core.Deck,
   MapView: core.MapView,
   // Not for rendering. The pin's fall is measured in screen pixels and needs to
@@ -244,7 +252,6 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   Tiles3DLoader: tiles.Tiles3DLoader,
   LineLayer: layers.LineLayer,
   IconLayer: layers.IconLayer,
-  Clip: geoClip(ext.ClipExtension, core.COORDINATE_SYSTEM),
 })).catch((error) => {
   // Not cached on failure, so a flyover opened on a dropped connection can be
   // retried by closing the card and opening it again.
@@ -252,58 +259,6 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   throw error;
 }));
 
-/**
- * deck.gl's clip extension, taught which coordinate system the bounds are in.
- *
- * THIS IS THE PERIMETER. Everything else in this file that mentions the box
- * decides which TILES to ask for and which to draw; this is the thing that
- * decides which PIXELS survive, and it is the difference between a bound and a
- * boundary. A tile is a few dozen metres of ground either side of an arbitrary
- * line of Google's choosing, so culling by tile leaves a ragged edge that
- * wanders in and out of the box by the width of whatever tile straddled it.
- * The extension discards fragments instead: it hands the shader a rectangle,
- * every fragment tests its own 2D position against it, and what comes out is a
- * clean square of ground with the grid around it.
- *
- * Wrapped rather than used directly because of one line in the stock `draw()`:
- * it calls `this.projectPosition(clipBounds)`, and `projectPosition` reads the
- * coordinate system off the LAYER it is called on. Tile3DLayer builds each of
- * its sublayers as `METER_OFFSETS` around that tile's own cartographic origin,
- * so the stock version hands a pair of longitudes and latitudes to a projection
- * that is expecting metres, and the clip lands somewhere off the coast of
- * Africa. Saying where the numbers come from is the whole fix.
- *
- * Built through a function because @deck.gl/extensions is lazily imported —
- * there is no ClipExtension to subclass until the toolkit has landed.
- */
-function geoClip(ClipExtension, COORDINATE_SYSTEM) {
-  return class GeoClipExtension extends ClipExtension {
-    draw() {
-      const { clipBounds } = this.props;
-      const from = {
-        fromCoordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-        fromCoordinateOrigin: [0, 0, 0],
-        // The second half of the fix, and the one that made the clip discard
-        // the entire viewport rather than merely land in the wrong place.
-        // `projectPosition` runs the point through `this.props.modelMatrix`
-        // BEFORE projecting it, and every one of these sublayers carries the
-        // tile's own ECEF transform there — so a longitude and a latitude were
-        // being multiplied by a matrix built for metres near the Earth's core.
-        modelMatrix: null,
-      };
-      const a = this.projectPosition([clipBounds[0], clipBounds[1], 0], from);
-      const b = this.projectPosition([clipBounds[2], clipBounds[3], 0], from);
-      this.setShaderModuleProps({
-        clip: {
-          bounds: [
-            Math.min(a[0], b[0]), Math.min(a[1], b[1]),
-            Math.max(a[0], b[0]), Math.max(a[1], b[1]),
-          ],
-        },
-      });
-    }
-  };
-}
 
 /** Asked each time, so a preference changed mid-session takes effect at once. */
 const prefersStill = () => Boolean(
@@ -400,58 +355,41 @@ function zoomFor(span, width, latitude) {
 }
 
 /**
- * Whether a tile belongs inside the building's box — in all three dimensions.
+ * Whether a tile is one of the ancestor slabs that exist only to be replaced.
  *
- * `boundingBox` is loaders.gl's own cartographic extent of the tile,
- * `[[west, south, minHeight], [east, north, maxHeight]]`, with the heights in
- * metres above the WGS84 ellipsoid. It is computed from whichever volume type
- * the tile declared and cached on first access, so asking every frame costs
- * three comparisons rather than a projection.
+ * WHAT IS LEFT OF THE BOX. There used to be a square here — a clip that cut the
+ * imagery along a straight line with grid outside it, and a matching test that
+ * unselected anything beyond it. The line is gone, because a hard edge across a
+ * photograph reads as a crop of the picture rather than as an edge of the world,
+ * and every request in this feature's history has been to push it further out.
+ * What the frustum shows is now what gets drawn.
  *
- * TWO TESTS, because one is not enough and the reason is specific to how a
- * tile pyramid is shaped.
+ * The SIZE half stays, and it was always the half doing work that could not be
+ * seen. An overlap test can never reject an ancestor — every ancestor of a tile
+ * over my campus contains my campus, which is what makes it an ancestor; measured against
+ * the live tileset it rejected one of the eighteen tiles covering the Parking
+ * Garage. This rejects the ones that are mostly not the building: kilometre-wide
+ * slabs at a few pixels of detail. Drawing those is what turned this viewport
+ * into global bathymetry once already — see SCREEN_SPACE_ERROR.
  *
- *   OVERLAP, on all three axes. This is the box proper. The vertical axis was
- *   missing from the first version, which made the bound a column of infinite
- *   height — over a tileset whose coarse levels are literally kilometres tall
- *   (the depth-2 slab over my campus starts 742 km up) that is not a rounding error.
- *
- *   SIZE, because overlap alone rejects almost nothing. Every ancestor of a
- *   tile over the campus contains the campus — that is what makes it an
- *   ancestor — so no overlap test can ever reject one. Measured against the
- *   live tileset, overlap rejects one of the eighteen tiles covering the
- *   Parking Garage. The size test rejects the ones that are mostly not the
- *   building: kilometre-wide slabs drawn at a few pixels of detail, which exist
- *   only to be replaced by their children.
- *
- * Overlap rather than containment for the first test, and it has to be:
- * Google's tiles line up with nothing, so a tile holding half the building also
- * holds ground well outside the box. Containment would drop exactly the tiles
- * the building is standing on.
- *
- * A tile that cannot say where it is, is kept. The failure this guards against
- * is a tileset shape this does not know how to read, and losing the picture
- * over one is worse than drawing a little too much of it.
+ * A tile that cannot say how big it is, is kept. The failure this guards against
+ * is a tileset shape this does not know how to read, and losing the picture over
+ * one is worse than drawing a little too much of it.
  */
-function inBox(tile, box) {
+function tooCoarse(tile, maxTileSpan) {
   let extent;
   try {
     extent = tile.boundingBox;
   } catch {
-    return true;
+    return false;
   }
-  if (!extent) return true;
+  if (!extent) return false;
 
   const [lo, hi] = extent;
-  const { min, max, maxTileSpan } = box;
-  for (let axis = 0; axis < 3; axis += 1) {
-    if (lo[axis] > max[axis] || hi[axis] < min[axis]) return false;
-  }
-
   // Degrees to metres on the ground. Latitude is the tighter of the two here
   // and the cheaper to be wrong about, so the wider span decides.
   const wide = Math.max((hi[0] - lo[0]) * M_PER_DEG_LON, (hi[1] - lo[1]) * M_PER_DEG_LAT);
-  return wide <= maxTileSpan;
+  return wide > maxTileSpan;
 }
 
 // ---------------------------------------------------------------------------
@@ -479,11 +417,11 @@ const stage = {
    * The current building's tile box, [[w, s], [e, n]].
    *
    * Read by `onTraversalComplete`, which belongs to the layer and therefore
-   * outlives every card — so the box has to be reachable from the stage rather
-   * than closed over at layer construction, or every building after the first
-   * would be culled against the first one's box.
+   * outlives every card — so it has to be reachable from the stage rather than
+   * closed over at layer construction, or every building after the first would
+   * be measured against the first one's framing.
    */
-  box: null,
+  maxTileSpan: 0,
   /**
    * The current building's roof point, for the same reason and read by the same
    * callback: it is what "the building has arrived" is tested against.
@@ -575,7 +513,7 @@ function showsSubject(tile, roof) {
   return roof[0] >= lo[0] && roof[0] <= hi[0] && roof[1] >= lo[1] && roof[1] <= hi[1];
 }
 
-function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
+function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
   return new Tile3DLayer({
     // Constant id and constant `data`, which is what stops the tileset being
     // reloaded. deck.gl matches layers across renders by id and only calls
@@ -613,22 +551,16 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
         // off over an empty box half a second before the building appeared in
         // it. `contentAvailable` is the library's own "ready and has geometry".
         onTraversalComplete: (selected) => {
-          // The box, applied to DRAWING. The far plane has already cut most of
-          // what is outside it, but a plane is only a plane: it stops the
-          // camera looking further, not sideways, so ground beside the building
-          // still arrives. This is the exact test, and what it excludes is
-          // where the grid shows through.
-          //
           // `unselect()` rather than only dropping it from the returned list,
           // because dropping it is not what stops it being drawn. Tile3DLayer
           // walks `tileset.tiles` and draws whatever still answers `tile.selected`
           // — a flag the traversal set before this callback ran — so a tile
-          // merely left out of this array keeps its draw call and is hidden only
-          // by the clip. Clearing the flag is what makes the box cost nothing.
-          const box = stage.box;
+          // merely left out of this array keeps its draw call and is drawn
+          // anyway. Clearing the flag is what makes a rejection cost nothing.
+          const maxTileSpan = stage.maxTileSpan;
           const kept = [];
           for (const tile of selected) {
-            if (box && !inBox(tile, box)) tile.unselect();
+            if (maxTileSpan && tooCoarse(tile, maxTileSpan)) tile.unselect();
             else kept.push(tile);
           }
 
@@ -688,13 +620,6 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
     // whole tiles, which is the ragged per-tile behaviour the clip exists to
     // replace. False forces the fragment path, where every pixel tests its own
     // position and a tile straddling the line is cut along it.
-    _subLayerProps: box ? {
-      scenegraph: {
-        extensions: [new Clip()],
-        clipBounds: [box.min[0], box.min[1], box.max[0], box.max[1]],
-        clipByInstance: false,
-      },
-    } : undefined,
   });
 }
 
@@ -737,13 +662,13 @@ function buildStage(tools, view) {
  * @param {number[]} options.centre   [lon, lat] to orbit.
  * @param {number}   options.span     Ground width to hold in frame, metres.
  * @param {number}   options.pitch    Camera tilt off nadir, degrees.
- * @param {number}   options.reach    Half-width of the tile box, metres.
+ * @param {number}   options.maxTileSpan  Widest tile worth drawing, metres.
  * @param {number[][]} options.box    [[w, s], [e, n]] tiles are loaded inside.
  * @param {string}  [options.name]    For the spinner's caption and the a11y label.
  * @param {number[]} [options.roof]   [lon, lat, z] the pin drops onto; see roofOf.
  * @returns {{ el: HTMLElement, destroy: () => void }}
  */
-export function createFlyover({ key, centre, span, pitch, reach, box, name, roof }) {
+export function createFlyover({ key, centre, span, pitch, maxTileSpan, name, roof }) {
   /** Identity for this card's claim on the shared canvas. */
   const token = {};
 
@@ -802,7 +727,7 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
       // after the canvas is detached, and culling those against a box for a
       // building nobody is looking at is the sort of thing that shows up as a
       // blank viewport on the NEXT card.
-      stage.box = null;
+      stage.maxTileSpan = 0;
       stage.roof = null;
       stage.host?.remove();
     }
@@ -864,9 +789,9 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
       },
     };
 
-    stage.box = box ?? null;
+    stage.maxTileSpan = maxTileSpan ?? 0;
     stage.roof = roof ?? null;
-    stage.base = [makeGrid(tools, centre, span), makeLayer(tools, key, box)];
+    stage.base = [makeGrid(tools, centre, span), makeLayer(tools, key)];
 
     if (!stage.deck) {
       try {

@@ -35,7 +35,7 @@ import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
 import { createSkinControl, preferredSkin, applySkinAttribute } from './skin.js';
 import { googleGround } from './google-tiles.js';
-import { canFlyOver, framing, boxOf, footprintExtent, roofOf } from './flyover.js';
+import { canFlyOver, framing, footprintExtent, roofOf } from './flyover.js';
 import { createFlyover } from './flyover-view.js';
 import { spin } from './spinner.js';
 import { paintIcons } from './g-icons.js';
@@ -2861,12 +2861,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         // point furthest INSIDE it rather than its middle, and centring a
         // square on one puts the far wall outside the square — see `footprintExtent`.
         const centre = extent?.centre ?? props.anchor ?? props.entrance;
+        // Span, pitch and the coarse-tile limit all come from one call, so the
+        // policy — how a place is worth framing — stays in one file.
         const frame = framing(props.area_m2, extent);
-        // The box the renderer is told to stop at, built here rather than
-        // inside the view so the policy — how much ground a place is worth
-        // loading — stays in one file with the rest of it.
         return createFlyover({
-          key: googleKey, centre, name: props.name, ...frame, box: boxOf(centre, frame.reach),
+          key: googleKey, centre, name: props.name, ...frame,
           // The ROOF, which is a different point from the one the camera aims
           // at: `centre` is the middle of the footprint, on the ground, and a
           // pin dropped on that goes through the building.
