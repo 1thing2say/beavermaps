@@ -53,7 +53,7 @@ import { M_PER_DEG_LAT, M_PER_DEG_LON, campusBox } from './flyover.js';
 import {
   pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS, DROP_MS,
 } from './flyover-pin.js';
-import { highlightLayers, HIGHLIGHT_MS } from './flyover-cage.js';
+import { highlightLayers, HIGHLIGHT_UP_MS } from './flyover-cage.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
@@ -961,7 +961,7 @@ export function createFlyover({
       // borrowing the pin's number parks the still on a mark at a sixth of its
       // strength. It used to agree by accident — the pin waited a second for a
       // label it no longer has.
-      const STILL_MS = Math.max(SETTLED_MS, DROP_MS + HIGHLIGHT_MS);
+      const STILL_MS = Math.max(SETTLED_MS, DROP_MS + HIGHLIGHT_UP_MS);
       const settle = (landed) => stage.deck?.setProps({
         viewState: { ...view, bearing: 35 },
         layers: [...stage.base, ...marks(landed ? STILL_MS : null)],

@@ -26,7 +26,7 @@ import {
 import {
   pushPinSvg, pinShadowSvg, SHADOW_BOX, PUSH_PIN, PUSH_PIN_RED,
 } from '../src/push-pin.js';
-import { highlightLayers, HIGHLIGHT_MS } from '../src/flyover-cage.js';
+import { highlightLayers, HIGHLIGHT_MS, HIGHLIGHT_UP_MS } from '../src/flyover-cage.js';
 import { poiFor } from '../src/poi.js';
 
 const buildings = load('directory').features;
@@ -194,7 +194,7 @@ test('a building with no footprint gets the framing its footprint would have', (
     'the coarse-tile limit stopped growing with the building');
 });
 
-test('the highlight outlines the building and washes it, and then holds', () => {
+test('the highlight is a box around the building, and it goes away', () => {
   // Fakes, because what is worth testing is the GEOMETRY handed to deck.gl
   // rather than deck.gl.
   const library = buildings.find((f) => f.properties.name === 'Library');
@@ -203,62 +203,85 @@ test('the highlight outlines the building and washes it, and then holds', () => 
   const draw = (ms, opts = {}) => {
     const made = [];
     const Layer = class { constructor(props) { made.push(props); } };
-    const tools = { PathLayer: Layer, SolidPolygonLayer: Layer };
+    const tools = { PathLayer: Layer, SolidPolygonLayer: Layer, LineLayer: Layer };
     const out = highlightLayers(tools, {
       footprint: library.geometry, mass, roof, ms, ...opts,
     });
-    return { out, made };
+    return { out, made, by: (id) => made.find((m) => m.id === id) };
   };
 
-  // Nothing before the pin has landed. There is no "and then nothing": this is
-  // the change from the sweep it replaced — the mark is the subject of the card
-  // for as long as the card is open, so it holds rather than erasing itself.
+  // Nothing before the pin has landed, and nothing at all once it is over.
   assert.deepEqual(draw(0).out, []);
   assert.deepEqual(draw(DROP_MS).out, []);
-  assert.equal(draw(DROP_MS + HIGHLIGHT_MS).out.length, 3);
-  assert.equal(draw(DROP_MS + HIGHLIGHT_MS * 40).out.length, 3);
+  assert.deepEqual(draw(DROP_MS + HIGHLIGHT_MS).out, []);
+  assert.deepEqual(draw(DROP_MS + HIGHLIGHT_MS * 4).out, []);
 
-  // A fill and two outline passes, because a white line on a white building is
-  // invisible: a wider dark casing, then the white over it.
-  const up = draw(DROP_MS + HIGHLIGHT_MS);
-  const [fill, casing, white] = up.made;
-  assert.ok(casing.getWidth > white.getWidth, 'the casing is not wider than the line it cases');
-  assert.deepEqual(white.getColor.slice(0, 3), [255, 255, 255]);
-  assert.ok(fill.getFillColor[3] < white.getColor[3] / 4,
-    'the wash is as strong as the outline, which makes it paint rather than a tint');
+  const up = draw(DROP_MS + HIGHLIGHT_UP_MS);
+  const volume = up.by('flyover-highlight-volume');
+  const posts = up.by('flyover-highlight-post');
+  const roofRing = up.by('flyover-highlight');
+  const baseRing = up.by('flyover-highlight-base');
 
-  // EVERYTHING IN ONE PLANE, at the measured roof rather than the peak — a ring
-  // hung at the peak floats over the roof it is supposed to lie on.
-  for (const ring of casing.data) {
-    for (const point of ring) assert.equal(point[2], roof[2]);
+  // A VOLUME, not a lid: extruded from the measured ground to the measured
+  // roof, which is the whole of this mark's claim about the building.
+  assert.ok(volume, 'there is no extruded volume');
+  assert.equal(volume.extruded, true);
+  assert.equal(volume.getElevation, roof[2] - mass.ground);
+  for (const polygon of volume.data) {
+    for (const ring of polygon) for (const p of ring) assert.equal(p[2], mass.ground);
   }
-  for (const polygon of fill.data) {
-    for (const ring of polygon) for (const point of ring) assert.equal(point[2], roof[2]);
+
+  // Two rings, one at each end of it.
+  for (const p of roofRing.data[0]) assert.equal(p[2], roof[2]);
+  for (const p of baseRing.data[0]) assert.equal(p[2], mass.ground);
+
+  // Uprights, at CORNERS rather than at vertices — a post at each of a curved
+  // wall's forty points is a fence. The Library is a rectangle with a stepped
+  // west end, so this is a handful and nowhere near its vertex count.
+  const outer = library.geometry.type === 'MultiPolygon'
+    ? library.geometry.coordinates[0][0] : library.geometry.coordinates[0];
+  assert.ok(posts.data.length >= 4, 'a box with no uprights is still a lid');
+  assert.ok(posts.data.length < outer.length * 0.6,
+    `${posts.data.length} posts on a ${outer.length}-point ring is a fence`);
+  // Vertical, which is the one thing PathLayer could not have drawn.
+  for (const d of posts.data) {
+    assert.deepEqual([d.from[0], d.from[1]], [d.to[0], d.to[1]]);
+    assert.equal(d.from[2], mass.ground);
+    assert.equal(d.to[2], roof[2]);
   }
-  // ...and the peak is the fallback, so a building with a footprint and no
-  // measured centre is still outlined.
-  const noRoof = draw(DROP_MS + HIGHLIGHT_MS, { roof: null });
-  assert.equal(noRoof.out.length, 3);
-  assert.equal(noRoof.made[1].data[0][0][2], mass.top);
 
-  // It FADES UP rather than appearing, and is at full strength once it is up.
-  const early = draw(DROP_MS + HIGHLIGHT_MS * 0.55).made[2].getColor[3];
-  assert.ok(early > 0 && early < white.getColor[3], 'the outline did not fade in');
+  // The glazing is a glazing and not paint: a line of sight through a box
+  // crosses two faces, so it has to be weaker than the lines that bound it.
+  assert.ok(volume.getFillColor[3] < roofRing.getColor[3] / 8,
+    'the fill is as strong as the outline, which makes the box milk');
 
-  // Drawn THROUGH the building: the far side of the outline is the half that
-  // says which mass this is when a neighbour stands in front of it.
+  // Cased, because a white line on a white roof is invisible.
+  const casing = up.by('flyover-highlight-case');
+  assert.ok(casing.getWidth > roofRing.getWidth);
+  assert.deepEqual(roofRing.getColor.slice(0, 3), [255, 255, 255]);
+
+  // Drawn THROUGH the building: the far side is the half that says which mass
+  // this is when a neighbour stands in front of it.
   for (const props of up.made) assert.equal(props.parameters.depthCompare, 'always');
 
-  // The outline takes the outer ring only — a hole traced at roof height reads
-  // as a second building — while the wash keeps every ring, so a courtyard
-  // stays uncovered.
-  assert.ok(fill.data.length === casing.data.length);
+  // UP, HELD, THEN AWAY. Sampled across the life: climbing, full, then falling.
+  const alpha = (ms) => draw(ms).by('flyover-highlight')?.getColor[3] ?? 0;
+  const full = alpha(DROP_MS + HIGHLIGHT_UP_MS);
+  assert.ok(alpha(DROP_MS + HIGHLIGHT_UP_MS * 0.55) < full, 'it did not fade in');
+  assert.equal(alpha(DROP_MS + HIGHLIGHT_UP_MS + 500), full, 'it did not hold');
+  assert.ok(alpha(DROP_MS + HIGHLIGHT_MS - 200) < full, 'it did not fade out');
+  assert.ok(HIGHLIGHT_MS - HIGHLIGHT_UP_MS >= 1000, 'it holds for less than the second asked for');
+
+  // The peak is the fallback, so a building with a footprint and no measured
+  // centre is still boxed.
+  const noRoof = draw(DROP_MS + HIGHLIGHT_UP_MS, { roof: null });
+  assert.equal(noRoof.by('flyover-highlight-volume').getElevation, mass.top - mass.ground);
 
   // Nothing to trace is not an error: a place that flies with no directory
   // footprint behind it gets a flyover without a highlight rather than a crash
-  // or an empty layer that costs a draw call.
-  const anyTime = DROP_MS + HIGHLIGHT_MS * 2;
-  const tools = { PathLayer: class {}, SolidPolygonLayer: class {} };
+  // or empty layers that cost draw calls.
+  const anyTime = DROP_MS + HIGHLIGHT_UP_MS;
+  const tools = { PathLayer: class {}, SolidPolygonLayer: class {}, LineLayer: class {} };
   assert.deepEqual(highlightLayers(tools, { footprint: null, mass, roof, ms: anyTime }), []);
   assert.deepEqual(
     highlightLayers(tools, { footprint: library.geometry, mass: null, roof, ms: anyTime }), [],
