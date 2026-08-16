@@ -192,6 +192,67 @@ export function squashed(ms) {
 }
 
 /**
+ * The word beside the pin, and how it is placed and timed.
+ *
+ * "HERE" RATHER THAN THE BUILDING'S NAME, which is the difference between
+ * useful and redundant. The card's own title is forty pixels above this picture
+ * in type twice the size, so a label repeating it says nothing the viewer has
+ * not just read. "Here" says something else entirely — it is deictic, it points,
+ * and pointing is exactly what is wanted when two roofs meet in the frame with
+ * no line between them.
+ *
+ * It arrives A FULL SECOND AFTER THE LANDING and fades rather than appearing.
+ * That gap is the whole difference between a caption and a remark: the drop, the
+ * squash and the trail are one continuous event, and a word inside it is a
+ * second thing to read while the first is still moving. A second later the
+ * picture has settled, the eye is already on the pin, and the word arrives as
+ * confirmation of something the viewer has just worked out for themselves.
+ *
+ * ABOVE the ball and clear of it, set in white at regular weight with no pill.
+ * The first version was bold on a red block, which is a badge — it competes with
+ * the pin for the same job and wins, so the eye lands on a label instead of on a
+ * place. Small, quiet and floating over the marker is a caption belonging to it.
+ *
+ * The plate under it is not decoration — see LABEL_PLATE. Plain white text over
+ * photographic imagery is legible until the roof under it is a bright gravel
+ * one, which on this campus is most of them.
+ *
+ * Placed in PIXELS, because the pin is a billboard and so is this: they are two
+ * parts of one screen-space object and neither should turn with the orbit.
+ */
+const LABEL = 'Here';
+/**
+ * San Francisco where there is one, and the browser's own stack behind it.
+ *
+ * deck.gl rasterises this through the 2D canvas into a glyph atlas, so it is a
+ * CSS font list and resolves exactly as one does anywhere else in the app.
+ */
+const LABEL_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif';
+
+/**
+ * The plate the word sits on: a whisper of dark, a grey hairline around it.
+ *
+ * NOT AN SDF OUTLINE, which is what this was and is worth writing down because
+ * it looks like the obvious answer. deck.gl can outline text from a signed
+ * distance field, and at this size it destroys it: `outlineWidth` is divided by
+ * the atlas radius, so 2 spreads about a sixth of the field outward, and on a
+ * thirteen-pixel word the outlines of "e", "r" and "e" merge into one another
+ * and the word renders as a smear. Thinning it far enough to separate them
+ * leaves nothing that survives a bright roof, which was the entire point.
+ *
+ * A plate does the same job with none of that: the fill stays white, the dark
+ * behind it is barely there, and the border states the edge in grey rather than
+ * in the pin's red. It is a caption belonging to the marker, not a badge
+ * competing with it.
+ */
+const LABEL_PLATE = [0, 0, 0, 78];
+const LABEL_EDGE = [124, 124, 128, 150];
+const LABEL_GAP = 0.30;
+const LABEL_SIZE = 0.21;
+const LABEL_WAIT_MS = 1000;
+const LABEL_FADE_MS = 400;
+
+/**
  * The end of everything: the fall, plus the compression that follows it.
  *
  * For callers that want the pin where it ends up without playing the drop —
@@ -201,7 +262,7 @@ export function squashed(ms) {
  * / (LANDING_SPEED * drop)` and `drop` is never less than `CLEAR_PINS * px`,
  * which caps it at well under half of DROP_MS whatever the viewport is.
  */
-export const SETTLED_MS = DROP_MS + SQUASH_MS;
+export const SETTLED_MS = DROP_MS + Math.max(SQUASH_MS, LABEL_WAIT_MS + LABEL_FADE_MS);
 
 /**
  * How tall the pin is drawn, as a fraction of the viewport's height.
@@ -239,34 +300,16 @@ const PIN_MAX_PX = 110;
  * viewport, the ball was cut in half by the frame — and the ball is the marker.
  *
  * So the size is the smaller of what legibility wants and what the shot has.
- * 0.9 leaves a tenth of the gap as air above the ball, because a marker touching
- * the edge reads as cropped even when it is whole.
+ *
+ * 0.62 RATHER THAN THE 0.9 THIS STARTED AT, because the pin stopped being the
+ * tallest thing in its own column. "Here" sits a third of a pin above the ball
+ * and is a line of type on top of that, so the stack is about 1.55 pins and the
+ * sky has to hold all of it — photographed at 0.9, the pin fitted perfectly and
+ * the word was clipped clean off the top edge of the frame, which is the sort of
+ * thing that is invisible until the label is the part you are looking for.
  */
-const HEADROOM = 0.9;
+const HEADROOM = 0.62;
 
-/**
- * The word beside the pin, and how it is placed and timed.
- *
- * "HERE" RATHER THAN THE BUILDING'S NAME, which is the difference between
- * useful and redundant. The card's own title is forty pixels above this picture
- * in type twice the size, so a label repeating it says nothing the viewer has
- * not just read. "Here" says something else entirely — it is deictic, it points,
- * and pointing is exactly what is wanted when two roofs meet in the frame with
- * no line between them.
- *
- * It arrives AFTER the landing rather than falling with the pin. A word tumbling
- * out of the sky is a second moving object competing with the one that is
- * carrying the meaning, and the trail is what makes that fall read at all. So it
- * fades up over the squash, which is also when the eye has arrived at the pin.
- *
- * Placed beside the ball rather than under it, in pixels, because the pin is a
- * billboard and so is this: they are the two parts of one screen-space object
- * and neither should turn with the orbit.
- */
-const LABEL = 'Here';
-const LABEL_AT = 0.62;
-const LABEL_SIZE = 0.30;
-const LABEL_FADE_MS = 260;
 
 /**
  * The cast shadow: the shortest and longest it may reach in pin heights of
@@ -537,11 +580,13 @@ export function pinLayers(
   // measures true, which is also the unit `reach` was worked out in.
   const cast = [roof[0], roof[1], roof[2] + SHADOW_CLEAR_M];
 
-  // The word, once the pin is down and only then. Sized and placed off the pin's
-  // CURRENT height, so it rides the squash with the ball rather than hanging
-  // still beside a pin that is moving.
-  const said = Math.max(0, Math.min(1, (ms - DROP_MS) / LABEL_FADE_MS));
-  const ball = px * squashed(ms) * PUSH_PIN.ride;
+  // The word, a second after the pin is down. Placed off the pin's CURRENT
+  // height so it rides the squash with the head rather than hanging still over
+  // a pin that is still moving — by the time it shows, that is nearly settled
+  // anyway, and "nearly" is exactly the kind of thing that is only invisible
+  // until it is not.
+  const said = Math.max(0, Math.min(1, (ms - DROP_MS - LABEL_WAIT_MS) / LABEL_FADE_MS));
+  const head = px * squashed(ms) * (1 + LABEL_GAP);
   const label = said > 0 && TextLayer ? [new TextLayer({
     id: 'flyover-pin-label',
     data: [roof],
@@ -549,20 +594,25 @@ export function pinLayers(
     getText: () => LABEL,
     getSize: Math.round(px * LABEL_SIZE),
     sizeUnits: 'pixels',
-    getPixelOffset: [Math.round(px * LABEL_AT), Math.round(clear - ball)],
-    getColor: [255, 255, 255, Math.round(255 * said)],
-    // A pill in the pin's own colour, so the two read as one object rather than
-    // as a marker with a caption near it. White on red survives any imagery
-    // underneath, which plain text with an outline does not.
+    getPixelOffset: [0, Math.round(clear - head)],
+    getColor: [255, 255, 255, Math.round(215 * said)],
+    // Centred over the pin and sitting ON the offset rather than across it, so
+    // the gap above the ball is the gap and not half of it.
+    getTextAnchor: 'middle',
+    getAlignmentBaseline: 'bottom',
+    fontFamily: LABEL_FONT,
+    fontWeight: 400,
     background: true,
-    getBackgroundColor: [...colourRgb(colour), Math.round(235 * said)],
-    backgroundPadding: [6, 3, 6, 3],
-    getBorderWidth: 0,
-    getTextAnchor: 'start',
-    getAlignmentBaseline: 'center',
-    fontWeight: 700,
+    getBackgroundColor: [...LABEL_PLATE.slice(0, 3), Math.round(LABEL_PLATE[3] * said)],
+    getBorderColor: [...LABEL_EDGE.slice(0, 3), Math.round(LABEL_EDGE[3] * said)],
+    getBorderWidth: 1,
+    backgroundPadding: [7, 3, 7, 3],
+    backgroundBorderRadius: 5,
     parameters: { depthCompare: 'always', depthWriteEnabled: false },
-    updateTriggers: { getPixelOffset: ms, getColor: said, getBackgroundColor: said, getSize: px },
+    updateTriggers: {
+      getPixelOffset: ms, getColor: said, getSize: px,
+      getBackgroundColor: said, getBorderColor: said,
+    },
   })] : [];
 
   return [
@@ -616,7 +666,3 @@ export function pinLayers(
   ];
 }
 
-/** '#rrggbb' to the triple deck.gl wants. */
-function colourRgb(hex) {
-  return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-}

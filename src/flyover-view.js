@@ -54,7 +54,6 @@ import {
   pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS,
 } from './flyover-pin.js';
 import { cageLayers } from './flyover-cage.js';
-import { PUSH_PIN_RED } from './push-pin.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
@@ -67,12 +66,18 @@ const TILES_ID = 'flyover-tiles';
 /**
  * How much sky the roof should have over it, as a share of the frame's height.
  *
- * What the camera's aim is solved for — see the padding in `createFlyover`. The
- * pin is 0.28 of the height and wants a little air over its ball, so 0.4 is that
- * with room; below it the pin starts being shortened to fit, which it can do
- * (see HEADROOM in src/flyover-pin.js) but should not have to.
+ * What the camera's aim is solved for — see the padding in `createFlyover`.
+ *
+ * It is the PIN AND ITS LABEL that have to fit, which is not what this was first
+ * sized for. "Here" sits a third of a pin above the ball and is a line of type
+ * again on top of that, so the stack is a little over 0.43 of the height where
+ * the pin alone is 0.28. At 0.4 the pin fitted perfectly and the word was
+ * clipped clean off the top edge — the kind of thing that is invisible until the
+ * label is the part you are looking for. Below this the pin starts being
+ * shortened to fit, which it can do (see HEADROOM in src/flyover-pin.js) but
+ * should not have to.
  */
-const WANT_SKY = 0.4;
+const WANT_SKY = 0.46;
 
 /**
  * One full circle, in ms.
@@ -268,9 +273,6 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   throw error;
 }));
 
-
-/** '#rrggbb' to the triple deck.gl wants, so the cage and the pin share one red. */
-const rgbOf = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 
 /** Asked each time, so a preference changed mid-session takes effect at once. */
 const prefersStill = () => Boolean(
@@ -836,11 +838,7 @@ export function createFlyover({
     // The cage sits between the ground and the tiles in the list and above both
     // on screen: its x-ray pass has the depth test off, so list order is what
     // puts it over the imagery rather than under it.
-    stage.base = [
-      makeGrid(tools, centre, span),
-      makeLayer(tools, key),
-      ...cageLayers(tools, { footprint, mass, colour: rgbOf(PUSH_PIN_RED) }),
-    ];
+    stage.base = [makeGrid(tools, centre, span), makeLayer(tools, key)];
 
     if (!stage.deck) {
       try {
@@ -932,9 +930,14 @@ export function createFlyover({
     // is no pin at all, rather than a pin parked somewhere. `roof` is absent for
     // anything src/roofs.json has no measured centre for, and an unmarked
     // flyover is a better answer than one marking a guess.
-    const pin = (ms) => (roof && ms !== null
-      ? pinLayers(tools, { roof, ...fall, span, width, height, ms })
-      : []);
+    // The scan and the pin share one clock, because they are one event: the pin
+    // lands, the building is surveyed, and both are over inside two seconds. The
+    // scan does not need a roof — it is drawn from the footprint — so it is not
+    // inside the `roof` guard the pin is.
+    const marks = (ms) => (ms === null ? [] : [
+      ...cageLayers(tools, { footprint, mass, ms }),
+      ...(roof ? pinLayers(tools, { roof, ...fall, span, width, height, ms }) : []),
+    ]);
 
     // A still frame under `prefers-reduced-motion`. The three-quarter bearing
     // is not arbitrary — a building photographed square-on from the air reads
@@ -954,7 +957,7 @@ export function createFlyover({
     if (prefersStill()) {
       const settle = (landed) => stage.deck?.setProps({
         viewState: { ...view, bearing: 35 },
-        layers: [...stage.base, ...pin(landed ? SETTLED_MS : null)],
+        layers: [...stage.base, ...marks(landed ? SETTLED_MS : null)],
       });
       const wait = () => {
         if (dead || stage.owner !== token) return;
@@ -1001,7 +1004,7 @@ export function createFlyover({
       }
       stage.deck.setProps({
         viewState: { ...view, bearing },
-        layers: [...stage.base, ...pin(dropAt ? now - dropAt : null)],
+        layers: [...stage.base, ...marks(dropAt ? now - dropAt : null)],
       });
       frame = requestAnimationFrame(tick);
     };

@@ -1,4 +1,4 @@
-// The wireframe cage: the tapped building's own outline, standing in the shot.
+// The survey: the tapped building's own outline, scanned once and then gone.
 //
 // WHY A PIN IS NOT ENOUGH, which is the whole reason this exists. A pin marks a
 // POINT on top of a mass, and the question a viewer actually has is which MASS.
@@ -13,72 +13,129 @@
 // outline, and no amount of shader work invents a boundary the data does not
 // carry. So the outline has to be OURS, drawn into their scene — and it can be,
 // because src/directory.json holds a real traced footprint for all thirty
-// buildings and src/roofs.json holds a measured ground and roof for each. The
-// cage lands on the same two planes the imagery does because both numbers were
-// read off that imagery.
+// buildings and src/roofs.json holds a measured ground and peak for each.
 //
-// PATHS RATHER THAN AN EXTRUDED POLYGON, and that is a legibility decision
-// rather than a stylistic one. deck.gl draws SolidPolygonLayer's `wireframe`
-// with GL_LINES, whose width is capped at one device pixel by essentially every
-// driver — a hairline, over photographic imagery, which is the one background
-// that eats hairlines. PathLayer takes a width in pixels and honours it.
+// A SCAN RATHER THAN AN ANNOTATION, and that is the decision that shapes
+// everything below. A permanent cage is a second object in the shot forever: it
+// competes with the building it is describing, it survives long past the moment
+// anyone needed it, and every metre its data disagrees with Google's mesh is a
+// metre somebody has time to notice. A band that rises through the building once
+// and leaves says the same thing in under two seconds and gives the picture back.
+//
+// It passes THROUGH the surface — the whole thing is drawn with the depth test
+// off — because a scan that stopped at the near wall would be a sticker on it.
+// What this is imitating is a survey pass, and a survey pass goes through.
+//
+// LINES RATHER THAN AN EXTRUDED POLYGON, and that is legibility rather than
+// style. deck.gl draws SolidPolygonLayer's `wireframe` with GL_LINES, whose
+// width is capped at one device pixel by essentially every driver — a hairline,
+// over photographic imagery, which is the one background that eats hairlines.
+// LineLayer takes a width in screen pixels and honours it, and it is also the
+// only one of the two that can draw a VERTICAL: PathLayer builds its ribbon in
+// the ground plane, so a segment with no horizontal extent has no direction to
+// be perpendicular to and renders as nothing at all.
+
+import { DROP_MS } from './flyover-pin.js';
 
 /**
- * How sharp a turn has to be for a vertex to count as a corner, in degrees.
+ * When the scan runs, all measured from the pin's landing.
  *
- * The uprights go on corners rather than on vertices, because a traced footprint
- * is not a drawing of a box: my campus's are 33 points around the Library and up to
- * two hundred around the Student Center, most of them describing a curve or a
- * jog of half a metre. An upright on every one is a picket fence, and a picket
- * fence around a building is not an outline of it.
+ * It waits for the squash rather than starting with it: the landing already
+ * carries a compression, a trail emptying and a shadow tightening, and a second
+ * event inside that is one too many to read. A seventh of a second later the pin
+ * has settled and the scan has the frame to itself.
  *
- * 28 degrees keeps the corners of a rectangle and every real re-entrant, and
- * drops the run of small turns that make up a curved wall.
- *
- * IT IS NOT ENOUGH ON ITS OWN, which the Gym proved: 34 of its 35 vertices turn
- * further than that, because its traced outline is jagged at the metre scale
- * rather than curved. An angle test cannot tell a jagged wall from a corner —
- * both turn sharply — so a spacing rule decides between them. Six metres is
- * about the narrowest a real bay gets on this campus and far wider than the
- * wobble in a trace.
+ * The sweep is the whole of the visible life. There is no phase where the entire
+ * cage is up — see BAND — so the fade is a tail on the band as it tops out
+ * rather than a curtain over a finished drawing, and past CAGE_MS there is
+ * nothing left to draw and nothing costing a layer.
  */
-const CORNER_DEG = 28;
-const CORNER_GAP_M = 6;
+const WAIT_MS = 140;
+const SWEEP_MS = 1200;
+const FADE_MS = 380;
+export const CAGE_MS = WAIT_MS + SWEEP_MS + FADE_MS;
 
 /**
- * How the two passes are drawn: width in pixels, and how strong each is.
+ * The grid: how many levels it has, how far apart its verticals are on the
+ * ground in metres, and how wide the sweep's band is as a share of the crossing.
  *
- * TWO PASSES, and the second is the one that does the work this was asked for.
- * The solid pass is depth-tested, so the far edges go behind the building and
- * the cage reads as a box the building is standing in. That is correct and it is
- * not sufficient: the case this exists for is a NEIGHBOUR standing in front,
- * and a depth-tested cage is hidden by that neighbour exactly where the
- * ambiguity is.
+ * A GRID, not a stack of rings, and the difference is what it says. Contours
+ * alone describe a height; a mesh describes a SURFACE, which is the thing that
+ * is actually ambiguous when two roofs meet in the picture with no line between
+ * them. So the verticals are spaced along the perimeter rather than saved for
+ * corners, and the two families together make cells.
  *
- * So the same lines are drawn again underneath with the depth test off, faint.
- * What shows through is only the part that failed the first pass — the hidden
- * edges — so the result is a solid outline with an x-ray of what is behind
- * whatever is in front of it. It is the same trick the pin's motion trail uses:
- * one shape, drawn twice, the second saying what the first had to leave out.
+ * BIG CELLS. This started at fifteen levels and read as a barcode: at a
+ * nineteen-metre building that is a line every metre and a quarter, which is
+ * finer than the wall detail underneath it and disappears into it. Six levels
+ * and a vertical every twelve metres puts three or four cells across a face,
+ * which is a mesh you can see the shape of.
+ *
+ * The band is a share of the CROSSING — the building's own width along the
+ * sweep — so it is the same fraction of a small building as of a large one.
+ * 0.12 lights about 45% of the mesh at its widest, and the reason that is not a
+ * quarter is structural rather than a bad number: the level lines follow the
+ * footprint, so a band crossing it meets the two sides FACING it whatever its
+ * width, and halving the band from 0.22 to 0.10 only moved the count from 237
+ * lines to 136. What the width actually controls is how much of that is BRIGHT,
+ * and the falloff is triangular, so the fifth of the mesh at the band's middle
+ * carries nearly all of the ink.
  */
-const SOLID = { width: 2.0, alpha: 235 };
-const XRAY = { width: 1.5, alpha: 70 };
+const LEVELS = 6;
+const VERTICAL_GAP_M = 12;
+const BAND = 0.12;
+
+
+/**
+ * Which way the sweep travels, as a compass bearing.
+ *
+ * ACROSS, NOT UP. Rising through a building is the obvious reading of "scan" and
+ * it is the wrong one here: the camera is 68 degrees off nadir, so vertical
+ * motion is the axis the projection compresses hardest, and a band that climbs
+ * moves a few pixels while a band that crosses moves the width of the frame. The
+ * one that can be seen is the one that goes sideways.
+ *
+ * 35 degrees rather than 0 or 90 so it crosses the building's own walls at an
+ * angle instead of running along one of them — a sweep parallel to a facade
+ * lights that whole facade at once and states nothing about depth. It is a
+ * bearing in the WORLD, so the orbit turns it with everything else rather than
+ * dragging it around with the camera.
+ */
+const SWEEP_DEG = 35;
+
+/**
+ * White, and how strong each part gets at the centre of the band.
+ *
+ * THE CASING IS NOT A STYLE CHOICE. Photographed on the Library — pale concrete,
+ * white glazing, gravel roof — a white line at 210 alpha was very nearly
+ * invisible, because the one background white cannot be drawn on is white. Every
+ * line is therefore drawn twice: a wider dark one first and the white one over
+ * it, which is the same thing the label does with a grey border and the same
+ * thing a map does with every road casing ever drawn.
+ *
+ * The casing is 2.2 px wider, so about a pixel of it shows on each side. Wider
+ * and it is a dark line with a white core; this is a white line that survives.
+ */
+const INK = [255, 255, 255];
+const CASE_INK = [24, 24, 27];
+const RING_ALPHA = 235;
+const CASE_ALPHA = 130;
+const RING_WIDTH = 1.6;
+const CASE_EXTRA = 2.2;
 
 /**
  * Metres per degree at my campus, for the corner spacing.
  *
  * Restated rather than imported, and only here: src/flyover.js exports both, but
- * importing them would make this module depend on the policy file to measure a
+ * importing them would make this module depend on the policy file to measure the
  * gap between two of its own vertices. The error from treating the latitude as
  * constant over one building is millimetres.
  */
 const M_PER_DEG_LAT = 111_132;
 const M_PER_DEG_LON = 86_900;
 
-/** The roof line is the one that answers the question; the base only grounds it. */
-const BASE_ALPHA = 0.55;
-
 const rad = Math.PI / 180;
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 /**
  * Every ring of a footprint, whatever GeoJSON shape it arrived in.
@@ -86,7 +143,7 @@ const rad = Math.PI / 180;
  * my campus's directory is all MultiPolygon and a third of the buildings have more
  * than one part — nine for the Student Center — so this cannot assume a single
  * outline. Holes are dropped: a courtyard is a real feature of a footprint and
- * an outline of one, drawn at roof height around nothing, reads as a second
+ * an outline of one, scanned at height around nothing, reads as a second
  * building rather than as a hole in the first.
  */
 function ringsOf(geometry) {
@@ -97,120 +154,125 @@ function ringsOf(geometry) {
   return polygons.map((polygon) => polygon[0]).filter((ring) => ring?.length > 3);
 }
 
-/**
- * The vertices of a ring where it actually turns a corner.
- *
- * Wrapped rather than clamped at the ends, because the first point of a closed
- * ring is a corner as often as any other and reading it as an endpoint puts an
- * upright in the middle of a wall.
- */
-function cornersOf(ring) {
-  // A closed ring repeats its first point last; the repeat is not a vertex.
-  const pts = ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
-    ? ring.slice(0, -1)
-    : ring;
-  if (pts.length < 3) return pts;
-
-  const out = [];
-  for (let i = 0; i < pts.length; i += 1) {
-    const prev = pts[(i - 1 + pts.length) % pts.length];
-    const here = pts[i];
-    const next = pts[(i + 1) % pts.length];
-    const into = Math.atan2(here[1] - prev[1], here[0] - prev[0]);
-    const away = Math.atan2(next[1] - here[1], next[0] - here[0]);
-    let turn = Math.abs(away - into);
-    if (turn > Math.PI) turn = 2 * Math.PI - turn;
-    if (turn <= CORNER_DEG * rad) continue;
-    // Far enough from the last upright to be a different corner rather than the
-    // same one drawn twice by a jagged trace. Checked against what was KEPT, so
-    // a run of ten sharp vertices along one wall yields one upright and not ten.
-    const last = out[out.length - 1];
-    if (last) {
-      const east = (here[0] - last[0]) * M_PER_DEG_LON;
-      const north = (here[1] - last[1]) * M_PER_DEG_LAT;
-      if (Math.hypot(east, north) < CORNER_GAP_M) continue;
-    }
-    out.push(here);
-  }
-  return out;
-}
 
 /**
- * The cage, as two layers: the x-ray underneath and the solid outline over it.
+ * The scan, as two layers, or nothing at all once it is over.
  *
- * Returned in draw order rather than sorted, for the same reason the pin's
- * samples are: deck.gl draws a list in the order it is given, and with the depth
- * test off on the first of these there is nothing else deciding.
+ * Nothing at all is the important half: this is called on every frame of a
+ * ninety-second orbit and is alive for under two seconds of it, so outside that
+ * window it has to cost no layers rather than two empty ones.
  *
- * @param {object}   tools            the deck.gl toolkit, for PathLayer and LineLayer
- * @param {object}   options
- * @param {object}   options.footprint GeoJSON geometry from src/directory.json
- * @param {object}   options.mass      { ground, roof } in metres, from `massOf`
- * @param {number[]} options.colour    [r, g, b], the pin's own
+ * @param {object} tools             the deck.gl toolkit, for LineLayer
+ * @param {object} options
+ * @param {object} options.footprint GeoJSON geometry from src/directory.json
+ * @param {object} options.mass      { ground, top } in metres, from `massOf`
+ * @param {number} options.ms        time since the pin's drop began
  */
-export function cageLayers({ PathLayer, LineLayer }, { footprint, mass, colour }) {
+export function cageLayers({ LineLayer }, { footprint, mass, ms }) {
   const rings = ringsOf(footprint);
-  if (!rings.length || !mass) return [];
+  if (!rings.length || !mass || !(ms > DROP_MS + WAIT_MS)) return [];
 
-  const { ground, roof } = mass;
-  const paths = [];
-  // THE UPRIGHTS ARE NOT PATHS, and finding out why cost a render. PathLayer
-  // builds a ribbon in the GROUND plane — it is a map primitive, and its width
-  // runs perpendicular to a horizontal direction — so a segment with no
-  // horizontal extent has no direction to be perpendicular to and draws
-  // nothing at all. LineLayer is the 3D one: two positions, a width in screen
-  // pixels, and no opinion about which way is up.
-  const posts = [];
+  const t = ms - DROP_MS - WAIT_MS;
+  if (t >= SWEEP_MS + FADE_MS) return [];
+
+  const { ground, top } = mass;
+  const height = top - ground;
+  if (!(height > 0)) return [];
+
+  // Every piece of the mesh, as a segment with a midpoint. Segments rather than
+  // paths because the sweep lights PART of a ring — a band crossing a building
+  // cuts every contour it meets — and a path is lit or not as a whole.
+  const segs = [];
+  const at = (p, z) => [p[0], p[1], z];
   for (const ring of rings) {
-    // The roof line first and the base second, so a caller reading `data` order
-    // sees the same priority the alphas state.
-    paths.push({ path: ring.map(([lon, lat]) => [lon, lat, roof]), lift: 1 });
-    paths.push({ path: ring.map(([lon, lat]) => [lon, lat, ground]), lift: BASE_ALPHA });
-    for (const [lon, lat] of cornersOf(ring)) {
-      posts.push({ from: [lon, lat, ground], to: [lon, lat, roof] });
+    const levels = [];
+    for (let i = 0; i <= LEVELS; i += 1) levels.push(ground + (height * i) / LEVELS);
+
+    let walked = 0;
+    let nextPost = 0;
+    for (let i = 0; i < ring.length - 1; i += 1) {
+      const a = ring[i];
+      const b = ring[i + 1];
+      for (const z of levels) segs.push({ from: at(a, z), to: at(b, z) });
+
+      // The verticals, spaced by DISTANCE along the perimeter rather than by
+      // vertex, so a wall traced with forty points and one traced with four get
+      // the same mesh. Split at every level so each cell edge lights on its own.
+      const east = (b[0] - a[0]) * M_PER_DEG_LON;
+      const north = (b[1] - a[1]) * M_PER_DEG_LAT;
+      const run = Math.hypot(east, north);
+      while (run > 0 && nextPost <= walked + run) {
+        const f = (nextPost - walked) / run;
+        const p = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+        for (let i2 = 0; i2 < LEVELS; i2 += 1) {
+          segs.push({ from: at(p, levels[i2]), to: at(p, levels[i2 + 1]) });
+        }
+        nextPost += VERTICAL_GAP_M;
+      }
+      walked += run;
     }
   }
+  if (!segs.length) return [];
 
-  const layer = (id, { width, alpha }, depth) => new PathLayer({
-    id,
-    data: paths,
-    getPath: (d) => d.path,
-    getColor: (d) => [...colour, Math.round(alpha * d.lift)],
-    getWidth: width,
-    widthUnits: 'pixels',
-    // A cage that thins to nothing at a distance stops being an outline. The
-    // minimum is what holds it together where the building is small in frame.
-    widthMinPixels: width,
-    jointRounded: true,
-    capRounded: true,
-    parameters: depth
-      ? { depthCompare: 'less-equal', depthWriteEnabled: false }
-      : { depthCompare: 'always', depthWriteEnabled: false },
-  });
+  // WHERE EACH SEGMENT SITS ALONG THE SWEEP, in metres, measured from wherever
+  // the mesh starts. One dot product per segment against the sweep's bearing —
+  // the same arithmetic a plane sweeping across the building would do, which is
+  // what this is.
+  const toward = SWEEP_DEG * rad;
+  const axis = (s2) => {
+    const lon = (s2.from[0] + s2.to[0]) / 2;
+    const lat = (s2.from[1] + s2.to[1]) / 2;
+    return lon * M_PER_DEG_LON * Math.sin(toward) + lat * M_PER_DEG_LAT * Math.cos(toward);
+  };
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const seg of segs) {
+    seg.u = axis(seg);
+    lo = Math.min(lo, seg.u);
+    hi = Math.max(hi, seg.u);
+  }
+  const cross = Math.max(1, hi - lo);
+  const reach = BAND * cross;
+  // From before the first segment to past the last, so the mesh arrives rather
+  // than being already half lit at the opening frame.
+  const centre = lo - reach + (cross + 2 * reach) * clamp01(t / SWEEP_MS);
+  const tail = 1 - clamp01((t - SWEEP_MS) / FADE_MS);
 
-  const uprights = (id, { width, alpha }, depth) => new LineLayer({
+  const lit = [];
+  for (const seg of segs) {
+    // Triangular, so a cell edge is brightest as the band's middle crosses it
+    // and out by the time the edge has passed. A step would switch a whole
+    // column on at once.
+    const on = tail * Math.max(0, 1 - Math.abs(seg.u - centre) / reach);
+    // Culled at 6% rather than at zero: a white line at 14 of 235 alpha is
+    // invisible and still costs a vertex pair, and there are hundreds of them
+    // out at the edges of a triangular falloff.
+    if (on > 0.06) lit.push({ from: seg.from, to: seg.to, on });
+  }
+  if (!lit.length) return [];
+
+  // THROUGH the surface: the depth test is off so the band crosses the building
+  // rather than stopping at the wall nearest the camera. A survey pass goes
+  // through, and the far half of the mesh is the half that says which mass this
+  // is when a neighbour is standing in front of it.
+  const parameters = { depthCompare: 'always', depthWriteEnabled: false };
+  const pass = (id, ink, alpha, width) => new LineLayer({
     id,
-    data: posts,
+    data: lit,
     getSourcePosition: (d) => d.from,
     getTargetPosition: (d) => d.to,
-    getColor: [...colour, Math.round(alpha * BASE_ALPHA)],
+    getColor: (d) => [...ink, Math.round(alpha * d.on)],
     getWidth: width,
     widthUnits: 'pixels',
     widthMinPixels: width,
-    parameters: depth
-      ? { depthCompare: 'less-equal', depthWriteEnabled: false }
-      : { depthCompare: 'always', depthWriteEnabled: false },
+    parameters,
+    updateTriggers: { getSourcePosition: t, getTargetPosition: t, getColor: t },
   });
 
-  // The x-ray is for the RINGS only. Photographed with the uprights in it too,
-  // the ones on a re-entrant corner came through the roof as a row of verticals
-  // standing in the middle of it — hidden geometry faithfully shown and read as
-  // clutter, because an upright says nothing on its own. The roof line is what
-  // has to survive a neighbour standing in front; a post that goes with the
-  // corner it is hidden behind has lost nothing.
+  // Casing first, then the white over it. Both are depth-off, so this list order
+  // is the only thing deciding which covers which.
   return [
-    layer('flyover-cage-xray', XRAY, false),
-    layer('flyover-cage', SOLID, true),
-    uprights('flyover-cage-posts', SOLID, true),
+    pass('flyover-cage-case', CASE_INK, CASE_ALPHA, RING_WIDTH + CASE_EXTRA),
+    pass('flyover-cage', INK, RING_ALPHA, RING_WIDTH),
   ];
 }

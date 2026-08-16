@@ -227,15 +227,25 @@ export const roofOf = (name) => (name ? ROOFS.get(name.trim()) ?? null : null);
  * datum — for anything that has to draw the building's own VOLUME rather than
  * a point on top of it.
  *
- * Both measured by scripts/build-roofs.mjs off Google's leaf tiles: the roof is
- * the median of the highest mesh sample in each 3 m cell inside the footprint,
- * and the ground is the median of the lowest sample per cell in the collar
- * outside it. Taking both from there rather than deriving the base from the
- * roof is what makes a cage drawn on this land on the same two planes the
- * imagery does — a ground guessed at z=0 would float the cage a metre or four
- * above or below the terrain it is supposed to be standing in.
+ * `top` IS THE PEAK AND NOT THE ROOF, which is the difference between a cage
+ * around a building and a cage through one. src/roofs.json carries both: the
+ * roof is the MEDIAN of the highest sample per 3 m cell, and for anything that
+ * is not a flat slab the median sits inside the mass — the Parking Garage
+ * measures 7.8 m of roof against 13.8 m of peak, and the Gym 2.5 against 6.8.
+ * Drawn at the roof, the Garage's outline ran across the middle of its own
+ * facade, which is exactly what the median said and not at all what anyone
+ * looking at it meant.
+ *
+ * The PIN still stands on the roof, and should: a marker stands on the surface
+ * a person would stand on, and the peak is where the stair core and the aerials
+ * are. Same building, two honest heights, each used for the thing it describes.
+ *
+ * The ground comes from the same script — the median of the lowest sample per
+ * cell in the collar outside the footprint — so a cage drawn on this lands on
+ * the planes the imagery does rather than on a guess. A base at z=0 would float
+ * it a metre or four above or below the terrain it is meant to stand in.
  */
-const MASS = new Map(roofs.buildings.map((row) => [row.name, { ground: row.ground_m, roof: row.roof_m }]));
+const MASS = new Map(roofs.buildings.map((row) => [row.name, { ground: row.ground_m, top: row.peak_m }]));
 export const massOf = (name) => (name ? MASS.get(name.trim()) ?? null : null);
 
 /**
