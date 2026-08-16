@@ -26,7 +26,7 @@ import {
 import {
   pushPinSvg, pinShadowSvg, SHADOW_BOX, PUSH_PIN, PUSH_PIN_RED,
 } from '../src/push-pin.js';
-import { cageLayers, CAGE_MS } from '../src/flyover-cage.js';
+import { highlightLayers, HIGHLIGHT_MS } from '../src/flyover-cage.js';
 import { poiFor } from '../src/poi.js';
 
 const buildings = load('directory').features;
@@ -194,101 +194,79 @@ test('a building with no footprint gets the framing its footprint would have', (
     'the coarse-tile limit stopped growing with the building');
 });
 
-test('the scan crosses the building as a grid, part at a time, and then stops', () => {
-  // A fake LineLayer, because what is worth testing is the GEOMETRY handed to
-  // deck.gl rather than deck.gl.
+test('the highlight outlines the building and washes it, and then holds', () => {
+  // Fakes, because what is worth testing is the GEOMETRY handed to deck.gl
+  // rather than deck.gl.
   const library = buildings.find((f) => f.properties.name === 'Library');
   const mass = { ground: -1.4, top: 14.1 };
-  // Past the scan's own wait, whatever that is; the sweep is what is sampled.
-  const WAIT_ISH = CAGE_MS * 0.1;
-  const draw = (ms) => {
+  const roof = [-121.3466, 38.6489, 11.2];
+  const draw = (ms, opts = {}) => {
     const made = [];
-    const tools = { LineLayer: class { constructor(p) { made.push(p); } } };
-    const out = cageLayers(tools, { footprint: library.geometry, mass, ms });
-    return { out, lit: made[0] };
+    const Layer = class { constructor(props) { made.push(props); } };
+    const tools = { PathLayer: Layer, SolidPolygonLayer: Layer };
+    const out = highlightLayers(tools, {
+      footprint: library.geometry, mass, roof, ms, ...opts,
+    });
+    return { out, made };
   };
 
-  // Nothing before the pin has landed, and nothing at all once it is over. The
-  // second half is the one that matters for cost: this is asked on every frame
-  // of a ninety-second orbit and is alive for under two of them.
+  // Nothing before the pin has landed. There is no "and then nothing": this is
+  // the change from the sweep it replaced — the mark is the subject of the card
+  // for as long as the card is open, so it holds rather than erasing itself.
   assert.deepEqual(draw(0).out, []);
   assert.deepEqual(draw(DROP_MS).out, []);
-  assert.deepEqual(draw(DROP_MS + CAGE_MS).out, []);
-  assert.deepEqual(draw(DROP_MS + CAGE_MS * 4).out, []);
+  assert.equal(draw(DROP_MS + HIGHLIGHT_MS).out.length, 3);
+  assert.equal(draw(DROP_MS + HIGHLIGHT_MS * 40).out.length, 3);
 
-  // Two passes at once, because a white line on a white building is invisible:
-  // a wider dark casing, then the white over it.
-  const mid = draw(DROP_MS + CAGE_MS * 0.5);
-  assert.equal(mid.out.length, 2);
-  assert.ok(mid.out[0].props?.getWidth ?? true);
+  // A fill and two outline passes, because a white line on a white building is
+  // invisible: a wider dark casing, then the white over it.
+  const up = draw(DROP_MS + HIGHLIGHT_MS);
+  const [fill, casing, white] = up.made;
+  assert.ok(casing.getWidth > white.getWidth, 'the casing is not wider than the line it cases');
+  assert.deepEqual(white.getColor.slice(0, 3), [255, 255, 255]);
+  assert.ok(fill.getFillColor[3] < white.getColor[3] / 4,
+    'the wash is as strong as the outline, which makes it paint rather than a tint');
 
-  // A GRID rather than a stack of rings: both level lines and the verticals
-  // that cross them, or it describes a height rather than a surface.
-  const level = mid.lit.data.filter((d) => d.from[2] === d.to[2]);
-  const upright = mid.lit.data.filter((d) => d.from[2] !== d.to[2]);
-  assert.ok(level.length > 0, 'the mesh has no level lines');
-  assert.ok(upright.length > 0, 'the mesh has no verticals, so it is not a grid');
-  // Verticals are vertical, which is the whole reason this is LineLayer.
-  for (const d of upright) assert.deepEqual([d.from[0], d.from[1]], [d.to[0], d.to[1]]);
-  // Everything sits inside the building it is describing.
-  for (const d of mid.lit.data) {
-    for (const z of [d.from[2], d.to[2]]) {
-      assert.ok(z >= mass.ground - 1e-9 && z <= mass.top + 1e-9, `a line at ${z} m is outside it`);
-    }
-    assert.ok(d.on > 0 && d.on <= 1);
+  // EVERYTHING IN ONE PLANE, at the measured roof rather than the peak — a ring
+  // hung at the peak floats over the roof it is supposed to lie on.
+  for (const ring of casing.data) {
+    for (const point of ring) assert.equal(point[2], roof[2]);
   }
-
-  // ...and it CROSSES, which is the change: the band travels along a compass
-  // bearing rather than climbing. Sampled through the sweep, the lit mesh only
-  // ever moves one way along that axis — and a vertical scan would not move
-  // along it at all.
-  const along = (d) => (d.from[0] + d.to[0]) / 2 * 86_900 * Math.sin(35 * Math.PI / 180)
-    + (d.from[1] + d.to[1]) / 2 * 111_132 * Math.cos(35 * Math.PI / 180);
-  let last = -Infinity;
-  let moved = 0;
-  for (const at of [0.25, 0.4, 0.55, 0.7]) {
-    const { lit } = draw(DROP_MS + CAGE_MS * at);
-    if (!lit?.data.length) continue;
-    const mean = lit.data.reduce((sum, d) => sum + along(d), 0) / lit.data.length;
-    assert.ok(mean > last, 'the band went backwards along its own axis');
-    if (last > -Infinity) moved += mean - last;
-    last = mean;
+  for (const polygon of fill.data) {
+    for (const ring of polygon) for (const point of ring) assert.equal(point[2], roof[2]);
   }
-  assert.ok(moved > 5, `the band crossed ${moved.toFixed(1)} m, which is not a sweep`);
+  // ...and the peak is the fallback, so a building with a footprint and no
+  // measured centre is still outlined.
+  const noRoof = draw(DROP_MS + HIGHLIGHT_MS, { roof: null });
+  assert.equal(noRoof.out.length, 3);
+  assert.equal(noRoof.made[1].data[0][0][2], mass.top);
 
-  // Only PART of the mesh at once. The whole cage being up together is the thing
-  // the band exists to prevent — that is an annotation, not a scan. Counted
-  // against the mesh's real size rather than an estimate of it: the most any one
-  // frame lights, against everything that lights across the whole sweep.
-  const seen = new Set();
-  let most = 0;
-  for (let at = 0; at <= 1; at += 0.02) {
-    const { lit } = draw(DROP_MS + WAIT_ISH + (CAGE_MS - WAIT_ISH) * at);
-    if (!lit) continue;
-    most = Math.max(most, lit.data.length);
-    for (const d of lit.data) seen.add(`${d.from.join()}|${d.to.join()}`);
-  }
-  assert.ok(seen.size > 100, 'the sweep never covers the mesh');
-  // Half, at the band's widest — which is a looser bound than it looks and is
-  // set by the shape of buildings rather than by the band. The level lines
-  // follow the footprint, so a band crossing it meets the two sides facing it
-  // whatever its width; halving the band moved this from 237 lines to 136. What
-  // the assertion still catches is the failure that matters: the entire mesh
-  // being up at once, which is an annotation rather than a scan.
-  assert.ok(most < seen.size * 0.5,
-    `${most} of ${seen.size} lines at once is most of the mesh`);
+  // It FADES UP rather than appearing, and is at full strength once it is up.
+  const early = draw(DROP_MS + HIGHLIGHT_MS * 0.55).made[2].getColor[3];
+  assert.ok(early > 0 && early < white.getColor[3], 'the outline did not fade in');
+
+  // Drawn THROUGH the building: the far side of the outline is the half that
+  // says which mass this is when a neighbour stands in front of it.
+  for (const props of up.made) assert.equal(props.parameters.depthCompare, 'always');
+
+  // The outline takes the outer ring only — a hole traced at roof height reads
+  // as a second building — while the wash keeps every ring, so a courtyard
+  // stays uncovered.
+  assert.ok(fill.data.length === casing.data.length);
 
   // Nothing to trace is not an error: a place that flies with no directory
-  // footprint behind it — see the Pool — gets a flyover without a scan rather
-  // than a crash or an empty layer that costs a draw call.
-  const anyTime = DROP_MS + CAGE_MS * 0.5;
-  const tools = { LineLayer: class {} };
-  assert.deepEqual(cageLayers(tools, { footprint: null, mass, ms: anyTime }), []);
-  assert.deepEqual(cageLayers(tools, { footprint: library.geometry, mass: null, ms: anyTime }), []);
-  // A building with no height measured is a plane, not a mass.
+  // footprint behind it gets a flyover without a highlight rather than a crash
+  // or an empty layer that costs a draw call.
+  const anyTime = DROP_MS + HIGHLIGHT_MS * 2;
+  const tools = { PathLayer: class {}, SolidPolygonLayer: class {} };
+  assert.deepEqual(highlightLayers(tools, { footprint: null, mass, roof, ms: anyTime }), []);
   assert.deepEqual(
-    cageLayers(tools, { footprint: library.geometry, mass: { ground: 3, top: 3 }, ms: anyTime }), [],
+    highlightLayers(tools, { footprint: library.geometry, mass: null, roof, ms: anyTime }), [],
   );
+  // A building with no height measured is a plane, not a mass.
+  assert.deepEqual(highlightLayers(tools, {
+    footprint: library.geometry, mass: { ground: 3, top: 3 }, roof, ms: anyTime,
+  }), []);
 });
 
 test('the campus box holds the campus, with room for a building on its edge', () => {

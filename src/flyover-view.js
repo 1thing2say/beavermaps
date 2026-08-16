@@ -51,9 +51,9 @@ import { spinnerOverlay } from './spinner.js';
 // comparison of two different things that happen to share a unit.
 import { M_PER_DEG_LAT, M_PER_DEG_LON, campusBox } from './flyover.js';
 import {
-  pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS,
+  pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS, DROP_MS,
 } from './flyover-pin.js';
-import { cageLayers } from './flyover-cage.js';
+import { highlightLayers, HIGHLIGHT_MS } from './flyover-cage.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
@@ -68,14 +68,13 @@ const TILES_ID = 'flyover-tiles';
  *
  * What the camera's aim is solved for — see the padding in `createFlyover`.
  *
- * It is the PIN AND ITS LABEL that have to fit, which is not what this was first
- * sized for. "Here" sits a third of a pin above the ball and is a line of type
- * again on top of that, so the stack is a little over 0.43 of the height where
- * the pin alone is 0.28. At 0.4 the pin fitted perfectly and the word was
- * clipped clean off the top edge — the kind of thing that is invisible until the
- * label is the part you are looking for. Below this the pin starts being
- * shortened to fit, which it can do (see HEADROOM in src/flyover-pin.js) but
- * should not have to.
+ * 0.46 was set when a "Here" label stood over the ball: pin plus gap plus a line
+ * of type is a little over 0.43 of the frame's height where the pin alone is
+ * 0.28, and at 0.4 the word was clipped clean off the top edge. The label is
+ * gone and the number is kept, because the slack it bought is what stops the pin
+ * being SHORTENED to fit on a tall building — which it can do (see HEADROOM in
+ * src/flyover-pin.js) but should not have to. Sky over a roof is not wasted
+ * frame; it is what makes the shot read as aerial rather than as a wall.
  */
 const WANT_SKY = 0.46;
 
@@ -265,7 +264,7 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   LineLayer: layers.LineLayer,
   IconLayer: layers.IconLayer,
   PathLayer: layers.PathLayer,
-  TextLayer: layers.TextLayer,
+  SolidPolygonLayer: layers.SolidPolygonLayer,
 })).catch((error) => {
   // Not cached on failure, so a flyover opened on a dropped connection can be
   // retried by closing the card and opening it again.
@@ -930,12 +929,13 @@ export function createFlyover({
     // is no pin at all, rather than a pin parked somewhere. `roof` is absent for
     // anything src/roofs.json has no measured centre for, and an unmarked
     // flyover is a better answer than one marking a guess.
-    // The scan and the pin share one clock, because they are one event: the pin
-    // lands, the building is surveyed, and both are over inside two seconds. The
-    // scan does not need a roof — it is drawn from the footprint — so it is not
-    // inside the `roof` guard the pin is.
+    // The highlight and the pin share one clock, because they are one event:
+    // the pin lands and the building it landed on is marked. The highlight is
+    // drawn from the FOOTPRINT and only reads `roof` for the plane to hang at,
+    // so it is not inside the `roof` guard the pin is — a building with a traced
+    // outline and no measured centre still gets outlined, at its peak.
     const marks = (ms) => (ms === null ? [] : [
-      ...cageLayers(tools, { footprint, mass, ms }),
+      ...highlightLayers(tools, { footprint, mass, roof, ms }),
       ...(roof ? pinLayers(tools, { roof, ...fall, span, width, height, ms }) : []),
     ]);
 
@@ -955,9 +955,16 @@ export function createFlyover({
     // the same thing on the frame it is already drawing; this path has no frames
     // of its own, so it borrows a few and stops as soon as it has an answer.
     if (prefersStill()) {
+      // THE FRAME WHERE EVERYTHING HAS FINISHED, which is the later of the two
+      // clocks and not the pin's alone. `SETTLED_MS` is when the pin has stopped
+      // moving; the highlight fades up behind it and is still climbing then, so
+      // borrowing the pin's number parks the still on a mark at a sixth of its
+      // strength. It used to agree by accident — the pin waited a second for a
+      // label it no longer has.
+      const STILL_MS = Math.max(SETTLED_MS, DROP_MS + HIGHLIGHT_MS);
       const settle = (landed) => stage.deck?.setProps({
         viewState: { ...view, bearing: 35 },
-        layers: [...stage.base, ...marks(landed ? SETTLED_MS : null)],
+        layers: [...stage.base, ...marks(landed ? STILL_MS : null)],
       });
       const wait = () => {
         if (dead || stage.owner !== token) return;
