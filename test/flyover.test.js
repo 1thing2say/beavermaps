@@ -21,7 +21,7 @@ import {
   M_PER_DEG_LAT, M_PER_DEG_LON, MIN_SPAN_M, roofOf,
 } from '../src/flyover.js';
 import {
-  fallen, bounced, DROP_MS, SETTLED_MS, HOLD_MS, pinHeight, dropPixels, pinIcon, pinShadowIcon,
+  fallen, squashed, DROP_MS, SETTLED_MS, HOLD_MS, pinHeight, dropPixels, pinIcon, pinShadowIcon,
 } from '../src/flyover-pin.js';
 import {
   pushPinSvg, pinShadowSvg, SHADOW_BOX, PUSH_PIN, PUSH_PIN_RED,
@@ -545,22 +545,32 @@ test('the cast shadow is anchored at the foot and declared at its own size', () 
   assert.ok(SHADOW_BOX.h / SHADOW_BOX.w > 2);
 });
 
-test('the pin takes the landing on its legs', () => {
+test('the pin takes the landing on its legs, once', () => {
   // Full height for the whole fall: nothing compresses a pin in mid-air.
-  for (const ms of [0, DROP_MS / 2, DROP_MS]) assert.equal(bounced(ms), 1);
+  for (const ms of [0, DROP_MS / 2, DROP_MS]) assert.equal(squashed(ms), 1);
 
-  // Then it compresses, springs back PAST full height, and rings down. The
-  // overshoot is the part that separates a bounce from a dip, so it is the part
-  // worth asserting.
-  const low = bounced(DROP_MS + 30);
-  assert.ok(low > 0.7 && low < 0.95, `a landing that squashes to ${low} is a collapse`);
-  assert.ok(Math.max(...[80, 100, 120, 140].map((d) => bounced(DROP_MS + d))) > 1.02,
-    'the pin never springs back past its own height');
+  // ONE DIP AND NO BOUNCE, which is the property this replaced a decaying sine
+  // to get. It compresses, it comes back, and it never goes past full height on
+  // the way — an overshoot is what makes a thing read as springy, and a marker
+  // standing on a roof is not.
+  let lowest = 1;
+  let rising = false;
+  for (let ms = DROP_MS; ms <= SETTLED_MS + 200; ms += 2) {
+    const at = squashed(ms);
+    assert.ok(at <= 1, `the pin sprang past full height to ${at} at ${ms} ms`);
+    if (at > lowest + 1e-9) rising = true;
+    // Down then up, and never down again: two dips are a bounce.
+    else if (rising) assert.fail(`the pin compressed a second time at ${ms} ms`);
+    lowest = Math.min(lowest, at);
+  }
+  assert.ok(lowest > 0.6 && lowest < 0.85, `a landing that squashes to ${lowest} is a collapse`);
 
-  // ...and is done by the time anything else asks for a settled frame.
-  assert.ok(Math.abs(bounced(SETTLED_MS) - 1) < 0.005);
-  assert.equal(bounced(SETTLED_MS * 10), 1);
+  // ...and it is OVER rather than merely small by the time anything asks for a
+  // settled frame, which is what lets SETTLED_MS be exact.
+  assert.equal(squashed(SETTLED_MS), 1);
+  assert.equal(squashed(SETTLED_MS * 10), 1);
 });
+
 
 test('recolouring the pin spins the hue and leaves the steel alone', () => {
   const red = pushPinSvg({ colour: PUSH_PIN_RED });

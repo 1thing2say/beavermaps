@@ -43,18 +43,24 @@ import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
  * How long the fall takes, in ms, and very nearly how long it is WATCHED for.
  *
  * Those used to be different numbers. The pin waits above the top of the window
- * — see CLEAR_PINS, which used to park it a whole pin height higher than it had
+ * — see CLEAR_PINS, which once parked it a whole pin height higher than it had
  * to — and at 300 ms only 158 of them happened on camera; the rest was a wait
- * with nothing in the frame. Now 94% of the fall is on screen, so 220 ms here
- * buys 207 ms of visible drop where 300 bought 158: shorter overall and half
- * again as much to look at.
+ * with nothing in the frame. 94% of the fall is on screen now, so this whole
+ * number is nearly all of it: 150 ms of visible drop against the 158 that 300 ms
+ * used to buy, in barely half the time.
  *
- * That is about twelve frames at 60fps, or four and a half on the software
- * renderer this was photographed on, with a six-sample trail smearing between
- * them. Shorter and the trail is doing all the work; longer and a marker that is
- * only answering "which building" has started asking to be watched.
+ * THE TRAIL IS WHAT MAKES THIS AFFORDABLE, and it is why the number can keep
+ * coming down. 150 ms is nine frames at 60fps and about three on the software
+ * renderer this was photographed on, which is not enough frames to draw a fall
+ * with — but each of them carries six time-samples of the pin behind it, and the
+ * trail's LENGTH is solved from the landing speed rather than fixed in
+ * milliseconds, so it lengthens by itself every time this shortens.
+ *
+ * The floor is somewhere below here and it is the pin's own height: once the
+ * ball moves further than its own diameter between two frames, the trail is no
+ * longer a blur of one object but a row of separate ones.
  */
-export const DROP_MS = 220;
+export const DROP_MS = 160;
 
 /**
  * How long the finished picture is held before the pin falls into it, in ms.
@@ -147,65 +153,55 @@ const GHOST_ALPHA = 0.34;
 const shutterMs = (drop, px) => (TRAIL_PINS * px * DROP_MS) / (LANDING_SPEED * drop * GHOSTS);
 
 /**
- * The landing: how far the pin compresses at the moment of contact, how long one
- * swing of the recovery takes, and how fast the swings die away.
+ * The landing: how far the pin compresses when it arrives, and how long the
+ * whole compression takes.
  *
- * A falling object that simply stops has no weight. A decaying sine gives the
- * whole gesture in one expression: the pin arrives at full height, compresses
- * over the next forty-five milliseconds, springs back PAST full height, and
- * rings down through two or three smaller swings — which is what separates
- * something springy from something being resized.
+ * ONE DIP. It was a decaying sine — a squash, an overshoot past full height, and
+ * two or three smaller swings ringing down — which is the textbook bounce and is
+ * more gesture than this moment can carry. A marker is not a ball; it does not
+ * have anywhere to bounce to. What survives is the part that reads: the pin
+ * takes the landing on its legs and stands back up, once.
  *
- * The decay is held at HALF the swing, which is the ratio that fixes the shape:
- * scale both and the bounce is the same gesture at a different speed, which is
- * how this was sped up without re-tuning it. The amplitude went the other way —
- * a briefer squash is caught by fewer frames, so it has to be deeper to land.
+ * Half a sine gives exactly that and nothing else. It leaves full height at the
+ * moment of contact, reaches its deepest at the midpoint, and is back at one at
+ * the end — no overshoot to suppress and no tail to wait out. It also holds the
+ * compression: the curve is within a tenth of its deepest for 60% of its length,
+ * which is 114 ms, so the squash is caught by frames rather than falling between
+ * them. That was the whole reason the old curve was a sine and not a cosine, and
+ * it survives the simplification.
  *
- * A SINE RATHER THAN A COSINE, which is the difference between a bounce and a
- * flicker and was found by photographing it. A cosine is at its deepest
- * compression at the instant of contact and has recovered half of it 50 ms
- * later, so the frame that actually gets drawn — this runs at whatever rate the
- * tileset leaves the renderer — catches maybe half the squash and the other half
- * happens between frames. Measured on the Library, a nominal 22% compression
- * reached the screen as 11% and a 4 px flinch. Starting at rest and taking a
- * quarter of a swing to reach the bottom puts the deepest part of it in the
- * middle of the motion, where frames are, and it is a compression that is
- * WATCHED rather than one that is inferred.
- *
- * UNIFORM rather than a squash, and that is a deliberate limit rather than an
- * oversight. A real squash keeps the width while the height drops, which for
- * IconLayer means a differently-proportioned ICON — a separate atlas entry per
- * step of the compression, and a texture atlas repacked a dozen times in the
- * half second after every landing. The pin gets shorter and springs back, which
- * is the read; it gets narrower at the same time, which nobody watches for.
+ * 0.26 rather than the 0.38 the decaying version carried, because that amplitude
+ * was being multiplied by an exponential that had already taken a third off it
+ * before the curve reached its lowest point. Measured on screen the old squash
+ * bottomed out at 0.76 of full height; this bottoms out at 0.74.
  */
-const BOUNCE = 0.38;
-const BOUNCE_MS = 180;
-const BOUNCE_DECAY = 90;
+const SQUASH = 0.26;
+const SQUASH_MS = 190;
 
 /**
  * How tall the pin stands at `ms`, as a fraction of its drawn height.
  *
- * One before it lands, because nothing is compressing a pin in mid-air.
+ * One before it lands, because nothing is compressing a pin in mid-air, and one
+ * again once it is over — this returns to full height and stays there rather
+ * than approaching it.
  */
-export function bounced(ms) {
+export function squashed(ms) {
   const t = ms - DROP_MS;
-  if (!(t > 0)) return 1;
-  return 1 - BOUNCE * Math.exp(-t / BOUNCE_DECAY) * Math.sin((2 * Math.PI * t) / BOUNCE_MS);
+  if (!(t > 0) || t >= SQUASH_MS) return 1;
+  return 1 - SQUASH * Math.sin((Math.PI * t) / SQUASH_MS);
 }
 
 /**
- * A time past the end of everything: the fall, the longest shutter it can ask
- * for, and the bounce ringing itself out.
+ * The end of everything: the fall, plus the compression that follows it.
  *
  * For callers that want the pin where it ends up without playing the drop —
- * `prefers-reduced-motion`, and a test that wants a stable frame. The trail is
- * the shorter of the two: the shutter totals `TRAIL_PINS * px * DROP_MS /
- * (LANDING_SPEED * drop)` and `drop` is never less than `CLEAR_PINS * px`, which
- * caps it at well under half of DROP_MS whatever the viewport is. Six decay
- * constants leave the bounce at a quarter of one part in a thousand.
+ * `prefers-reduced-motion`, and a test that wants a stable frame. It is an exact
+ * time rather than a bound now that the squash ends rather than decays. The
+ * trail is comfortably inside it: the shutter totals `TRAIL_PINS * px * DROP_MS
+ * / (LANDING_SPEED * drop)` and `drop` is never less than `CLEAR_PINS * px`,
+ * which caps it at well under half of DROP_MS whatever the viewport is.
  */
-export const SETTLED_MS = DROP_MS + BOUNCE_DECAY * 6;
+export const SETTLED_MS = DROP_MS + SQUASH_MS;
 
 /**
  * How tall the pin is drawn, as a fraction of the viewport's height.
@@ -548,9 +544,9 @@ export function pinLayers(
       getPosition: () => [roof[0], roof[1], roof[2] + CLEAR_M],
       getPixelOffset: (d) => [0, clear - d.lift],
       getIcon: () => icon,
-      // The bounce. Anchored at the foot, so compressing the pin drops its head
-      // toward the roof and leaves the point exactly where it landed.
-      getSize: px * bounced(ms),
+      // The landing squash. Anchored at the point, so compressing the pin drops
+      // its head toward the roof and leaves the point where it landed.
+      getSize: px * squashed(ms),
       // Only the alpha is read: the icon is not a mask, so the shader keeps the
       // pin's own colours and multiplies this in. That is what a ghost needs —
       // a fainter copy of the same drawing, not a flat silhouette of it.
