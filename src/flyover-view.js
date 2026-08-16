@@ -50,9 +50,15 @@ import { spinnerOverlay } from './spinner.js';
 // because a tile measured on one scale against a box built on another is a
 // comparison of two different things that happen to share a unit.
 import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
-import { pinLayers, dropPixels, CLEAR_M, SETTLED_MS, QUIET_MS } from './flyover-pin.js';
+import { pinLayers, dropPixels, CLEAR_M, SETTLED_MS } from './flyover-pin.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
+
+/**
+ * The tile layer's id, which is also the prefix Tile3DLayer gives its sublayers
+ * — so it is how `drawn` asks whether any geometry exists yet.
+ */
+const TILES_ID = 'flyover-tiles';
 
 /** One full circle, in ms. */
 const ORBIT_MS = 30_000;
@@ -461,12 +467,6 @@ const stage = {
    */
   roof: null,
   /**
-   * When a tile last finished loading, for anything waiting on the picture to
-   * stop changing. Belongs to the stage rather than to a card because
-   * `onTileLoad` belongs to the layer, which outlives every card.
-   */
-  lastLoad: 0,
-  /**
    * The grid and the tiles for the current building, held so the pin can be
    * animated without rebuilding them.
    *
@@ -558,7 +558,7 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
     // reloaded. deck.gl matches layers across renders by id and only calls
     // `_loadTileset` when `props.data` actually changes — so every subsequent
     // building reuses the tree that is already in memory, and pays nothing.
-    id: 'flyover-tiles',
+    id: TILES_ID,
     data: TILESET,
     loader: Tiles3DLoader,
     loadOptions: {
@@ -626,9 +626,6 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader, Clip }, key, box) {
       },
     },
     onTileLoad: (tile) => {
-      // What "the picture has stopped changing" is measured against. See
-      // QUIET_MS in src/flyover-pin.js.
-      stage.lastLoad = performance.now();
       // Collected from the tiles themselves. Google's copyright is not a
       // constant — it is a property of whose imagery is under you — and it
       // arrives in each glTF's `asset.copyright`, not in the tileset JSON. The
@@ -837,16 +834,38 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
     stage.onReady = () => {
       if (dead) return;
       credit.textContent = [...stage.credits].join(', ') || FALLBACK_CREDIT;
-      // Half of the drop's condition. The other half — the tileset going quiet,
-      // so the building is DRAWN and not merely loaded — is checked per frame in
-      // the orbit, because it is a thing that becomes true with the passage of
-      // time rather than with the arrival of a tile. See QUIET_MS.
+      // HALF of the drop's condition. This one says a fine tile covering the
+      // roof has ARRIVED; the other half, `drawn`, says deck.gl has built
+      // geometry out of it, and is checked per frame because it becomes true
+      // between frames rather than in any callback.
       roofReady = true;
-      // The spinner goes as soon as there is something to look at, rather than
-      // when the whole set has landed. Waiting for the traversal to go quiet
-      // would hold a spinner over a scene that is already showing the building;
-      // the remaining tiles refine what is on screen, and watching a roof
-      // sharpen is a better wait than watching a ring turn.
+    };
+
+    /**
+     * Whether there is anything on screen yet — as opposed to loaded.
+     *
+     * MEASURED, and it is the difference between a marker landing on a building
+     * and a marker landing on an empty grid. Photographed on the Parking Garage:
+     * a fine tile covering the roof reported content at 1.2 s and Tile3DLayer
+     * had not built a single sublayer out of it until 2.1 s, which is exactly
+     * when imagery appeared in the box. Nine hundred milliseconds of a picture
+     * that was ready by every signal except the one that matters.
+     *
+     * Tile3DLayer is a composite, so its geometry is its SUBLAYERS. Every one
+     * that exists is also loaded — checked across the whole load, the drawn
+     * count never once lagged the sublayer count — so their existence is the
+     * whole test and `isLoaded` adds nothing to it.
+     *
+     * `layerManager` is not part of deck.gl's documented surface, which is why
+     * every step of the walk is optional: a release that renames it makes this
+     * return false, and false costs the pin its drop rather than throwing inside
+     * the orbit. There is no public route to "has this composite drawn yet".
+     */
+    const drawn = () => !!stage.deck?.layerManager?.getLayers?.()
+      ?.some((l) => l.id.startsWith(`${TILES_ID}-`));
+
+    /** Spinner off, once, the moment there is a building to look at. */
+    const reveal = () => {
       if (!busy.isConnected) return;
       busy.stop?.();
       busy.remove();
@@ -885,21 +904,29 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
     // The pin still lands, because it is not decoration — it is the answer to
     // "which of these buildings". What it loses is the fall: `settled` is past
     // the end of the shutter, so every ghost has caught up and the pin is simply
-    // there. It has to be redrawn on `onReady` rather than once here, because at
-    // this point the tiles have not arrived and neither has the drop's clock.
+    // there.
+    //
+    // It POLLS, briefly, and that is not laziness. The pin may not be drawn
+    // until there is a building under it, and "there is a building" becomes true
+    // between frames rather than in a callback — see `drawn`. The orbit checks
+    // the same thing on the frame it is already drawing; this path has no frames
+    // of its own, so it borrows a few and stops as soon as it has an answer.
     if (prefersStill()) {
-      const settle = () => {
+      const settle = (landed) => stage.deck?.setProps({
+        viewState: { ...view, bearing: 35 },
+        layers: [...stage.base, ...pin(landed ? SETTLED_MS : null)],
+      });
+      const wait = () => {
+        if (dead || stage.owner !== token) return;
+        if (busy.isConnected && drawn()) reveal();
+        if (!(roofReady && drawn())) { frame = requestAnimationFrame(wait); return; }
         // Landed, so the fall's length changes nothing on screen — but the
         // trail's spacing is solved from it, and a zero is a division by zero.
-        if (roof && !fall.drop) fall = measureDrop(35);
-        stage.deck?.setProps({
-          viewState: { ...view, bearing: 35 },
-          layers: [...stage.base, ...pin(roofReady ? SETTLED_MS : null)],
-        });
+        if (roof) fall = measureDrop(35);
+        settle(true);
       };
-      const ready = stage.onReady;
-      stage.onReady = () => { ready(); settle(); };
-      settle();
+      settle(false);
+      frame = requestAnimationFrame(wait);
       return;
     }
 
@@ -910,10 +937,24 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
       // ORBIT_MS whether the tab is rendering at 120fps or dropping frames
       // decoding tiles — which is exactly when this is running.
       const bearing = (((now - start) / ORBIT_MS) * 360) % 360;
-      // Nothing falls onto a building that is not on screen yet. Held until the
-      // roof's tile has content AND nothing has loaded for QUIET_MS, which is
-      // what "the picture has stopped changing" looks like from here.
-      if (!dropAt && roofReady && now - stage.lastLoad > QUIET_MS) {
+      // Nothing falls onto a building that is not on screen yet — and nothing
+      // waits once one is. This used to hold for a further 300 ms of silence
+      // from the tileset, on the reasoning that a tile reporting content is not
+      // yet a tile on screen. Photographed, the building was up at 133 ms and
+      // the pin did not move until 435: the whole of that gap was the wait,
+      // spent looking at a finished picture with nothing happening in it.
+      //
+      // What made it safe to drop is `showsSubject`, which did not exist when
+      // the wait was written: readiness now means a tile at 8.5 m of geometric
+      // error whose box CONTAINS the roof, rather than any tile anywhere with
+      // content. The fall covers the rest — the pin needs DROP_MS to arrive,
+      // which is a further 220 ms of cover for a roof still being uploaded.
+      // Two different moments, and they are worth separating. The spinner goes
+      // the instant there is ANY geometry, because watching a coarse roof sharpen
+      // is a better wait than watching a ring turn. The pin waits for the roof's
+      // own tile on top of that, because it is about to stand on it.
+      if (busy.isConnected && drawn()) reveal();
+      if (!dropAt && roofReady && drawn()) {
         dropAt = now;
         if (roof) fall = measureDrop(bearing);
       }

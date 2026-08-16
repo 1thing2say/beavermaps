@@ -304,19 +304,37 @@ export const MIN_SPAN_M = 130;
  * appear to work". A boundary you cannot see is indistinguishable from one that
  * is not there.
  *
- * 0.28 puts the square at 0.56 spans, a bit over half the frame's width, so it
- * closes on all four sides and the grid surrounds it. The building itself is
- * 1/2.6 of a span across by construction (see `framing`), so the square is
- * about 1.5x the footprint in every direction — enough for the forecourt, the
- * planting and the paths leading up to a building, which is what makes the shot
- * read as a place rather than as a model on a turntable.
+ * 0.24 puts the square at 0.48 spans, so the grid still surrounds it and the
+ * building is about a third of the frame. IT IS THE DIAGONAL THAT HAS TO FIT,
+ * which is what makes the ceiling lower than it looks: the camera goes all the
+ * way round, so for half of every orbit a CORNER of the square is pointing at
+ * it, and the width to accommodate is 1.41 spans of side. 0.48 puts that
+ * diagonal at 0.68 of the frame. Photographed at 0.28 — a 0.56 square, a 0.79
+ * diagonal — the perimeter ran off the left and right edges of the Parking
+ * Garage's shot at most bearings and stopped being a boundary at all.
+ *
+ * IT WAS 0.2, WHICH IS NOT WHAT THIS COMMENT SAID, and the prose was right where
+ * the number was not: at 0.2 the square is 0.4 spans and sits in the middle of
+ * the picture with a wide skirt of empty grid all round it, which reads as a
+ * model on a turntable — the exact thing described above as the failure.
+ * Measured over a full orbit of the Parking Garage, the share of the box that
+ * was bare grid went from 31.5% at 0.2 to 20.6% here: a third less margin, and
+ * still a fifth of the picture, which is what keeps the boundary a boundary.
+ *
+ * WHAT IT DOES NOT CHANGE is how much ground is inside the square. `reach` is
+ * `required` for any building the span is not clamped for, and `required` is a
+ * function of the footprint and BOX_MARGIN alone — so raising this pulls the
+ * CAMERA in rather than pushing the boundary out. Same square, less frame around
+ * it: 0.4 of the width to 0.56, and the building from a quarter of the frame to
+ * about a third. Where the span IS clamped, at the MIN_SPAN_M floor, the square
+ * does grow — a small building gets 73 m of ground across instead of 52.
  *
  * The far plane follows from this too and gets tighter with it, so a smaller
- * square is also less loaded: see `farPlaneFor` in src/flyover-view.js. Nothing
+ * span is also less loaded: see `farPlaneFor` in src/flyover-view.js. Nothing
  * here is scale-dependent — every term is a multiple of the span — so one value
  * holds from Adaptive PE at 173 m2 to the Parking Garage at 8,629.
  */
-const BOX_REACH = 0.2;
+const BOX_REACH = 0.24;
 
 /**
  * How much ground the square holds around the building, in half-extents.

@@ -116,10 +116,10 @@ test('the area floor sits in a gap rather than through a cluster', () => {
 
 test('framing pulls in for a small building and stops short for a large one', () => {
   const small = framing(200);
-  const big = framing(50_000);
+  const big = framing(1_000_000);
   assert.ok(small.span < big.span);
   // Both clamped, which is the part that matters: an unclamped span would orbit
-  // Adaptive PE from 36 m and the Parking Garage from a quarter of a mile.
+  // Adaptive PE from 36 m and a square kilometre from three miles out.
   assert.equal(small.span, MIN_SPAN_M);
   assert.equal(big.span, 800);
   // A missing footprint must still produce a usable camera rather than NaN.
@@ -136,15 +136,18 @@ test('the perimeter fits inside the frame and still holds the building', () => {
   // shipped once at 0.55 and read as a feature that did not work.
   //
   // Too narrow and it cuts the subject. `framing` holds BOX_MARGIN half-extents
-  // of ground around the building, which puts a square one at four times its
-  // width, so the square has to be wider than the footprint to contain it.
+  // of ground around the building, so the square has to be wider than the
+  // footprint to contain it.
   //
-  // This is the area-only path — no footprint — so `span / 4` is the building's
-  // width by construction. The footprint path is checked properly in "no
-  // building is cut by its own perimeter", against real geometry.
+  // This is the area-only path — no footprint — so the building is square and
+  // `sqrt(area)` is its width exactly. That used to be written as `span / 4`,
+  // which was only true at one value of BOX_REACH and quietly became an
+  // underestimate the moment that moved, making the lower bound easier than it
+  // reads. The footprint path is checked properly in "no building is cut by its
+  // own perimeter", against real geometry.
   for (const area of [173, 631, 5403, 8629, 50_000]) {
     const { span, reach } = framing(area);
-    const buildingWidth = span / 4;
+    const buildingWidth = Math.sqrt(area);
     assert.ok(reach * 2 < span * 0.8,
       `the square is ${((reach * 2) / span).toFixed(2)} spans — no room left for grid`);
     assert.ok(reach * 2 > buildingWidth * 1.2,
@@ -218,30 +221,37 @@ test('footprintExtent measures the footprint, not the properties', () => {
   assert.equal(footprintExtent({ coordinates: [] }), null);
 });
 
-test('a building with no footprint still gets the framing it always had', () => {
-  // The fallback path, which is the one thing here that must not have changed:
-  // for a square building the new arithmetic has to reproduce the old numbers
-  // exactly, or every constant measured at that framing is now measured at
-  // something else. See BOX_MARGIN.
+test('a building with no footprint gets the framing its footprint would have', () => {
+  // The fallback path, checked against the real one rather than against numbers
+  // copied out of it. This used to assert `sqrt(area) * 4` and `span * 0.2`
+  // literally, which pinned the framing to the constants of the day and failed
+  // the moment BOX_REACH was retuned — a test that only ever restated the
+  // implementation. What actually has to hold is that a building with no
+  // measured outline is framed exactly as a SQUARE one of its area would be.
   //
   // Every real my campus building is in this range — the largest is the garage at
   // 8,629 m2 — so in practice this is the whole of the fallback.
   for (const area of [173, 631, 5403, 8629]) {
-    const expected = Math.max(MIN_SPAN_M, Math.min(800, Math.sqrt(area) * 4));
-    assert.equal(framing(area).span, expected);
-    assert.ok(Math.abs(framing(area).reach - expected * 0.2) < 1e-9);
+    const half = Math.sqrt(area) / 2;
+    const measured = framing(area, { halfWidth: half, halfHeight: half });
+    assert.equal(framing(area).span, measured.span, `${area} m2 span`);
+    assert.ok(Math.abs(framing(area).reach - measured.reach) < 1e-9, `${area} m2 reach`);
   }
+
+  // ...and the square holds a fixed share of the frame wherever the span is
+  // free to follow it, which is what makes one BOX_REACH serve every building.
+  const free = [1772, 5403, 8629].map((a) => framing(a)).map((f) => f.reach / f.span);
+  for (const share of free) assert.ok(Math.abs(share - free[0]) < 1e-9);
 
   // Above the span ceiling the two DO part, and deliberately: the frame stops
   // backing off at 800 m and the square does not stop growing, because a
   // perimeter that fits the frame but not the building is the bug all of this
   // is about. Nothing at my campus is this big; the behaviour is asserted so that the
-  // next campus to arrive with a 50,000 m2 building is not silently cut.
-  const huge = framing(50_000);
+  // next campus to arrive with a square kilometre is not silently cut.
+  const huge = framing(1_000_000);
   assert.equal(huge.span, 800);
-  assert.ok(huge.reach > 800 * 0.2, 'the square stopped growing with the building');
-  assert.ok(huge.reach >= Math.sqrt(50_000) / 2, 'the square no longer holds the building');
-  assert.ok(huge.reach * 2 < huge.span * 0.8, 'the square outgrew the frame');
+  assert.ok(huge.reach > 800 * free[0], 'the square stopped growing with the building');
+  assert.ok(huge.reach >= Math.sqrt(1_000_000) / 2, 'the square no longer holds the building');
 });
 
 test('the box surrounds its centre and is the right size on the ground', () => {

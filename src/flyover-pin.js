@@ -110,34 +110,6 @@ const CLEAR_PINS = 0.08;
 const MIN_DROP_PINS = 1;
 
 /**
- * How long the tileset has to go quiet — no tile arriving — before the pin is
- * allowed to fall.
- *
- * A SIGNAL RATHER THAN A DELAY, and the two earlier attempts are why. A tile
- * reporting `contentAvailable` is not a tile on screen: Tile3DLayer is a
- * composite and still has to build a ScenegraphLayer for it and upload the
- * glTF. So the first version dropped the pin onto bare grid and the building
- * faded up underneath it a moment later.
- *
- * Tightening the level-of-detail threshold did not fix it — READY_ERROR_M went
- * from 16 m to 8.5 in src/flyover-view.js and the gap barely moved, because the
- * lag is in the renderer rather than in the tiles. Nor did a fixed 450 ms wait,
- * and the reason is the interesting one: the gap is not a constant. The Library
- * is drawn about half a second after its roof tile lands and the Parking Garage
- * about 1.6 s, because the garage is 118 m long, is framed at a 472 m span, and
- * needs several times as many tiles to cover. Any single number is either too
- * short for the garage or a stall on everything else.
- *
- * What both cases have in common is that the picture is complete when tiles
- * STOP ARRIVING. 300 ms of silence is longer than the gap between tiles within
- * one burst and shorter than anyone waits, and it needs no per-building
- * knowledge at all. A building whose tiles are entirely in the cache loads
- * nothing, so it is quiet from the start and the pin falls immediately, which is
- * also right.
- */
-export const QUIET_MS = 300;
-
-/**
  * The shutter, in the sense a camera means it: how far back in TIME the trail
  * reaches, and how many samples of it are drawn.
  *
