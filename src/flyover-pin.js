@@ -39,8 +39,17 @@ import {
 // another is a picture of two different campuses.
 import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
 
-/** How long the fall takes, in ms. */
-export const DROP_MS = 420;
+/**
+ * How long the fall takes, in ms.
+ *
+ * Not the whole animation and not what anyone is watching either: the pin waits
+ * ABOVE the top of the window and only the last half of this happens on camera.
+ * At the framing this app uses that is 158 ms of visible fall, which is nine
+ * frames at 60fps with a six-sample trail smearing between them. Shorter and the
+ * trail is doing all the work; longer and a marker that is only answering "which
+ * building" has started asking to be watched.
+ */
+export const DROP_MS = 300;
 
 /**
  * How much of the fall already happened before the first frame, as a multiple of
@@ -147,9 +156,14 @@ const shutterMs = (drop, px) => (TRAIL_PINS * px * DROP_MS) / (LANDING_SPEED * d
  *
  * A falling object that simply stops has no weight. A decaying sine gives the
  * whole gesture in one expression: the pin arrives at full height, compresses
- * over the next sixty milliseconds, springs back PAST full height, and rings
- * down through two or three smaller swings — which is what separates something
- * springy from something being resized.
+ * over the next forty-five milliseconds, springs back PAST full height, and
+ * rings down through two or three smaller swings — which is what separates
+ * something springy from something being resized.
+ *
+ * The decay is held at HALF the swing, which is the ratio that fixes the shape:
+ * scale both and the bounce is the same gesture at a different speed, which is
+ * how this was sped up without re-tuning it. The amplitude went the other way —
+ * a briefer squash is caught by fewer frames, so it has to be deeper to land.
  *
  * A SINE RATHER THAN A COSINE, which is the difference between a bounce and a
  * flicker and was found by photographing it. A cosine is at its deepest
@@ -169,9 +183,9 @@ const shutterMs = (drop, px) => (TRAIL_PINS * px * DROP_MS) / (LANDING_SPEED * d
  * half second after every landing. The pin gets shorter and springs back, which
  * is the read; it gets narrower at the same time, which nobody watches for.
  */
-const BOUNCE = 0.34;
-const BOUNCE_MS = 260;
-const BOUNCE_DECAY = 130;
+const BOUNCE = 0.38;
+const BOUNCE_MS = 180;
+const BOUNCE_DECAY = 90;
 
 /**
  * How tall the pin stands at `ms`, as a fraction of its drawn height.

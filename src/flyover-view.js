@@ -855,8 +855,8 @@ export function createFlyover({ key, centre, span, pitch, reach, box, name, roof
     // How far the pin has to fall to start off camera, in CSS pixels, worked
     // out ONCE from where the roof actually projects — not per frame. The orbit
     // moves the roof around the picture, so a per-frame answer would change the
-    // fall's length while the pin was in the middle of it; over the 420 ms this
-    // takes the camera turns under five degrees, which moves the roof by a few
+    // fall's length while the pin was in the middle of it; over the 300 ms this
+    // takes the camera turns under four degrees, which moves the roof by a few
     // pixels of a fall that is a couple of hundred.
     // `clear` goes with it: what CLEAR_M of altitude is worth in pixels here, so
     // the pin can be anchored that far above the roof for the depth test and put
