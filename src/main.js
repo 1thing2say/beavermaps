@@ -2729,6 +2729,28 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return campusDirectory.features.find((f) => f.properties?.name === name)?.geometry ?? null;
   }
 
+  /**
+   * A directory row by name, for a tap that landed on a NAME rather than on a
+   * building.
+   *
+   * `buildingAt` asks what footprint is under the pointer, which is the right
+   * question for a tap on a building and the wrong one for a tap on its label.
+   * my campus's cartographer sets a `plate` where a name will not fit inside the shape
+   * it belongs to — Portable Village's sits in the yard beside it, Environmental
+   * Resources' out on the path — so the pixel under the word is frequently not
+   * the building, and seven of the nine plates on this campus are directory rows
+   * whose names tapped to nothing at all: a pin lifted, no card, no flyover.
+   *
+   * So the name is asked as well. It is a WEAKER question and is only ever the
+   * fallback, because two things can be under one pointer and only one of them
+   * can be the thing you touched. But a label carrying a building's exact name
+   * is that building however far the word has drifted from it.
+   */
+  function directoryRow(name) {
+    if (!campusDirectory || !name) return null;
+    return campusDirectory.features.find((f) => f.properties?.name === name)?.properties ?? null;
+  }
+
   function showBuildingCard(raw) {
     // Vector tiles hand nested properties back as JSON strings.
     const props = { ...raw };
@@ -4942,7 +4964,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // without the small one and the existing card path runs underneath.
     const pin = pinAt(e.point);
     if (pin) {
-      const named = pin.text ? buildingAt(e.point) : null;
+      const named = pin.text ? (buildingAt(e.point) ?? directoryRow(pin.text)) : null;
       selectPin(pin, { card: !named });
       if (named) showBuildingCard(named);
       return;
