@@ -237,8 +237,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // has something to be put back to. See src/lighting.js.
   let lightingBench = null;
   let debugOpen = false;
-  /** Whether a selected pin trails a ghost of itself. Debug menu only. */
-  let pinBlur = false;
+  /**
+   * Which motion blur a selected pin gets — `off`, `ghost` or `smear`. Debug
+   * menu only, and see DEBUG_CHOICES for what each one means.
+   */
+  let pinBlur = 'off';
   let benchLights = null;
   let benchTilt = false;
   // Whether there is a style under us to configure at all.
@@ -1895,7 +1898,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // One flag per ghost, for the same reason: a ghost stops writing `icon-size`
     // once its own copy of the growth is over, which is what keeps five extra
     // symbol layers from re-laying out for the 780 ms of pure sway.
-    const trailing = pinBlur && addPinGhosts();
+    // Only the trail. The other method is an SVG filter on a DOM element, and
+    // these pins are not one — they are symbols rasterised into Mapbox's own GL
+    // canvas, which nothing on this side of the API can put a filter on. So
+    // `smear` leaves the arriving pins alone rather than approximating itself.
+    const trailing = pinBlur === 'ghost' && addPinGhosts();
     const ghostGrowing = GHOST_PIN_LAYERS.map(() => true);
 
     // WHAT THIS TRAIL CANNOT DO, measured rather than assumed, because the
@@ -4288,10 +4295,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   function applyDebug({ open, routing, gps, blur }) {
-    // Read by the next selection rather than applied to the current one: the
-    // trail is made of animations that start when the pin is mounted, and there
-    // is nothing sensible to do to a pin that is already standing still.
-    pinBlur = open && blur;
+    // Read by the next selection rather than applied to the current one: both
+    // methods are built when the pin is mounted, and there is nothing sensible
+    // to do to a pin that is already standing still.
+    pinBlur = open ? blur : 'off';
 
     // The gate the lighting bench is read through. Set before anything else
     // here, so applyLighting sees the new state whichever path reaches it.
@@ -4343,6 +4350,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     switches: {
       routing: document.getElementById('debug-routing'),
       gps: document.getElementById('debug-gps'),
+    },
+    choices: {
       blur: document.getElementById('debug-blur'),
     },
     onChange: applyDebug,

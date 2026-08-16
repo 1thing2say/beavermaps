@@ -585,6 +585,16 @@
        than as speed, and the pin's own shadow is still down there. */
     filter: none;
 }
+
+/* The other method's plumbing: an empty SVG whose only job is to hold a
+   <filter> somewhere `url(#id)` can find it. Zero-sized and taken out of flow so
+   a definition cannot become a layout. It lives inside the marker rather than in
+   the page so it is removed when the marker is. See SMEAR_MS in pin-select.js. */
+.pin-selected-filter {
+    position: absolute;
+    width: 0;
+    height: 0;
+}
 .pin-selected-dot {
     position: absolute;
     left: 50%;
@@ -2804,6 +2814,22 @@ body.simulating .nav-sign::after {
 }
 
 .g-seg[aria-checked="true"]:not(:hover) {
+    background: color-mix(in srgb, var(--g-blue) 12%, transparent);
+}
+
+/* Same reasoning as the switches above: the panel disables its controls when it
+   is closed, and a segment that still shows which one is chosen while saying it
+   cannot be pressed is the honest way to sit there. */
+.g-seg:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.g-seg:disabled:hover {
+    background: transparent;
+}
+
+.g-seg[aria-checked="true"]:disabled:hover {
     background: color-mix(in srgb, var(--g-blue) 12%, transparent);
 }
 

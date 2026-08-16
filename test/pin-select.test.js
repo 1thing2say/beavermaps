@@ -15,7 +15,9 @@ import {
   LABEL_START_SCALE, LABEL_RISE, LABEL_INK_DELAY, LABEL_INK_SPAN, SYMBOL_FADE_MS,
   swayAt, swayKeyframes, SWAY_AMP, SWAY_DECAY_MS, SWAY_PERIOD_MS, SWAY_DELAY_MS,
   SWAY_MS, SWAY_DIR, SWAY_STEP_MS, cubicBezier, growEase, scaleStops,
+  GHOSTS, GHOST_LAG_MS, SMEAR_MS, SMEAR_SIGMA, SMEAR_MAX,
 } from '../src/pin-select.js';
+import { DEBUG_CHOICES } from '../src/debug.js';
 import {
   PIN_BASE_W, PIN_BOX, PIN_RING, PIN_ASPECT, LIFT_RING, LIFT_ASPECT, LIFT_DOT, LIFT_HEAD,
   AMENITY_KINDS, pinColour, glyphInk, pinInk, restingSvg, liftedSvg,
@@ -355,6 +357,47 @@ test('the sway is wrapped around the head, not applied to it', () => {
   assert.doesNotMatch(sway[1], /transform:/, 'the sway transform comes from the keyframes');
   assert.ok(scale, '.pin-selected-scale has gone');
   assert.doesNotMatch(scale[1], /animation:/, 'the sway has landed on the growing element');
+});
+
+test('both motion blurs integrate the same window', () => {
+  // The point of having two is that they are two TECHNIQUES. Handing one a
+  // longer exposure than the other would make the comparison about the exposure
+  // instead, so the smear's window is derived from the trail's rather than
+  // chosen — this is the assertion that keeps it derived.
+  assert.equal(SMEAR_MS, GHOSTS * GHOST_LAG_MS);
+  assert.equal(SMEAR_MS, 150);
+});
+
+test('the smear sigma is the one that matches a shutter', () => {
+  // A shutter open across the window smears a point evenly over the distance it
+  // travelled: a box of length L, whose variance is L^2/12. The Gaussian that
+  // matches it has that variance too, so sigma = L/sqrt(12) = L/(2*sqrt 3).
+  // Anything else here is a look rather than a model.
+  for (const L of [1, 7.13, 19.9, 55]) {
+    assert.ok(Math.abs(SMEAR_SIGMA * L - Math.sqrt((L * L) / 12)) < 1e-12,
+      `sigma for a ${L}px smear is not the box's own deviation`);
+  }
+  // And the cap is a fraction of the marker, not a pixel count, so it still
+  // means the same thing if the marker is ever resized.
+  assert.ok(SMEAR_MAX > 0 && SMEAR_MAX < 1, 'the cap has stopped being a fraction');
+});
+
+test('the debug panel offers exactly the methods that exist', () => {
+  // The values live in debug.js and the labels live in the markup, which is two
+  // places for one list. A segment offering a method nothing implements would
+  // sit there doing nothing, and a method with no segment would be unreachable.
+  const html = readFileSync(path.join(root, 'index.html'), 'utf8');
+  const row = /id="debug-blur"[\s\S]*?<\/div>/.exec(html);
+  assert.ok(row, 'the motion blur row has gone from index.html');
+  const offered = [...row[0].matchAll(/data-choice="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(offered, DEBUG_CHOICES.blur.values);
+  // First value is the off state by convention — a closed panel and a malformed
+  // store both land on it, so it had better be the one that does nothing.
+  assert.equal(DEBUG_CHOICES.blur.values[0], 'off');
+  // And the boolean this shipped as still has to mean something, or somebody's
+  // stored `true` silently turns the trail off.
+  assert.ok(DEBUG_CHOICES.blur.values.includes(DEBUG_CHOICES.blur.legacy));
+  assert.notEqual(DEBUG_CHOICES.blur.legacy, 'off');
 });
 
 test('the bezier solver agrees with the browser that runs the other copy', () => {

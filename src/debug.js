@@ -35,15 +35,39 @@
 const STORAGE_KEY = 'mapper-debug';
 
 /** The lies, and what each says when it is on. */
-export const DEBUG_FLAGS = ['routing', 'gps', 'blur'];
+export const DEBUG_FLAGS = ['routing', 'gps'];
 
-const CLOSED = { open: false, routing: false, gps: false, blur: false };
+/**
+ * The settings that are a CHOICE rather than a switch.
+ *
+ * A switch asks whether to do a thing; these ask WHICH WAY to do it, and the
+ * difference is not cosmetic — a bench for comparing two techniques has to be
+ * able to say "that one" and not only "on". The first value is the off state by
+ * convention, so a malformed store and a closed panel land in the same place.
+ *
+ * `legacy` is what a stored `true` becomes, because `blur` shipped as a switch
+ * before it was a choice and somebody's localStorage still holds the boolean.
+ * Dropping it would silently turn the trail off for anyone who had it on, which
+ * is the one thing a rename is not allowed to do.
+ */
+export const DEBUG_CHOICES = {
+  blur: { values: ['off', 'ghost', 'smear'], legacy: 'ghost' },
+};
+
+const CLOSED = {
+  open: false,
+  ...Object.fromEntries(DEBUG_FLAGS.map((flag) => [flag, false])),
+  ...Object.fromEntries(
+    Object.entries(DEBUG_CHOICES).map(([name, choice]) => [name, choice.values[0]]),
+  ),
+};
 
 /**
  * What was stored, sanitised.
  *
- * Every field is read as a boolean rather than trusted, because this key is
- * hand-editable and a malformed one should open the app, not break it.
+ * Every field is read as a boolean — or as one of a known set — rather than
+ * trusted, because this key is hand-editable and a malformed one should open the
+ * app, not break it.
  */
 function stored() {
   try {
@@ -51,6 +75,12 @@ function stored() {
     if (!saved || typeof saved !== 'object') return { ...CLOSED };
     const state = { open: saved.open === true };
     for (const flag of DEBUG_FLAGS) state[flag] = saved[flag] === true;
+    for (const [name, choice] of Object.entries(DEBUG_CHOICES)) {
+      const was = saved[name];
+      if (choice.values.includes(was)) state[name] = was;
+      else if (was === true) state[name] = choice.legacy;
+      else state[name] = choice.values[0];
+    }
     return state;
   } catch {
     return { ...CLOSED };
@@ -81,19 +111,25 @@ function isChord(event) {
 /**
  * Wire up the debug menu.
  *
- * `panel` is the card, `close` its dismiss button, and `switches` maps each
- * flag name to its checkbox. `onChange` is handed the whole state on every
- * change including the first, so the caller applies one function to one object
- * and never has to work out which field moved.
+ * `panel` is the card, `close` its dismiss button, `switches` maps each flag
+ * name to its checkbox, and `choices` maps each choice name to the radiogroup
+ * that offers it — a group of buttons carrying `data-choice`, read out of the
+ * markup rather than built here, so the labels live next to the rest of the
+ * panel. `onChange` is handed the whole state on every change including the
+ * first, so the caller applies one function to one object and never has to work
+ * out which field moved.
  *
  * Opened by `?debug`, by `#debug`, or by Ctrl/Cmd+Shift+D — three ways in
  * because the two URL forms cost a line each and the chord is the one you use
  * when the app is already loaded. It is remembered across reloads, which it has
  * to be: half of what this panel is for is checking that a setting survives one.
  */
-export function createDebugMenu({ panel, close, switches, onChange }) {
+export function createDebugMenu({ panel, close, switches, choices = {}, onChange }) {
   const state = stored();
   if (urlAsks()) state.open = true;
+
+  /** The buttons of one radiogroup, as an array. */
+  const optionsOf = (group) => [...group.querySelectorAll('[data-choice]')];
 
   function publish({ persist = true } = {}) {
     panel.classList.toggle('hidden', !state.open);
@@ -103,6 +139,12 @@ export function createDebugMenu({ panel, close, switches, onChange }) {
       // The switches only mean anything while the panel is up, and a disabled
       // control that still shows its position is the honest way to say so.
       input.disabled = !state.open;
+    }
+    for (const [name, group] of Object.entries(choices)) {
+      for (const button of optionsOf(group)) {
+        button.setAttribute('aria-checked', String(button.dataset.choice === state[name]));
+        button.disabled = !state.open;
+      }
     }
     if (persist) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     // A copy, not the object. The caller reads flags out of this on every
@@ -120,6 +162,17 @@ export function createDebugMenu({ panel, close, switches, onChange }) {
   for (const [flag, input] of Object.entries(switches)) {
     input.addEventListener('change', () => {
       state[flag] = input.checked;
+      publish();
+    });
+  }
+
+  // Delegated to the group rather than bound per button, so a segment added to
+  // the markup is wired by being in the markup.
+  for (const [name, group] of Object.entries(choices)) {
+    group.addEventListener('click', (event) => {
+      const button = event.target.closest?.('[data-choice]');
+      if (!button || button.disabled) return;
+      state[name] = button.dataset.choice;
       publish();
     });
   }
