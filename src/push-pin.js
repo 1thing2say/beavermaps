@@ -1,124 +1,197 @@
-// A dropped pin, drawn as vector from a screenshot of one.
+// A push pin, drawn as vector from a photograph of one.
 //
-// The map's own markers live in `map-images.js` — a flat disc at rest, a
-// teardrop when selected — and this is the third member of that family rather
-// than a stranger to it: the pin that STANDS on a surface, a ball on a needle,
-// for the aerial view where a flat sticker lying on a roof would read as part of
-// the photograph instead of as something placed on top of it.
+// THIS IS THE DRAWING THE FLYOVER USES, and it has been swapped once. It was
+// briefly a recreation of the dropped pin in Apple's LocationAwareness
+// screenshot — a flat #fa392f disc with a hard white sticker on it and a three
+// pixel grey needle, which is a UI marker and reads as one. This is the other
+// answer: a lit, glossy, physical object photographed under a real light. Both
+// were measured the same way; they are drawings of different things, and which
+// one belongs on a photorealistic roof is a taste rather than a fact. The Apple
+// one is recoverable from git if the taste changes back.
 //
-// EVERY NUMBER BELOW IS MEASURED, off Apple's own location_and_maps_intro_2x at
-// 640x1136. The pin there is a ball of radius 13.0 px centred at (319.0, 532.2)
-// standing on a foot whose last row is y=591, so the source's scale is a ball
-// radius of 13 px and every ratio here is expressed in those radii.
+// Not the map's marker. `map-images.js` owns that — a flat disc at rest and a
+// teardrop when selected, both measured off Apple Maps — and this is a
+// different object in a different language: a lit, glossy, physical thing with a
+// steel needle. It is here for the places a PICTURE of a pin is wanted rather
+// than a map marker: an empty state, a header, the illustration beside "press
+// and hold to drop a pin". Putting it on the map beside the discs would be two
+// marker vocabularies on one canvas.
 //
-// WHAT THE MEASUREMENT ACTUALLY SAID, and it is not what a from-memory drawing
-// would have produced:
+// EVERY NUMBER BELOW IS MEASURED, off closeup-shot-single-red-push-pin at
+// 740x740. The photo is a 175 px ball centred at (387.5, 278) with a needle to a
+// point at (381.5, 570), so the source's own scale is a ball radius of 87.5 px
+// and every ratio here is expressed in those radii. Sampling was done on a
+// background test of "nearly white and nearly neutral", which drops the white
+// and the light grey of the file's transparency checkerboard together — the
+// checkerboard is a viewer artifact, not part of the subject, and nothing of it
+// reaches this drawing. The alpha here is real alpha.
 //
-//   the ball is FLAT   Not shaded, not a sphere. The horizontal profile across
-//                      the widest row reads 250,57,47 at every one of the 25
-//                      pixels between its antialiased edges, and the vertical
-//                      profile moves from 249 to 251 over the whole ball. There
-//                      is no rim, no terminator and no falloff — it is one
-//                      colour, #fa392f, with a hard white dot on it.
-//   the dot is HARD    #fafafa, six pixels across, centred (-4.5, -4.7) from the
-//                      ball's centre. Its pixels are 250,250,250 right up to the
-//                      red. Blurring it is the usual mistake; it is a sticker,
-//                      not a specular highlight.
-//   the needle is LIT  Three pixels wide. The two edges are #a5a7a9 for the
-//                      whole length, and the middle column runs #bebfc1 at the
-//                      top to #a6a8ab at the bottom — a highlight down the front
-//                      of a cylinder that fades as it goes into shadow.
+// THE SHADING IS A FITTED PROFILE, not an impression of one. Median colour was
+// taken in rings of constant distance from the specular highlight, over every
+// pixel inside 0.985r, and it falls off cleanly and monotonically from white at
+// the highlight to #ba2330 at the far rim. That profile is what BODY_STOPS is:
+// a radial gradient centred on the highlight reproduces it by construction,
+// which is why the body needs no hand-tuning and no second guess.
 //
-// The foot is the one simplification: at source scale it is a 5x3 blob that is
-// darkest at its shoulders (#484745) with the needle's lit core still showing
-// between them, which is a cone tip seen side on. It is drawn as a plain dark
-// ellipse, because that detail is a third of a pixel at every size this is used
-// at and a rounded foot is what it reads as anyway.
+// Two things that profile cannot carry, both real and both measured separately:
 //
-// The drop shadow is NOT copied, and it is the only part of this that is not a
-// measurement. Apple's sits down and to the RIGHT of the ball — a fixed light,
-// which is what a UI on a screen has. This pin is drawn as a BILLBOARD in an
-// orbiting aerial view, so any offset baked into it points a different compass
-// direction every second of the orbit, and the cast shadow it would be
-// disagreeing with — `pinShadowSvg`, laid flat on the roof by
-// src/flyover-pin.js — has a real sun behind it and does not.
+//   the Fresnel rim   Median by radius from the BALL's centre is flat at
+//                     #d2030f out to 0.56r and then climbs — #d91427 at 0.84,
+//                     #db3840 at 0.92, #de5357 at 0.96. That is an edge lift at
+//                     every angle, and a gradient centred on the highlight
+//                     cannot produce one because the near rim and the far rim
+//                     are at completely different distances from it.
+//   the terminator    The lift is not equal at every angle. On the ring at
+//                     0.94r it runs #f75b60 at the lit right and #b1383b at the
+//                     shaded lower left. A concentric rim alone lifts the shaded
+//                     side by about 28 levels too much, so a soft dark crescent
+//                     sits over the anti-light quarter and pulls it back.
 //
-// So this one is kept concentric and faint: it is contact and separation, the
-// darkening that stops a bright ball dissolving into bright imagery, and it
-// deliberately states no light direction at all. The cast shadow states it.
+// The needle is chrome, which means it is DARK IN THE MIDDLE and bright at the
+// lit edge — it reflects the camera and the ground, not a diffuse surface. The
+// cross section at mid length reads #65615a #8e877d #524c42 #aba39b #c8c4bd
+// left to right, and drawing it as a plain grey rod is the single thing that
+// makes a vector pin look like a drawing of one.
 
-/** Hue of the screenshot's pin, so a recolour knows what it is rotating from. */
-const SOURCE_HUE = 3;
+/** Hue of the photographed pin, so a recolour knows what it is rotating from. */
+const SOURCE_HUE = 356;
 
 /**
  * The ball's radius, and the only number the drawing scales from.
  *
  * 12 puts the ball on the same 24-unit grid the amenity pictograms are authored
- * on. That is not needed for anything — nothing shares a layer with these — but
- * a second grid in the same app is a second set of ratios to hold in your head.
+ * on and the whole pin in a 26-wide box, which is `PIN.w` in map-images.js. That
+ * is not needed for anything — nothing shares a layer with these — but a second
+ * grid in the same app is a second set of ratios to hold in your head.
  */
 const R = 12;
+/** Room around the ball, so the rim's antialiasing is not clipped by the box. */
+const PAD = 1;
 
-/** Where the pin stands, in ball radii below the ball's centre. */
-const TIP_DROP = 4.523;
-/** Half the needle's width, in ball radii: 1.5 px of the source's 13. */
-const NEEDLE_HALF = 0.115;
-/** The foot, in ball radii: centre below the ball, then its two half-axes. */
-const FOOT = { y: 4.400, rx: 0.200, ry: 0.123 };
+/** Where the needle comes to a point, in ball radii below the ball's centre. */
+const TIP_DROP = 3.337;
+/** Half the needle's width, and the length of its point, in ball radii. */
+const NEEDLE_HALF = 0.0686;
+const NEEDLE_TAPER = 0.251;
 
 /**
- * The white dot, in ball radii. Centre offset, then radius.
+ * The specular highlight: centre in ball radii, then its own radius.
  *
- * Measured as a bounding box rather than a centroid, because it has no falloff
- * to take a centroid of: x 312..317, y 525..530 against a ball centred at
- * (319.0, 532.2), which is (-0.346, -0.362) at a radius of 0.223.
+ * Found by centroid of the pixels inside 0.93r above a brightness floor, which
+ * is stable across every floor from 120 to 245 — (+0.44, -0.29) either way. The
+ * hard white core is 0.115r; it carries a rose halo out to about 0.20r, and that
+ * halo is in BODY_STOPS rather than here.
  */
-const DOT = { x: -0.346, y: -0.362, r: 0.223 };
+const SPEC = { x: 0.440, y: -0.286, r: 0.115 };
 
 /**
- * The ball's own shadow: centre below the ball, radius, and peak opacity — all
- * in ball radii except the last.
+ * How far the body gradient reaches, in ball radii.
  *
- * Invented rather than measured, and the only part of this drawing that is. See
- * the header: Apple's is offset to the right and this one cannot be, because the
- * cast shadow on the roof is directly underneath and the two have to agree about
- * the light. What survives from the source is the softness and the strength.
+ * The specular sits 0.525r off centre, so the far rim is 1.525r from it. This is
+ * the denominator every offset in BODY_STOPS was divided by, and changing it
+ * without re-deriving them slides the whole profile.
  */
-const BALL_SHADE = { y: 0.34, r: 1.18, alpha: 0.20 };
-
-/** Room around the drawing, in ball radii, so antialiasing is not clipped. */
-const PAD = 0.06;
-/** Half the box, in ball radii. The ball's shadow is the widest thing in it. */
-const HALF_W = BALL_SHADE.r + PAD;
+const BODY_REACH = 1.525;
 
 /**
- * The needle in cross section, left edge to core to right edge.
+ * The measured falloff, offset -> colour.
  *
- * Three pixels at source scale, so this is less a fitted profile than the three
- * numbers themselves. It is drawn as a gradient anyway because this pin is also
- * used at illustration sizes, where three flat bands would band.
+ * Median of every pixel at that distance from the highlight. The first three
+ * stops are the highlight's own halo, which is why the body already looks lit
+ * before the specular is drawn on top of it.
+ *
+ * It stops at #ba2330 rather than at the #bb585c the rings actually reach,
+ * because those last two rings ARE the far rim and the rim is a layer of its
+ * own. Leaving them in would light the shaded edge twice.
+ */
+const BODY_STOPS = [
+  [0.000, '#fbfdfe'],
+  [0.066, '#fbfaf7'],
+  [0.098, '#f54859'],
+  [0.131, '#f0041c'],
+  [0.197, '#ea0214'],
+  [0.295, '#e60313'],
+  [0.393, '#e10415'],
+  [0.492, '#d8051f'],
+  [0.590, '#cd041f'],
+  [0.689, '#c20520'],
+  [0.787, '#bd0f25'],
+  [0.885, '#ba2330'],
+  [1.000, '#ba2330'],
+];
+
+/**
+ * The Fresnel rim: offset from the BALL's centre -> colour and opacity.
+ *
+ * Fitted against the by-radius medians rather than picked. At 0.96r the median
+ * is #de5357 over a body of about #cf0620, and #ee868c at 0.55 lands on #e04d5b
+ * — within a couple of levels on every channel. Transparent until 0.80 so the
+ * fitted body owns everything inside it.
+ */
+const RIM_STOPS = [
+  [0.80, '#e0454e', 0],
+  [0.90, '#e5686e', 0.32],
+  [0.96, '#ee868c', 0.55],
+  [1.00, '#f5a8ac', 0.72],
+];
+
+/**
+ * The terminator crescent, which is the rim's correction and nothing else.
+ *
+ * Centred a ball radius beyond the shaded rim along the anti-light direction, so
+ * it is strongest where the rim over-lifts and has fallen to nothing by the time
+ * it reaches the middle. Without it the pin reads as lit from everywhere at
+ * once, which is the look of a vector sphere rather than a photographed one.
+ */
+const SHADE = { at: 1.30, r: 1.05, colour: '#7d1520', alpha: 0.42 };
+
+/**
+ * The needle in cross section, left edge to right edge, at mid length.
+ *
+ * Chrome, so the order is the point: a middling left edge, a bright band at a
+ * quarter, the DARK reflection just left of centre, and the lit right side. Read
+ * off the row at source y=450, which is clear of both the ball's shadow and the
+ * point.
  */
 const NEEDLE_STOPS = [
-  [0.00, '#a5a7a9'],
-  [0.50, '#bebfc1'],
-  [1.00, '#a5a7a9'],
+  [0.00, '#65615a'],
+  [0.09, '#747069'],
+  [0.18, '#8b847a'],
+  [0.27, '#8e877d'],
+  [0.36, '#7b7569'],
+  [0.45, '#5b5549'],
+  [0.55, '#524c42'],
+  [0.64, '#7e786e'],
+  [0.73, '#aba39b'],
+  [0.82, '#b7afa7'],
+  [0.91, '#c0b8b2'],
+  [1.00, '#bdb5af'],
 ];
 
 /**
  * What happens to that cross section down the needle's length.
  *
- * The core fades to the edge colour and the edges do not move, so one gradient
- * in the edge's own colour — transparent at the collar, opaque at the foot —
- * carries the whole effect. Linear, because the measured core is: 190 at the
- * ball and 166 at the foot, with every row in between on the line.
+ * Almost nothing, which took a second pass to find out. Row medians run #81,
+ * #90, #8b, #85, #89, #88, #93 from source y=400 to 545 — a shaft that is
+ * essentially uniform over its whole visible length. The first version of this
+ * table ramped it dark-to-light end to end and was wrong for most of the needle.
+ *
+ * What is real is at the two ends. Under the ball the shaft is in its contact
+ * shadow and carries the ball's own colour bounced into it, #5f1e26 at the
+ * collar and a near-black #5a3e3a a couple of millimetres down; at the point it
+ * lifts to about #a89f95. Two effects in one gradient, which works because the
+ * stops between them are fully transparent and so contribute no colour of their
+ * own. Alphas solved against the #8b847a the cross section already supplies.
  */
-const NEEDLE_FADE = [
-  [0.00, '#a5a7a9', 0],
-  [1.00, '#a5a7a9', 1],
+const NEEDLE_LENGTH_STOPS = [
+  [0.000, '#4a0d14', 0.80],
+  [0.071, '#3a1a18', 0.60],
+  [0.167, '#3a1a18', 0.08],
+  [0.400, '#8b847a', 0],
+  [0.860, '#e8e2d8', 0],
+  [0.952, '#e8e2d8', 0.31],
+  [1.000, '#e8e2d8', 0.40],
 ];
-
-/** The foot, at its darkest measured pixel. */
-const FOOT_COLOUR = '#484745';
 
 /**
  * The cast shadow's falloff: a penumbra, not a disc with a blur on it.
@@ -163,41 +236,59 @@ const n = (v) => Number(v.toFixed(3));
 /**
  * The drawing's box and the landmarks in it, for anything that has to place it.
  *
- * `tipY` is the one that matters: the pin marks a place with its FOOT, so a
- * caller anchoring it to a coordinate wants that there. It is NOT the bottom of
- * the box — there is a sliver of padding under it for the foot's antialiasing —
- * so anchoring to the box bottom stands every pin off its roof by that much.
+ * `tipY` is the one that matters: the pin marks a place with its POINT, so a
+ * caller anchoring it to a coordinate wants the tip there, and the tip is at the
+ * very bottom of the box rather than at the middle of a dot the way the map's
+ * lifted marker is.
  */
 export const PUSH_PIN = {
-  w: n(HALF_W * 2 * R),
-  h: n((1 + PAD + TIP_DROP + PAD) * R),
-  cx: n(HALF_W * R),
-  cy: n((1 + PAD) * R),
+  w: R * 2 + PAD * 2,
+  h: n(R + PAD + TIP_DROP * R),
+  cx: R + PAD,
+  cy: R + PAD,
   r: R,
-  tipY: n((1 + PAD + TIP_DROP) * R),
+  tipY: n(R + PAD + TIP_DROP * R),
 };
 PUSH_PIN.aspect = n(PUSH_PIN.h / PUSH_PIN.w);
-/** Where the foot sits in the box, as a fraction of its height. */
+/**
+ * Where the point sits in the box, as a fraction of its height.
+ *
+ * One, here, because this drawing's tip IS the bottom of its box — but it is
+ * exported rather than assumed, because the caller that anchors an icon to it
+ * (src/flyover-pin.js) must not care which drawing it was handed. A pin with a
+ * sliver of padding under its point would otherwise stand off its roof by that
+ * much, silently.
+ */
 PUSH_PIN.anchor = n(PUSH_PIN.tipY / PUSH_PIN.h);
 /**
- * How high the BALL rides above the foot, as a fraction of the pin's height.
+ * How high the BALL rides above the point, as a fraction of the pin's height.
  *
  * For anything working out where the pin's shadow falls: the ball is the only
  * part of this with enough mass to cast one, and under a light that is not
- * directly overhead a shadow's distance from the foot is its caster's height
+ * directly overhead a shadow's distance from the point is its caster's height
  * times the light's own slope.
  */
 PUSH_PIN.ride = n((PUSH_PIN.tipY - PUSH_PIN.cy) / PUSH_PIN.h);
 
-/** The colour the screenshot's own pin is, for callers that want it named. */
-export const PUSH_PIN_RED = '#fa392f';
+/** The colour the photograph's own pin is, for callers that want it named. */
+export const PUSH_PIN_RED = '#e60313';
+
+/**
+ * The source leans 1.18 degrees: its tip sits 6 px left of the ball's centre
+ * over a 292 px needle, consistently, on every row sampled. It is drawn upright
+ * anyway, because a pin whose tip is not under its own centre makes every caller
+ * do arithmetic to put the point on a coordinate. Anyone who wants the
+ * photograph's exact attitude can rotate the whole thing about the tip:
+ * `transform="rotate(-1.18 13 53.044)"`.
+ */
+export const SOURCE_LEAN_DEG = 1.18;
 
 // --- colour ------------------------------------------------------------------
 //
 // The pin recolours by rotating hue and leaving lightness and saturation exactly
-// as measured, so a green one is the same object under the same light rather
-// than a second drawing. Neutrals rotate to themselves, so the white dot and the
-// grey needle need no special case.
+// as measured, so a green one is the same photograph of the same object under
+// the same light rather than a second drawing. Neutrals rotate to themselves, so
+// the white highlight and the steel needle need no special case.
 
 function toHsl(hex) {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
@@ -227,9 +318,9 @@ function toHex([h, s, l]) {
 }
 
 /**
- * Spin a measured colour from the screenshot's hue onto another one.
+ * Spin a measured colour from the photograph's hue onto another one.
  *
- * No hue at all means "leave this alone", which is what the needle asks for: a
+ * No hue at all means "leave this alone", which is what the steel asks for: a
  * green pin still has a grey needle, and rotating a near-neutral is a rounding
  * error rather than a no-op.
  */
@@ -245,6 +336,26 @@ const stops = (list, hue) => list
   .map(([offset, colour, opacity]) => `<stop offset="${offset}" stop-color="${spin(colour, hue)}"`
     + `${opacity === undefined ? '' : ` stop-opacity="${opacity}"`}/>`)
   .join('');
+
+/** The silhouette of the needle: a parallel shaft that comes to a point. */
+function needlePath() {
+  const { cx, cy, h } = PUSH_PIN;
+  const half = NEEDLE_HALF * R;
+  const taper = NEEDLE_TAPER * R;
+  const shoulder = n(h - taper);
+  // A quadratic rather than a straight bevel. The photograph's point is convex —
+  // 7 px wide where a straight taper would be 5.5 — because it is a cone seen
+  // side on, and a straight one reads as a wedge at any size worth drawing.
+  const belly = n(h - taper * 0.35);
+  return [
+    `M${n(cx - half)} ${cy}`,
+    `L${n(cx - half)} ${shoulder}`,
+    `Q${n(cx - half * 0.62)} ${belly} ${cx} ${n(h)}`,
+    `Q${n(cx + half * 0.62)} ${belly} ${n(cx + half)} ${shoulder}`,
+    `L${n(cx + half)} ${cy}`,
+    'Z',
+  ].join(' ');
+}
 
 /**
  * The pin, as an SVG string.
@@ -265,11 +376,15 @@ export function pushPinSvg({ colour = PUSH_PIN_RED, id = 'pp', title = '', heigh
   const box = height
     ? ` width="${n(height / PUSH_PIN.aspect)}" height="${n(height)}"`
     : ' width="100%" height="100%"';
-  const half = n(NEEDLE_HALF * r);
-  const foot = { y: n(cy + FOOT.y * r), rx: n(FOOT.rx * r), ry: n(FOOT.ry * r) };
-  // The needle runs from the ball's CENTRE, not from its underside, so the join
-  // has no seam to hide: the shaft simply goes up behind the ball and stops.
-  const collar = n(cy + r);
+  // Where the needle leaves the ball, which is where its own shading starts.
+  const collar = cy + r;
+  const spec = { x: n(cx + SPEC.x * r), y: n(cy + SPEC.y * r) };
+  // The shaded quarter sits opposite the highlight, at the same angle.
+  const away = Math.hypot(SPEC.x, SPEC.y);
+  const shade = {
+    x: n(cx - (SPEC.x / away) * SHADE.at * r),
+    y: n(cy - (SPEC.y / away) * SHADE.at * r),
+  };
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"`,
@@ -277,41 +392,44 @@ export function pushPinSvg({ colour = PUSH_PIN_RED, id = 'pp', title = '', heigh
     title ? `<title>${title}</title>` : '',
 
     '<defs>',
+    `<radialGradient id="${id}-body" gradientUnits="userSpaceOnUse"`,
+    ` cx="${spec.x}" cy="${spec.y}" r="${n(BODY_REACH * r)}">`,
+    stops(BODY_STOPS, hue),
+    '</radialGradient>',
+
+    `<radialGradient id="${id}-rim" gradientUnits="userSpaceOnUse"`,
+    ` cx="${cx}" cy="${cy}" r="${r}">`,
+    stops(RIM_STOPS, hue),
+    '</radialGradient>',
+
     `<radialGradient id="${id}-shade" gradientUnits="userSpaceOnUse"`,
-    ` cx="${cx}" cy="${n(cy + BALL_SHADE.y * r)}" r="${n(BALL_SHADE.r * r)}">`,
-    `<stop offset="0" stop-color="#000000" stop-opacity="${BALL_SHADE.alpha}"/>`,
-    `<stop offset="0.50" stop-color="#000000" stop-opacity="${n(BALL_SHADE.alpha * 0.62)}"/>`,
-    '<stop offset="1" stop-color="#000000" stop-opacity="0"/>',
+    ` cx="${shade.x}" cy="${shade.y}" r="${n(SHADE.r * r)}">`,
+    `<stop offset="0" stop-color="${spin(SHADE.colour, hue)}" stop-opacity="${SHADE.alpha}"/>`,
+    `<stop offset="1" stop-color="${spin(SHADE.colour, hue)}" stop-opacity="0"/>`,
     '</radialGradient>',
 
     `<linearGradient id="${id}-steel" gradientUnits="userSpaceOnUse"`,
-    ` x1="${n(cx - half)}" y1="0" x2="${n(cx + half)}" y2="0">`,
+    ` x1="${n(cx - NEEDLE_HALF * r)}" y1="0" x2="${n(cx + NEEDLE_HALF * r)}" y2="0">`,
     stops(NEEDLE_STOPS),
     '</linearGradient>',
 
-    `<linearGradient id="${id}-fade" gradientUnits="userSpaceOnUse"`,
-    ` x1="0" y1="${collar}" x2="0" y2="${foot.y}">`,
-    stops(NEEDLE_FADE),
+    `<linearGradient id="${id}-shaft" gradientUnits="userSpaceOnUse"`,
+    ` x1="0" y1="${collar}" x2="0" y2="${n(h)}">`,
+    stops(NEEDLE_LENGTH_STOPS),
     '</linearGradient>',
     '</defs>',
 
-    // Behind everything, including the needle: it is the ball's shadow on
-    // whatever is under the pin, not a darkening of the pin's own parts.
-    `<circle cx="${cx}" cy="${n(cy + BALL_SHADE.y * r)}" r="${n(BALL_SHADE.r * r)}"`,
-    ` fill="url(#${id}-shade)"/>`,
+    // The needle first and the ball over it, so the join needs no seam: the
+    // shaft simply runs up behind the ball to its centre and is covered.
+    `<g><path d="${needlePath()}" fill="url(#${id}-steel)"/>`,
+    `<path d="${needlePath()}" fill="url(#${id}-shaft)"/></g>`,
 
-    `<g><rect x="${n(cx - half)}" y="${cy}" width="${n(half * 2)}"`,
-    ` height="${n(foot.y - cy)}" fill="url(#${id}-steel)"/>`,
-    `<rect x="${n(cx - half)}" y="${cy}" width="${n(half * 2)}"`,
-    ` height="${n(foot.y - cy)}" fill="url(#${id}-fade)"/></g>`,
-
-    `<ellipse cx="${cx}" cy="${foot.y}" rx="${foot.rx}" ry="${foot.ry}"`,
-    ` fill="${FOOT_COLOUR}"/>`,
-
-    // Flat, and that is the measurement rather than a shortcut. See the header.
-    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${spin(PUSH_PIN_RED, hue)}"/>`,
-    `<circle cx="${n(cx + DOT.x * r)}" cy="${n(cy + DOT.y * r)}" r="${n(DOT.r * r)}"`,
-    ' fill="#fafafa"/>',
+    // Rim before crescent, not after. The crescent exists to say the rim does
+    // not happen on the shaded side, and a rim painted over it says it does —
+    // that order left the far edge 24 levels light against the photograph.
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${id}-body)"/>`,
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${id}-rim)"/>`,
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${id}-shade)"/>`,
     '</svg>',
   ].join('');
 }

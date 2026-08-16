@@ -485,12 +485,13 @@ test('the pin starts off camera and spends most of the fall on it', () => {
   assert.ok(pinHeight(height, 60) < pinHeight(height), 'a short sky did not shrink the pin');
 });
 
-test('the push pin marks a place with its foot', () => {
-  // The foot is NOT the bottom of the box — there is a sliver of padding under
-  // it so its antialiasing is not clipped — so anchoring the icon to the box
-  // stands every pin on the campus off its roof by that much. The anchor has to
-  // come from the drawing's own measurement of where its foot is.
-  assert.ok(PUSH_PIN.tipY < PUSH_PIN.h);
+test('the push pin marks a place with its point', () => {
+  // WHERE THE POINT IS, ASKED RATHER THAN ASSUMED. This drawing puts its tip at
+  // the very bottom of its box and the one before it left a sliver of padding
+  // under it, so an icon anchored blindly to the box is right for one and stands
+  // every pin on the campus off its roof for the other. The contract is the
+  // fraction, not the number — this survives the next swap too.
+  assert.ok(PUSH_PIN.tipY > 0 && PUSH_PIN.tipY <= PUSH_PIN.h);
   assert.equal(PUSH_PIN.anchor, Number((PUSH_PIN.tipY / PUSH_PIN.h).toFixed(3)));
   const icon = pinIcon(PUSH_PIN_RED, 40);
   assert.ok(Math.abs(icon.anchorY / icon.height - PUSH_PIN.anchor) < 1e-9,
@@ -561,15 +562,14 @@ test('the pin takes the landing on its legs', () => {
   assert.equal(bounced(SETTLED_MS * 10), 1);
 });
 
-test('recolouring the pin spins the hue and leaves the needle alone', () => {
+test('recolouring the pin spins the hue and leaves the steel alone', () => {
   const red = pushPinSvg({ colour: PUSH_PIN_RED });
   const green = pushPinSvg({ colour: '#1e8e3e' });
   assert.notEqual(red, green);
-  // The needle is measured grey and must not follow the ball: a green pin with
-  // a green spike is a drawing of a different object. Same for the white dot,
-  // which is a sticker on the ball rather than a highlight of its colour.
-  for (const neutral of ['#a5a7a9', '#bebfc1', '#484745', '#fafafa']) {
-    assert.ok(green.includes(neutral), `the needle lost ${neutral} when recoloured`);
+  // The needle is measured chrome and must not follow the ball: a green pin with
+  // a green spike is a drawing of a different object.
+  for (const steel of ['#65615a', '#524c42', '#bdb5af']) {
+    assert.ok(green.includes(steel), `the needle lost ${steel} when recoloured`);
   }
   // ...while the ball did move.
   assert.ok(!green.includes(PUSH_PIN_RED));
