@@ -34,7 +34,7 @@ import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
 import { createSkinControl, preferredSkin, applySkinAttribute } from './skin.js';
 import { googleGround } from './google-tiles.js';
-import { canFlyOver, framing, footprintExtent, roofOf } from './flyover.js';
+import { canFlyOver, framing, footprintExtent, roofOf, massOf } from './flyover.js';
 import { createFlyover } from './flyover-view.js';
 import { spin } from './spinner.js';
 import { paintIcons } from './g-icons.js';
@@ -2771,6 +2771,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           // at: `centre` is the middle of the footprint, on the ground, and a
           // pin dropped on that goes through the building.
           roof: roofOf(props.name),
+          // The building's own traced outline and the two planes it stands
+          // between, for the cage. Google's tiles are one mesh with no building
+          // in them to outline, so this is the only geometry that knows where
+          // this building stops and the one touching it starts.
+          footprint: footprintOf(props.name),
+          mass: massOf(props.name),
         });
       })()
       : null;

@@ -245,6 +245,30 @@ const PIN_MAX_PX = 110;
 const HEADROOM = 0.9;
 
 /**
+ * The word beside the pin, and how it is placed and timed.
+ *
+ * "HERE" RATHER THAN THE BUILDING'S NAME, which is the difference between
+ * useful and redundant. The card's own title is forty pixels above this picture
+ * in type twice the size, so a label repeating it says nothing the viewer has
+ * not just read. "Here" says something else entirely — it is deictic, it points,
+ * and pointing is exactly what is wanted when two roofs meet in the frame with
+ * no line between them.
+ *
+ * It arrives AFTER the landing rather than falling with the pin. A word tumbling
+ * out of the sky is a second moving object competing with the one that is
+ * carrying the meaning, and the trail is what makes that fall read at all. So it
+ * fades up over the squash, which is also when the eye has arrived at the pin.
+ *
+ * Placed beside the ball rather than under it, in pixels, because the pin is a
+ * billboard and so is this: they are the two parts of one screen-space object
+ * and neither should turn with the orbit.
+ */
+const LABEL = 'Here';
+const LABEL_AT = 0.62;
+const LABEL_SIZE = 0.30;
+const LABEL_FADE_MS = 260;
+
+/**
  * The cast shadow: the shortest and longest it may reach in pin heights of
  * ground, how quickly height fades it, and how dark it is at contact.
  *
@@ -449,7 +473,7 @@ export const pinShadowIcon = () => (shadowIcon ??= {
  * @param {string}  [options.colour]
  */
 export function pinLayers(
-  { IconLayer },
+  { IconLayer, TextLayer },
   { roof, drop, clear, px, span, width, height, ms, colour = PUSH_PIN_RED },
 ) {
   const icon = pinIcon(colour, px);
@@ -513,6 +537,34 @@ export function pinLayers(
   // measures true, which is also the unit `reach` was worked out in.
   const cast = [roof[0], roof[1], roof[2] + SHADOW_CLEAR_M];
 
+  // The word, once the pin is down and only then. Sized and placed off the pin's
+  // CURRENT height, so it rides the squash with the ball rather than hanging
+  // still beside a pin that is moving.
+  const said = Math.max(0, Math.min(1, (ms - DROP_MS) / LABEL_FADE_MS));
+  const ball = px * squashed(ms) * PUSH_PIN.ride;
+  const label = said > 0 && TextLayer ? [new TextLayer({
+    id: 'flyover-pin-label',
+    data: [roof],
+    getPosition: (d) => d,
+    getText: () => LABEL,
+    getSize: Math.round(px * LABEL_SIZE),
+    sizeUnits: 'pixels',
+    getPixelOffset: [Math.round(px * LABEL_AT), Math.round(clear - ball)],
+    getColor: [255, 255, 255, Math.round(255 * said)],
+    // A pill in the pin's own colour, so the two read as one object rather than
+    // as a marker with a caption near it. White on red survives any imagery
+    // underneath, which plain text with an outline does not.
+    background: true,
+    getBackgroundColor: [...colourRgb(colour), Math.round(235 * said)],
+    backgroundPadding: [6, 3, 6, 3],
+    getBorderWidth: 0,
+    getTextAnchor: 'start',
+    getAlignmentBaseline: 'center',
+    fontWeight: 700,
+    parameters: { depthCompare: 'always', depthWriteEnabled: false },
+    updateTriggers: { getPixelOffset: ms, getColor: said, getBackgroundColor: said, getSize: px },
+  })] : [];
+
   return [
     new IconLayer({
       id: 'flyover-pin-shadow',
@@ -560,5 +612,11 @@ export function pinLayers(
       parameters: { depthCompare: 'less-equal', depthWriteEnabled: false },
       updateTriggers: { getPixelOffset: ms, getSize: ms, getIcon: icon.id },
     }),
+    ...label,
   ];
+}
+
+/** '#rrggbb' to the triple deck.gl wants. */
+function colourRgb(hex) {
+  return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 }

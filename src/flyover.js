@@ -155,11 +155,6 @@ export function tierOf({ name, poi, labelKind, area_m2: area } = {}) {
   // so this needs no name rule and no class.
   if (labelKind === 'area') return FLYOVER_TIER.FLAT;
 
-  // The name overrides every piece of evidence below it, which is what makes
-  // "Baseball and Softball Field" come out right: it is a directory row with a
-  // real traced footprint, and it is still a field.
-  if (name && GROUND_NAME.test(name.trim())) return FLYOVER_TIER.FLAT;
-
   // Then, in order of how much the evidence is worth.
   //
   // A FOOTPRINT IN THE DIRECTORY is the strongest thing this map knows, and it
@@ -179,6 +174,22 @@ export function tierOf({ name, poi, labelKind, area_m2: area } = {}) {
   // structures — `building` is a name on a footprint and `plate` is a name
   // plate — and neither is ever put on open ground.
   if (labelKind === 'building' || labelKind === 'plate') return FLYOVER_TIER.SOLID;
+
+  // THE NAME, and it is far weaker evidence than it used to be. It sat above
+  // everything, on the reasoning that "Baseball and Softball Field" is a
+  // directory row with a real traced footprint and is still a field. That was
+  // one judgment applied to every case, and the cases disagree: the same rule
+  // refused the Pool, which is a printed building name on my campus's own sheet with
+  // a structure under it, and the field itself turns out to be 4.5 m of built
+  // thing rather than lawn — measured, in src/roofs.json, by the same script
+  // that put a roof under every other building here.
+  //
+  // So a traced footprint and a printed building name now both outrank it, and
+  // what is left below is what it was always for: something tapped with no
+  // footprint, no label kind and only a disc class behind it, where "Lawn" is
+  // all anybody knows. my campus's five AREA names are caught further up and never
+  // reach this.
+  if (name && GROUND_NAME.test(name.trim())) return FLYOVER_TIER.FLAT;
 
   // A CLASS is the weakest, and it is all that is left for something tapped
   // with no footprint and no label kind behind it. `parking` is FLAT here for
@@ -210,6 +221,22 @@ export const canFlyOver = (thing) => tierOf(thing) >= FLYOVER_TIER.SOLID;
  */
 const ROOFS = new Map(roofs.buildings.map((row) => [row.name, row.centre]));
 export const roofOf = (name) => (name ? ROOFS.get(name.trim()) ?? null : null);
+
+/**
+ * How high a building stands and what it stands on, in metres of the same
+ * datum — for anything that has to draw the building's own VOLUME rather than
+ * a point on top of it.
+ *
+ * Both measured by scripts/build-roofs.mjs off Google's leaf tiles: the roof is
+ * the median of the highest mesh sample in each 3 m cell inside the footprint,
+ * and the ground is the median of the lowest sample per cell in the collar
+ * outside it. Taking both from there rather than deriving the base from the
+ * roof is what makes a cage drawn on this land on the same two planes the
+ * imagery does — a ground guessed at z=0 would float the cage a metre or four
+ * above or below the terrain it is supposed to be standing in.
+ */
+const MASS = new Map(roofs.buildings.map((row) => [row.name, { ground: row.ground_m, roof: row.roof_m }]));
+export const massOf = (name) => (name ? MASS.get(name.trim()) ?? null : null);
 
 /**
  * How wide a piece of ground the camera should hold in frame, in metres.

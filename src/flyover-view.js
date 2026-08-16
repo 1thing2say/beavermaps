@@ -53,6 +53,8 @@ import { M_PER_DEG_LAT, M_PER_DEG_LON, campusBox } from './flyover.js';
 import {
   pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS,
 } from './flyover-pin.js';
+import { cageLayers } from './flyover-cage.js';
+import { PUSH_PIN_RED } from './push-pin.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
@@ -257,6 +259,8 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   Tiles3DLoader: tiles.Tiles3DLoader,
   LineLayer: layers.LineLayer,
   IconLayer: layers.IconLayer,
+  PathLayer: layers.PathLayer,
+  TextLayer: layers.TextLayer,
 })).catch((error) => {
   // Not cached on failure, so a flyover opened on a dropped connection can be
   // retried by closing the card and opening it again.
@@ -264,6 +268,9 @@ const loadToolkit = () => (toolkit ??= Promise.all([
   throw error;
 }));
 
+
+/** '#rrggbb' to the triple deck.gl wants, so the cage and the pin share one red. */
+const rgbOf = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 
 /** Asked each time, so a preference changed mid-session takes effect at once. */
 const prefersStill = () => Boolean(
@@ -699,7 +706,9 @@ function buildStage(tools, view) {
  * @param {number[]} [options.roof]   [lon, lat, z] the pin drops onto; see roofOf.
  * @returns {{ el: HTMLElement, destroy: () => void }}
  */
-export function createFlyover({ key, centre, span, pitch, maxTileSpan, bounds, name, roof }) {
+export function createFlyover({
+  key, centre, span, pitch, maxTileSpan, bounds, name, roof, footprint, mass,
+}) {
   /** Identity for this card's claim on the shared canvas. */
   const token = {};
 
@@ -824,7 +833,14 @@ export function createFlyover({ key, centre, span, pitch, maxTileSpan, bounds, n
     stage.maxTileSpan = maxTileSpan ?? 0;
     stage.bounds = bounds ? campusBox(bounds) : null;
     stage.roof = roof ?? null;
-    stage.base = [makeGrid(tools, centre, span), makeLayer(tools, key)];
+    // The cage sits between the ground and the tiles in the list and above both
+    // on screen: its x-ray pass has the depth test off, so list order is what
+    // puts it over the imagery rather than under it.
+    stage.base = [
+      makeGrid(tools, centre, span),
+      makeLayer(tools, key),
+      ...cageLayers(tools, { footprint, mass, colour: rgbOf(PUSH_PIN_RED) }),
+    ];
 
     if (!stage.deck) {
       try {

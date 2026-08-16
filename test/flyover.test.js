@@ -26,6 +26,7 @@ import {
 import {
   pushPinSvg, pinShadowSvg, SHADOW_BOX, PUSH_PIN, PUSH_PIN_RED,
 } from '../src/push-pin.js';
+import { cageLayers } from '../src/flyover-cage.js';
 import { poiFor } from '../src/poi.js';
 
 const buildings = load('directory').features;
@@ -42,9 +43,12 @@ test('the tiers are ordered, so >= SOLID means what it reads as', () => {
 
 test('every directory building is classified, and only the known cases are refused', () => {
   const refused = directory.filter((row) => !canFlyOver(asCard(row))).map((row) => row.name);
-  // If this list grows, a real building stopped getting an aerial view.
+  // If this list grows, a real building stopped getting an aerial view. It used
+  // to hold "Baseball and Softball Field" as well, refused on the word its name
+  // ends with — and src/roofs.json measured 4.5 m of built structure standing
+  // there, so the name was wrong about it and a traced footprint now outranks
+  // one. Only bad imagery refuses a directory row today.
   assert.deepEqual(refused.sort(), [
-    'Baseball and Softball Field',      // a field, by name
     'Career Technical Education (CTE)', // stale imagery, see STALE_IMAGERY
   ]);
 });
@@ -93,11 +97,23 @@ test('a pool is refused however it is classified', () => {
   assert.equal(tierOf({ name: 'Gym', poi: 'sport', area_m2: 5403 }), FLYOVER_TIER.SOLID);
 });
 
-test('the last word decides, so a Field House is a building and a Field is not', () => {
-  assert.equal(tierOf({ name: 'Field House', poi: 'sport', area_m2: 2000 }), FLYOVER_TIER.SOLID);
-  assert.equal(tierOf({ name: 'Track and Field Center', poi: 'sport', area_m2: 2000 }),
-    FLYOVER_TIER.SOLID);
-  assert.equal(tierOf({ name: 'Softball Field', poi: 'sport', area_m2: 2000 }), FLYOVER_TIER.FLAT);
+test('the last word decides, but only where nothing better is known', () => {
+  // The name rule is now the WEAKEST evidence rather than the strongest, so
+  // this is about the case it was left for: something tapped with a disc class
+  // and nothing else — no footprint, no printed label kind.
+  assert.equal(tierOf({ name: 'Field House', poi: 'sport' }), FLYOVER_TIER.SOLID);
+  assert.equal(tierOf({ name: 'Track and Field Center', poi: 'sport' }), FLYOVER_TIER.SOLID);
+  assert.equal(tierOf({ name: 'Softball Field', poi: 'sport' }), FLYOVER_TIER.FLAT);
+
+  // ...and a traced footprint overrules it, which is the change. my campus's own
+  // Baseball and Softball Field is 483 m2 of directory row with 4.5 m of
+  // structure measured on it, and refusing that on the word "Field" was the
+  // rule being confidently wrong about a real building.
+  assert.equal(tierOf({ name: 'Softball Field', poi: 'sport', area_m2: 2000 }), FLYOVER_TIER.SOLID);
+  // As does a name my campus printed on its own sheet as a building.
+  assert.equal(tierOf({ name: 'Pool', labelKind: 'building' }), FLYOVER_TIER.SOLID);
+  // But never an AREA name, which is my campus's own word for a piece of ground.
+  assert.equal(tierOf({ name: 'SOFTBALL FIELD', labelKind: 'area' }), FLYOVER_TIER.FLAT);
 });
 
 test('an amenity is a point and gets nothing', () => {
@@ -176,6 +192,51 @@ test('a building with no footprint gets the framing its footprint would have', (
   assert.equal(huge.span, 800);
   assert.ok(huge.maxTileSpan > 800 * free[0],
     'the coarse-tile limit stopped growing with the building');
+});
+
+test('the cage traces the building and puts its uprights on corners', () => {
+  // A fake PathLayer/LineLayer, because what is worth testing here is the
+  // GEOMETRY handed to deck.gl rather than deck.gl.
+  const made = [];
+  const tools = {
+    PathLayer: class { constructor(p) { made.push({ kind: 'path', ...p }); } },
+    LineLayer: class { constructor(p) { made.push({ kind: 'line', ...p }); } },
+  };
+  const library = buildings.find((f) => f.properties.name === 'Library');
+  const mass = { ground: -1.4, roof: 12.8 };
+  cageLayers(tools, { footprint: library.geometry, mass, colour: [230, 3, 19] });
+
+  const rings = made.filter((l) => l.kind === 'path');
+  const posts = made.filter((l) => l.kind === 'line');
+  assert.ok(rings.length === 2, 'the rings are drawn twice: solid, and x-rayed underneath');
+  assert.ok(posts.length === 1, 'the uprights are drawn once, depth-tested');
+
+  // Two rings per footprint part, at the two measured planes and nowhere else —
+  // a cage floating above its own building is the failure this catches, and it
+  // is invisible from any single frame.
+  const heights = new Set(rings[0].data.flatMap((d) => d.path.map((p) => p[2])));
+  assert.deepEqual([...heights].sort((a, b) => a - b), [mass.ground, mass.roof]);
+
+  // UPRIGHTS ON CORNERS, NOT ON VERTICES. The Library's outline is 32 points and
+  // most of them are a jog of half a metre; an upright on each is a picket fence
+  // around a building rather than an outline of one.
+  const verts = library.geometry.coordinates[0][0].length;
+  assert.ok(posts[0].data.length > 3, 'a building with no uprights is not a cage');
+  assert.ok(posts[0].data.length < verts / 2,
+    `${posts[0].data.length} uprights on ${verts} vertices is a fence`);
+  // ...and every one of them is vertical, which is the whole reason they are
+  // LineLayer: PathLayer builds a ribbon in the ground plane and draws nothing
+  // at all for a segment with no horizontal extent.
+  for (const { from, to } of posts[0].data) {
+    assert.deepEqual([from[0], from[1]], [to[0], to[1]]);
+    assert.ok(to[2] > from[2], 'an upright that goes down is upside down');
+  }
+
+  // Nothing to trace is not an error: a place that flies with no directory
+  // footprint behind it — see the Pool — gets a flyover without a cage rather
+  // than a crash or an empty layer that costs a draw call.
+  assert.deepEqual(cageLayers(tools, { footprint: null, mass, colour: [0, 0, 0] }), []);
+  assert.deepEqual(cageLayers(tools, { footprint: library.geometry, mass: null, colour: [0, 0, 0] }), []);
 });
 
 test('the campus box holds the campus, with room for a building on its edge', () => {
