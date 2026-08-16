@@ -429,10 +429,18 @@ test('the pin starts off camera and spends most of the fall on it', () => {
 
   // Off camera at the first frame: the pin's FOOT starts at or above the top
   // edge, which puts everything above it — the whole drawing — out of shot.
-  assert.ok(drop >= ROOF_Y + px,
-    `a ${drop.toFixed(0)} px fall leaves ${(ROOF_Y + px - drop).toFixed(0)} px of pin on screen`);
+  assert.ok(drop >= ROOF_Y,
+    `a ${drop.toFixed(0)} px fall leaves ${(ROOF_Y - drop).toFixed(0)} px of pin on screen`);
 
-  // ...and then most of the drop is spent where it can be seen. The pin's foot
+  // ...and BARELY above it, which is the half of this that was wrong for a
+  // while. A pin extends upward from its foot, so once the foot is at the edge
+  // there is nothing left to hide; asking for a whole extra pin height of
+  // clearance — which the first version did — parks it 74 px higher than it has
+  // to be and turns the first half of the drop into a wait with an empty frame.
+  assert.ok(drop < ROOF_Y + px * 0.25,
+    `the pin waits ${(drop - ROOF_Y).toFixed(0)} px above a frame it only has to clear`);
+
+  // So nearly all of the drop is spent where it can be seen. The pin's foot
   // crosses the top edge when it has fallen to ROOF_Y, so this is the fraction
   // of the animation with some pin in frame.
   let entered = DROP_MS;
@@ -440,15 +448,18 @@ test('the pin starts off camera and spends most of the fall on it', () => {
     if (fallen(ms, drop) < ROOF_Y) { entered = ms; break; }
   }
   const onScreen = 1 - entered / DROP_MS;
-  assert.ok(onScreen > 0.4,
+  assert.ok(onScreen > 0.85,
     `only ${(onScreen * 100).toFixed(0)}% of the fall happens inside the frame`);
 
   // A viewport of nothing must not produce a pin of nothing: the flyover
   // measures its own element, and a card built into a hidden panel measures 0.
   assert.ok(pinHeight(0) > 0);
   assert.ok(pinHeight(4000) < 120, 'the pin grows without limit on a large screen');
-  // A roof already at the top edge would otherwise ask for no fall at all.
-  assert.ok(dropPixels(0, height) > px, 'a high roof gets no drop');
+  // A roof already at the top edge asks for a fall of nearly nothing, and the
+  // floor is what stops that being literally nothing — the trail's spacing is
+  // solved by dividing by it. There is no framing that produces this; it is the
+  // projection's edge case rather than the app's.
+  assert.ok(dropPixels(0, height) >= px, 'a high roof gets no drop at all');
 });
 
 test('the push pin marks a place with its foot', () => {

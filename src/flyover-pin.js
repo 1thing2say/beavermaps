@@ -40,16 +40,21 @@ import {
 import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
 
 /**
- * How long the fall takes, in ms.
+ * How long the fall takes, in ms, and very nearly how long it is WATCHED for.
  *
- * Not the whole animation and not what anyone is watching either: the pin waits
- * ABOVE the top of the window and only the last half of this happens on camera.
- * At the framing this app uses that is 158 ms of visible fall, which is nine
- * frames at 60fps with a six-sample trail smearing between them. Shorter and the
- * trail is doing all the work; longer and a marker that is only answering "which
- * building" has started asking to be watched.
+ * Those used to be different numbers. The pin waits above the top of the window
+ * — see CLEAR_PINS, which used to park it a whole pin height higher than it had
+ * to — and at 300 ms only 158 of them happened on camera; the rest was a wait
+ * with nothing in the frame. Now 94% of the fall is on screen, so 220 ms here
+ * buys 207 ms of visible drop where 300 bought 158: shorter overall and half
+ * again as much to look at.
+ *
+ * That is about twelve frames at 60fps, or four and a half on the software
+ * renderer this was photographed on, with a six-sample trail smearing between
+ * them. Shorter and the trail is doing all the work; longer and a marker that is
+ * only answering "which building" has started asking to be watched.
  */
-export const DROP_MS = 300;
+export const DROP_MS = 220;
 
 /**
  * How much of the fall already happened before the first frame, as a multiple of
@@ -81,21 +86,28 @@ const PRE_FALL = 1;
 const LANDING_SPEED = (2 * (PRE_FALL + 1)) / (1 + 2 * PRE_FALL);
 
 /**
- * How much clearance the pin gets above the top of the window, as a multiple of
- * its own drawn height, and the shortest fall that is still a fall.
+ * How far above the top of the window the pin's FOOT waits, as a multiple of the
+ * pin's drawn height, and the shortest fall that is still a fall.
  *
- * 1 would put the pin exactly at the edge at the first frame: its foot on the
- * top edge, its head just above. That is enough in principle and not in
- * practice, because the first frame is drawn at whatever moment the tileset went
- * quiet and a device pixel ratio can put a half-pixel of ball back on screen.
- * 1.15 is a sixth of a pin of margin and costs 15% of the fall's length.
+ * A SLIVER, and the first version of this was 1.15 — which was a plain mistake
+ * rather than a taste, and one worth leaving written down because it is easy to
+ * make twice. A pin extends UPWARD from its foot, so the foot reaching the top
+ * edge already puts the entire drawing off camera; there is nothing to clear
+ * beyond it. 1.15 therefore parked the pin a whole extra pin height higher than
+ * it needed to be, and at the framing this app uses that is 74 px of a 189 px
+ * fall spent above the picture. Just over half the drop was on screen and the
+ * rest was a wait.
+ *
+ * At 0.08 it is five pixels, which is there for the half-pixel a device pixel
+ * ratio can put back on screen and for nothing else, and 94% of the fall happens
+ * where it can be watched.
  *
  * The floor is for the case the projection can produce and the framing normally
- * does not: a roof that is already at or above the top edge, where "start above
- * it" asks for no fall at all.
+ * does not: a roof at or above the top edge, where "start above it" asks for no
+ * fall at all. One pin height is the least that reads as a drop.
  */
-const CLEAR_PINS = 1.15;
-const MIN_DROP_PINS = 2;
+const CLEAR_PINS = 0.08;
+const MIN_DROP_PINS = 1;
 
 /**
  * How long the tileset has to go quiet — no tile arriving — before the pin is
