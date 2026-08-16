@@ -2762,6 +2762,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         const frame = framing(props.area_m2, extent);
         return createFlyover({
           key: googleKey, centre, name: props.name, ...frame,
+          // The ground the aerial view may draw, which is the same campus the
+          // 2D map is fenced to. Passed rather than restated: this is the walk
+          // network's own extent, and a flyover bounded by a second opinion
+          // about where my campus is would disagree with the map beside it.
+          bounds: CAMPUS_BOUNDS,
           // The ROOF, which is a different point from the one the camera aims
           // at: `centre` is the middle of the footprint, on the ground, and a
           // pin dropped on that goes through the building.

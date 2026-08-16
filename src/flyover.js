@@ -401,6 +401,45 @@ const BOX_MARGIN = 1.8;
 const COARSE_SPANS = 2;
 
 /**
+ * How far past the campus the tiles are allowed to reach, in metres.
+ *
+ * The boundary cannot be the campus exactly, because half the buildings this
+ * flies over are ON it: the Parking Garage is against the track and the
+ * Environmental Resources yard is at the north-east corner, and a shot of a
+ * building framed at 300 m that stops dead at its own back fence is a shot of
+ * half a building. 150 m is about the frame's own half-width at a typical span,
+ * so an edge building still gets a full picture and the campus is still what
+ * bounds it.
+ */
+const CAMPUS_MARGIN_M = 150;
+
+/**
+ * The ground the flyover is allowed to draw, from the campus's own bounds.
+ *
+ * WHY THERE IS A BOUNDARY AT ALL, having just removed one. The square that used
+ * to be here was per BUILDING and it showed: a hard clipped edge a hundred
+ * metres from the subject, with grid outside it. This is per CAMPUS, five to ten
+ * times further out, so it is off camera for every building except the ones on
+ * the edge — and for those it cuts at the campus, which is a boundary that means
+ * something rather than one that means "the renderer stopped here".
+ *
+ * It is not clipped, only unselected. A tile straddling the line is drawn whole
+ * and spills past it, so the edge is ragged at tile granularity — about 60 m on
+ * my campus's leaves — rather than a drawn line. That is the difference between a
+ * picture that ends and a picture with a border on it.
+ *
+ * @param {number[][]} bounds [[west, south], [east, north]], as main.js holds it
+ */
+export function campusBox([[west, south], [east, north]]) {
+  const dLon = CAMPUS_MARGIN_M / M_PER_DEG_LON;
+  const dLat = CAMPUS_MARGIN_M / M_PER_DEG_LAT;
+  return {
+    min: [west - dLon, south - dLat],
+    max: [east + dLon, north + dLat],
+  };
+}
+
+/**
  * Metres per degree at my campus's latitude.
  *
  * Fixed rather than computed per call. The campus is 1 km across and this is

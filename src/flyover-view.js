@@ -49,7 +49,7 @@ import { spinnerOverlay } from './spinner.js';
 // The same scale the box was built with. Imported rather than restated,
 // because a tile measured on one scale against a box built on another is a
 // comparison of two different things that happen to share a unit.
-import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
+import { M_PER_DEG_LAT, M_PER_DEG_LON, campusBox } from './flyover.js';
 import {
   pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS,
 } from './flyover-pin.js';
@@ -75,16 +75,18 @@ const WANT_SKY = 0.4;
 /**
  * One full circle, in ms.
  *
- * 45 seconds rather than 30. A helicopter holding a subject does not hurry, and
- * the faster circle read as a turntable — 12 degrees a second is quick enough
- * that the building's own faces swing past before you have looked at one. At 8
- * a second the shot has time to be a shot.
+ * 90 seconds, which is a drift rather than an orbit: four degrees a second, and
+ * nobody holds a card open long enough to see a quarter of it. That is the
+ * point. A circle you can perceive as a circle is a turntable, and the thing
+ * being looked at stops being a building and starts being an exhibit; slow
+ * enough and the camera reads as holding still while the light moves over the
+ * faces, which is what a helicopter actually looks like.
  *
  * It costs nothing. The orbit is wall-clock rather than per-frame, tiles are
  * requested by what the frustum contains rather than by how fast it moves, and
  * the traversal is the same set of tiles either way — just held longer.
  */
-const ORBIT_MS = 45_000;
+const ORBIT_MS = 90_000;
 
 /**
  * How much detail to ask for, as loaders.gl's screen-space error in pixels.
@@ -163,14 +165,17 @@ const MAX_GPU_MB = 24;
  * viewport frozen on whatever it happened to be holding. Cycling buildings
  * quickly is simply how you get past 48 selected tiles.
  *
- * IT IS NOW THE BINDING CONSTRAINT, where it used to be a backstop. The clip box
- * that bounded what was drawn is gone — see `tooCoarse` — so the fence is the
- * frustum, and the frustum at 68 degrees off nadir holds more ground than a
- * square around one building did. Measured after the change: the traversal
- * selects 65 tiles over the Library and 64 over the Parking Garage, and this
- * keeps 48 of them. That is two to three times what the box allowed, bounded
- * rather than open, and what it gives up is the farthest ground rather than the
- * building — the sort above is what makes that true rather than hoped for.
+ * IT BRIEFLY BECAME THE BINDING CONSTRAINT and is a backstop again, which is
+ * the more comfortable place for it to sit. Removing the per-building clip left
+ * the frustum as the only fence, and at 68 degrees off nadir a frustum holds a
+ * lot: the traversal came back with 65 tiles over the Library where the box had
+ * allowed far fewer, and this was culling 17 of them every frame. Bounding the
+ * ground to the CAMPUS instead — see `offCampus` — takes 14 to 16 off the
+ * selection at the far edge rather than at the near one, which lands both the
+ * Library and the Parking Garage in the low forties and gives this room again.
+ *
+ * The sort is what makes the fallback safe rather than hoped for: what is given
+ * up is always the farthest ground and never the building in the middle.
  */
 const MAX_TILES_DRAWN = 48;
 
@@ -376,6 +381,25 @@ function zoomFor(span, width, latitude) {
  * is a tileset shape this does not know how to read, and losing the picture over
  * one is worse than drawing a little too much of it.
  */
+function offCampus(tile, bounds) {
+  let extent;
+  try {
+    extent = tile.boundingBox;
+  } catch {
+    return false;
+  }
+  if (!extent) return false;
+
+  const [lo, hi] = extent;
+  // Overlap rather than containment, and only in lon/lat. Containment would
+  // reject every tile the campus edge runs through, which is exactly the ground
+  // an edge building is standing on; the vertical axis is left to `tooCoarse`,
+  // because a height bound rejects almost nothing here — every ancestor of a
+  // tile over my campus contains my campus however tall it is.
+  return lo[0] > bounds.max[0] || hi[0] < bounds.min[0]
+    || lo[1] > bounds.max[1] || hi[1] < bounds.min[1];
+}
+
 function tooCoarse(tile, maxTileSpan) {
   let extent;
   try {
@@ -422,6 +446,11 @@ const stage = {
    * be measured against the first one's framing.
    */
   maxTileSpan: 0,
+  /**
+   * The campus, as the ground the tiles may cover. Same reason as above: the
+   * traversal callback outlives every card, so this cannot be closed over.
+   */
+  bounds: null,
   /**
    * The current building's roof point, for the same reason and read by the same
    * callback: it is what "the building has arrived" is tested against.
@@ -557,10 +586,12 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
           // — a flag the traversal set before this callback ran — so a tile
           // merely left out of this array keeps its draw call and is drawn
           // anyway. Clearing the flag is what makes a rejection cost nothing.
-          const maxTileSpan = stage.maxTileSpan;
+          const { maxTileSpan, bounds } = stage;
           const kept = [];
           for (const tile of selected) {
-            if (maxTileSpan && tooCoarse(tile, maxTileSpan)) tile.unselect();
+            const out = (maxTileSpan && tooCoarse(tile, maxTileSpan))
+              || (bounds && offCampus(tile, bounds));
+            if (out) tile.unselect();
             else kept.push(tile);
           }
 
@@ -668,7 +699,7 @@ function buildStage(tools, view) {
  * @param {number[]} [options.roof]   [lon, lat, z] the pin drops onto; see roofOf.
  * @returns {{ el: HTMLElement, destroy: () => void }}
  */
-export function createFlyover({ key, centre, span, pitch, maxTileSpan, name, roof }) {
+export function createFlyover({ key, centre, span, pitch, maxTileSpan, bounds, name, roof }) {
   /** Identity for this card's claim on the shared canvas. */
   const token = {};
 
@@ -728,6 +759,7 @@ export function createFlyover({ key, centre, span, pitch, maxTileSpan, name, roo
       // building nobody is looking at is the sort of thing that shows up as a
       // blank viewport on the NEXT card.
       stage.maxTileSpan = 0;
+      stage.bounds = null;
       stage.roof = null;
       stage.host?.remove();
     }
@@ -790,6 +822,7 @@ export function createFlyover({ key, centre, span, pitch, maxTileSpan, name, roo
     };
 
     stage.maxTileSpan = maxTileSpan ?? 0;
+    stage.bounds = bounds ? campusBox(bounds) : null;
     stage.roof = roof ?? null;
     stage.base = [makeGrid(tools, centre, span), makeLayer(tools, key)];
 

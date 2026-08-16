@@ -17,8 +17,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { load } from './helpers.js';
 import {
-  tierOf, canFlyOver, framing, footprintExtent, FLYOVER_TIER, MIN_AREA_M2, STALE_IMAGERY,
-  M_PER_DEG_LON, MIN_SPAN_M, roofOf,
+  tierOf, canFlyOver, framing, campusBox, footprintExtent, FLYOVER_TIER, MIN_AREA_M2, STALE_IMAGERY,
+  M_PER_DEG_LAT, M_PER_DEG_LON, MIN_SPAN_M, roofOf,
 } from '../src/flyover.js';
 import {
   fallen, squashed, DROP_MS, SETTLED_MS, HOLD_MS, pinHeight, dropPixels, pinIcon, pinShadowIcon,
@@ -176,6 +176,35 @@ test('a building with no footprint gets the framing its footprint would have', (
   assert.equal(huge.span, 800);
   assert.ok(huge.maxTileSpan > 800 * free[0],
     'the coarse-tile limit stopped growing with the building');
+});
+
+test('the campus box holds the campus, with room for a building on its edge', () => {
+  // The walk network's own extent, which is what main.js hands over. Restating
+  // it here would be a second opinion about where my campus is; this checks the
+  // MARGIN, which is the part that is a judgment.
+  const bounds = [[-121.350452, 38.644706], [-121.342319, 38.653606]];
+  const { min, max } = campusBox(bounds);
+
+  // Every corner of the campus is inside, or a building on the edge is bounded
+  // by a box that has already cut the ground it stands on.
+  assert.ok(min[0] < bounds[0][0] && min[1] < bounds[0][1]);
+  assert.ok(max[0] > bounds[1][0] && max[1] > bounds[1][1]);
+
+  // The margin is real ground rather than a rounding error, and it is roughly
+  // square ON THE GROUND — a degree of longitude at my campus is about 0.78 of a
+  // degree of latitude, so a margin that was equal in DEGREES would be visibly
+  // oblong and short on one axis.
+  const east = (min[0] - (bounds[0][0] - 0)) * -M_PER_DEG_LON;
+  const north = (min[1] - (bounds[0][1] - 0)) * -M_PER_DEG_LAT;
+  assert.ok(Math.abs(east - north) < 1, `margin is ${east.toFixed(0)} m by ${north.toFixed(0)} m`);
+  assert.ok(east > 80 && east < 400, `a ${east.toFixed(0)} m margin is not a frame's worth`);
+
+  // ...and it is well OUTSIDE any single building's shot, which is the whole
+  // difference from the per-building square this replaced: that one was drawn
+  // across the picture, this one is off camera for everything but the edge.
+  const widest = Math.max(...[173, 1772, 8629].map((a) => framing(a).span));
+  assert.ok((max[0] - min[0]) * M_PER_DEG_LON > widest,
+    'the campus is narrower than a single flyover frame');
 });
 
 test('the coarse-tile limit rejects a planet-scale slab and keeps the campus', () => {
