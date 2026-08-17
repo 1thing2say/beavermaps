@@ -15,7 +15,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { load } from './helpers.js';
+import { load, root } from './helpers.js';
 import {
   tierOf, canFlyOver, framing, campusBox, footprintExtent, FLYOVER_TIER, MIN_AREA_M2, STALE_IMAGERY,
   M_PER_DEG_LAT, M_PER_DEG_LON, MIN_SPAN_M, roofOf,
@@ -29,6 +29,8 @@ import {
 } from '../src/push-pin.js';
 import { highlightLayers, HIGHLIGHT_MS, HIGHLIGHT_UP_MS } from '../src/flyover-cage.js';
 import { poiFor } from '../src/poi.js';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 const buildings = load('directory').features;
 const directory = buildings.map((f) => f.properties ?? f);
@@ -336,6 +338,26 @@ test('the landing pin gets shorter without getting narrower', () => {
   assert.ok(ids.size <= 14, `${ids.size} distinct icons across the squash is an atlas repack a frame`);
   // And warming is a no-op rather than a throw where there is no Image.
   assert.doesNotThrow(() => warmPinIcons(PUSH_PIN_RED, px));
+});
+
+test('every label alias names a directory row that exists', () => {
+  // my campus's printed sheet and its directory disagree about a few names — the
+  // Health Education Complex is labelled "Health & Ed (HeEd) 710-716" on the
+  // map, because that is what is written on the building. main.js keeps a small
+  // hand-made map between them, and a hand-made map is exactly the thing that
+  // rots when the file it points into is edited.
+  const main = readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
+  const block = /const LABEL_ALIASES = new Map\(\[([\s\S]*?)\]\);/.exec(main);
+  assert.ok(block, 'LABEL_ALIASES has gone from main.js');
+  const pairs = [...block[1].matchAll(/\['([^']+)',\s*'([^']+)'\]/g)];
+  assert.ok(pairs.length > 0, 'the alias table is empty');
+  const names = new Set(buildings.map((f) => f.properties.name));
+  const printed = new Set(labels.map((f) => f.properties.text));
+  for (const [, from, to] of pairs) {
+    assert.ok(printed.has(from), `no label on the map reads "${from}"`);
+    assert.ok(names.has(to), `"${from}" is aliased to "${to}", which is not a directory row`);
+    assert.ok(!names.has(from), `"${from}" is already a directory row and needs no alias`);
+  }
 });
 
 test('the campus box holds the campus, with room for a building on its edge', () => {

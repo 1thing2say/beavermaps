@@ -2938,9 +2938,26 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * can be the thing you touched. But a label carrying a building's exact name
    * is that building however far the word has drifted from it.
    */
+  /**
+   * Labels my campus's sheet spells differently from the directory's own row.
+   *
+   * Not a general fuzzy match, and deliberately not: "Science" and "Science
+   * Success Center" are two buildings, and anything loose enough to join
+   * "Health & Ed" to "Health Education Complex" is loose enough to join those.
+   * Each entry is a decision about one name, made by reading both files.
+   *
+   * The sheet's own wording is kept on the map — it is what is printed on the
+   * building and what somebody standing outside it will be looking for. This
+   * only says which row it is.
+   */
+  const LABEL_ALIASES = new Map([
+    ['Health & Ed (HeEd) 710-716', 'Health Education Complex'],
+  ]);
+
   function directoryRow(name) {
     if (!campusDirectory || !name) return null;
-    return campusDirectory.features.find((f) => f.properties?.name === name)?.properties ?? null;
+    const want = LABEL_ALIASES.get(name.trim()) ?? name;
+    return campusDirectory.features.find((f) => f.properties?.name === want)?.properties ?? null;
   }
 
   function showBuildingCard(raw) {
