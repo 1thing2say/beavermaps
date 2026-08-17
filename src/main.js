@@ -216,6 +216,49 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   /**
+   * How far the ambient light is raised under a low sun, in the LIGHT theme.
+   *
+   * COLOUR COULD NOT DO THIS, and the attempt is why the numbers are here. The
+   * campus is emissive and was matched to the city by repainting it; the city
+   * was supposed to be met half way by authoring its colours lighter. That works
+   * for a mid-tone and does nothing at all for `colorLand`, which is already
+   * #f3f3f1 — there is no headroom between it and white, so an 18% lift toward
+   * white moved it two values while Standard's dusk lighting was multiplying it
+   * down by a third. The result was a near-black city at dusk with a legible
+   * campus sitting inside it.
+   *
+   * So the LIGHT is raised instead, which is the thing actually doing the
+   * darkening. This is not a claim that dusk is bright: it is the same call the
+   * app already makes everywhere else, that a map is a document to be read
+   * before it is a picture of a time of day. Night keeps more of its darkness
+   * than dusk because a night map that looks like noon has stopped saying
+   * anything.
+   *
+   * Only in the LIGHT theme. Somebody who has chosen dark has asked for a dark
+   * map and should be given one.
+   */
+  const AMBIENT_ASSIST = {
+    dawn: { intensity: 0.85, color: '#fff1dd' },
+    dusk: { intensity: 0.85, color: '#ffeed6' },
+    night: { intensity: 0.62, color: '#c9d6ea' },
+  };
+
+  function assist(lights, preset) {
+    const want = currentTheme === 'light' ? AMBIENT_ASSIST[preset] : null;
+    if (!want) return lights;
+    for (const light of lights) {
+      // Ambient is the one that matters. Standard's night ambient is
+      // hsl(217,100%,11%) — very nearly black — and scaling a black light by any
+      // intensity leaves it black, which is why the colour is replaced and not
+      // only the number. Measured on the bench: ambient 0.5 to 1.0 at night
+      // moves a roof by about one L* until the colour moves too.
+      if (light.id !== 'ambient') continue;
+      light.properties = { ...light.properties, intensity: want.intensity, color: want.color };
+    }
+    return lights;
+  }
+
+  /**
    * The palette, moved to the time of day.
    *
    * Every reader of the palette goes through here rather than calling
@@ -818,7 +861,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     paintLamps();
 
     // The campus is emissive and cannot be relit; it has to be repainted. See
-    // `paintedFor`.
+    // `paintedFor`. Read here rather than at the point of use because the lights
+    // below need the same answer.
     const wanted = bench && bench.preset !== 'auto' ? bench.preset : clockPreset();
     if (wanted !== paintedFor) {
       paintedFor = wanted;
@@ -848,7 +892,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // A clone every time, not the captured array: setLights takes ownership
       // of what it is handed, and giving away the only copy of Standard's own
       // lighting means the next revert has nothing to revert to.
-      map.setLights(structuredClone(benchLights));
+      map.setLights(assist(structuredClone(benchLights), wanted));
       return;
     }
     const lights = structuredClone(benchLights);
