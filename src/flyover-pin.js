@@ -550,6 +550,32 @@ export function pinLayers(
   }
   samples.push({ lift, alpha: 255 });
 
+  // EVERY SQUASH FRAME, DRAWN INVISIBLY, WHILE THE PIN IS STILL FALLING.
+  //
+  // Safari flickered here and Chrome did not, and the difference is decode
+  // speed rather than anything either browser does wrong. The compression is
+  // baked into the icon (see pinIcon), so the landing steps through twelve
+  // distinct icon ids — and deck.gl loads an icon the FIRST time it sees one,
+  // asynchronously, repacking its atlas when it arrives. Between the request
+  // and the repack there is nothing to draw, so the pin blinks out for a frame
+  // or two. Chrome decodes a 400-byte data: URI fast enough to land inside one
+  // frame; Safari does not, and the whole landing strobes.
+  //
+  // `new Image()` warming does not fix it: that fills the BROWSER's image
+  // cache, and deck.gl's atlas is a separate thing that is still built the
+  // first time a layer references the id. The only way to have an icon in the
+  // atlas is to have asked for it, so they are asked for — at zero alpha, at
+  // the pin's own position, during the fall. Twelve invisible quads for a
+  // hundred and sixty milliseconds, and every icon the landing needs is
+  // resident before the landing starts.
+  //
+  // Dropped the moment the compression begins, so the settled pin is one quad.
+  if (ms < DROP_MS) {
+    for (let i = 0; i < SQUASH_STEPS; i += 1) {
+      samples.push({ lift, alpha: 0, warm: i / SQUASH_STEPS });
+    }
+  }
+
   // Reciprocal, so the shadow's total darkness is conserved: the same light is
   // spread over more shadow the higher its caster is.
   const spread = 1 + lift / (SHADOW_SOFTEN * px);
@@ -631,7 +657,9 @@ export function pinLayers(
       // the end of it rather than nearly.
       getPosition: () => [roof[0], roof[1], roof[2] + CLEAR_M],
       getPixelOffset: (d) => [0, clear - d.lift],
-      getIcon: () => icon,
+      // A warm sample names its own compression so deck.gl actually loads that
+      // icon; everything else is the pin as it is right now.
+      getIcon: (d) => (d.warm === undefined ? icon : pinIcon(colour, px, d.warm)),
       // The landing squash. Anchored at the point, so compressing the pin drops
       // its head toward the roof and leaves the point where it landed.
       // DERIVED FROM THE ICON rather than recomputed, and it has to be. The
