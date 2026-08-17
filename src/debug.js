@@ -34,8 +34,15 @@
 
 const STORAGE_KEY = 'mapper-debug';
 
-/** The lies, and what each says when it is on. */
-export const DEBUG_FLAGS = ['routing', 'gps'];
+/**
+ * The lies, and what each says when it is on — plus `fps`, which is not one.
+ *
+ * A readout rather than a lie: it changes nothing about what the app does, it
+ * only draws what the app is already doing on top of it. It is a flag here
+ * because it is a switch and this is where the switches live, but it belongs
+ * under its own heading in the markup rather than under "Pretend".
+ */
+export const DEBUG_FLAGS = ['routing', 'gps', 'fps'];
 
 const CLOSED = {
   open: false,

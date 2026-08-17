@@ -732,10 +732,12 @@ function buildStage(tools, view) {
  * @param {number[][]} options.box    [[w, s], [e, n]] tiles are loaded inside.
  * @param {string}  [options.name]    For the spinner's caption and the a11y label.
  * @param {number[]} [options.roof]   [lon, lat, z] the pin drops onto; see roofOf.
+ * @param {boolean} [options.fps]     Draw a frame-rate readout over the view.
  * @returns {{ el: HTMLElement, destroy: () => void }}
  */
 export function createFlyover({
   key, centre, span, pitch, maxTileSpan, bounds, name, roof, footprint, mass,
+  fps = false,
 }) {
   /** Identity for this card's claim on the shared canvas. */
   const token = {};
@@ -755,6 +757,53 @@ export function createFlyover({
 
   const el = document.createElement('figure');
   el.className = 'g-flyover';
+
+  /**
+   * The frame-rate readout, when the back room asks for one.
+   *
+   * MEASURED WHERE THE FRAMES ARE, which is the point of it being here rather
+   * than a page-wide counter. The orbit runs its own rAF and hands deck.gl a new
+   * view and new layers on each pass; a counter on the document tells you the
+   * PAGE is ticking over, which it is, and says nothing about whether this
+   * viewport got a frame. The gap between those two is exactly where the pin's
+   * landing stutters live.
+   *
+   * Three numbers, because one is not enough to see a stall. The average is what
+   * the eye reports; the median frame gap is what it should be; and the worst
+   * gap in the last window is the one that shows up as a hitch and never appears
+   * in an average. A run of 60 fps with a 90 ms frame in it is not a smooth run.
+   */
+  const meter = fps ? document.createElement('div') : null;
+  if (meter) {
+    meter.className = 'g-flyover-fps';
+    meter.textContent = '--';
+    // Not announced: it is a developer readout over a picture, and a screen
+    // reader has no use for a number changing four times a second.
+    meter.setAttribute('aria-hidden', 'true');
+  }
+
+  /** Frame gaps since the last time the readout was written. */
+  const gaps = [];
+  let lastFrame = 0;
+  let lastWrite = 0;
+  function tickMeter(now) {
+    if (!meter) return;
+    if (lastFrame) gaps.push(now - lastFrame);
+    lastFrame = now;
+    // Four times a second: often enough to watch, slow enough to read.
+    if (now - lastWrite < 250 || gaps.length < 2) return;
+    lastWrite = now;
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const median = sorted[sorted.length >> 1];
+    const worst = sorted.at(-1);
+    const mean = gaps.reduce((sum, g) => sum + g, 0) / gaps.length;
+    meter.textContent = `${Math.round(1000 / mean)} fps  ${median.toFixed(1)}ms`
+      + `  peak ${worst.toFixed(0)}ms`;
+    // Amber once a frame has taken longer than two at 60, which is the point a
+    // dropped frame becomes a visible one.
+    meter.classList.toggle('is-slow', worst > 33);
+    gaps.length = 0;
+  }
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', name ? `Aerial view of ${name}` : 'Aerial view');
 
@@ -762,6 +811,9 @@ export function createFlyover({
   credit.className = 'g-flyover-credit';
   credit.textContent = FALLBACK_CREDIT;
   el.append(credit);
+  // Over the picture and over the credit, because it is a reading of the thing
+  // underneath it rather than part of the picture.
+  if (meter) el.append(meter);
 
   const busy = spinnerOverlay('Loading aerial view');
   el.append(busy);
@@ -1038,6 +1090,7 @@ export function createFlyover({
       // the instant there is ANY geometry, because watching a coarse roof sharpen
       // is a better wait than watching a ring turn. The pin waits for the roof's
       // own tile on top of that, because it is about to stand on it.
+      tickMeter(now);
       if (busy.isConnected && drawn()) reveal();
       if (!shownAt && roofReady && drawn()) {
         shownAt = now;

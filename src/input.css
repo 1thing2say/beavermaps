@@ -3238,3 +3238,27 @@ body.no-routing #side-panel {
         min-height: 44px;
     }
 }
+
+/* The flyover's frame-rate readout, which only exists with the debug menu open.
+   Tabular figures because the numbers change four times a second and a
+   proportional font makes the whole line jump every time a 1 becomes a 4. */
+.g-flyover-fps {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 4;
+    padding: 3px 7px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #e8eaed;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+/* Past 33 ms a dropped frame is a visible one. */
+.g-flyover-fps.is-slow {
+    color: #fdd663;
+}

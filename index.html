@@ -547,6 +547,20 @@
                 <input id="debug-gps" type="checkbox" class="g-switch">
             </label>
 
+            <!-- Not a lie: it changes nothing and only draws what is already
+                 happening. Its own heading for that reason. The counter is
+                 measured inside the flyover's own orbit loop rather than on the
+                 page, because those are two different rates and the gap between
+                 them is where a stutter lives — see createFlyover. -->
+            <p class="g-layers-heading g-layers-heading--split">Readouts</p>
+            <label class="g-debug-row" for="debug-fps">
+                <span class="g-debug-text">
+                    <span class="g-debug-name">Frame rate on the aerial view</span>
+                    <span class="g-debug-hint">Average, median frame, and the worst one in the last quarter second</span>
+                </span>
+                <input id="debug-fps" type="checkbox" class="g-switch">
+            </label>
+
             <!-- The campus directory, off src/directory.json. It held the
                  sidebar until it did not earn the room; the note where it used
                  to be says why. It is here rather than deleted because this is

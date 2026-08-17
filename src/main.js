@@ -327,6 +327,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // Standard's own light array, captured on every style load so the override
   // has something to be put back to. See src/lighting.js.
   let debugOpen = false;
+  /** Whether a flyover draws its own frame-rate readout. Debug menu only. */
+  let showFps = false;
   let benchLights = null;
   let benchTilt = false;
   // Whether there is a style under us to configure at all.
@@ -3008,6 +3010,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
           // this building stops and the one touching it starts.
           footprint: footprintOf(props.name),
           mass: massOf(props.name),
+          fps: showFps,
         });
       })()
       : null;
@@ -4432,7 +4435,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     geolocateControl.trigger();
   }
 
-  function applyDebug({ open, routing, gps }) {
+  function applyDebug({ open, routing, gps, fps }) {
+    // Read by the next card rather than applied to the open one: the readout is
+    // built with the flyover, and there is no sensible thing to do to a viewport
+    // that is already orbiting.
+    showFps = open && fps;
+
     // The gate the lighting bench is read through. Set before anything else
     // here, so applyLighting sees the new state whichever path reaches it.
     debugOpen = open;
@@ -4483,6 +4491,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     switches: {
       routing: document.getElementById('debug-routing'),
       gps: document.getElementById('debug-gps'),
+      fps: document.getElementById('debug-fps'),
     },
     onChange: applyDebug,
   });
