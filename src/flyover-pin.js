@@ -146,6 +146,18 @@ const MIN_DROP_PINS = 1;
  * as fast as that one was. So the step is solved for: distance over speed, with
  * the landing speed the trail is wanted at.
  */
+/**
+ * Whether the falling pin trails copies of itself at all. Off for now, by
+ * request.
+ *
+ * One flag rather than a deletion, for the reason SHOW_HIGHLIGHT in
+ * src/flyover-view.js is one: everything below still works and still says what
+ * a shutter is, and turning it back on is `true`. The constants under it are
+ * left alone deliberately — `shutterMs` is what solves the trail's length from
+ * the landing speed, and that derivation is the part worth keeping legible.
+ */
+const SHOW_TRAIL = false;
+
 const GHOSTS = 6;
 const TRAIL_PINS = 0.85;
 /** The nearest ghost's opacity; the rest fall off linearly behind it. */
@@ -527,7 +539,7 @@ export function pinLayers(
 
   const lift = fallen(ms, drop);
   const samples = [];
-  for (let k = GHOSTS; k >= 1; k -= 1) {
+  for (let k = SHOW_TRAIL ? GHOSTS : 0; k >= 1; k -= 1) {
     const at = fallen(ms - k * shutter, drop);
     // A ghost that has caught up with the pin is not a fainter copy of it, it is
     // extra alpha on top of it — six of them stacked on a landed pin darken it
