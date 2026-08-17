@@ -6,6 +6,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 // mask exists to hide Mapbox's data, so fetching it would show a flash of the
 // thing it is there to remove.
 import campusBoundary from './campus-boundary.json';
+import campusLamps from './lamps.json';
 import { point, lineString, featureCollection } from '@turf/helpers';
 import { nearestPoint } from '@turf/nearest-point';
 import { distance } from '@turf/distance';
@@ -795,6 +796,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // name, no lights to override. `lightPreset: null` is how palette.js says
     // so. Skipped outright rather than left to setConfig's warning, because a
     // bench pointed at a style that has no lighting should be quiet, not noisy.
+    paintLamps();
+
     if (colors.lightPreset === null) return;
 
     // THE SKY, NOT THE INTERFACE. `colors.lightPreset` is the theme's opinion —
@@ -1458,6 +1461,101 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * images along with the layers, so the icons have to be re-registered before
    * anything can reference them.
    */
+  /**
+   * The campus after dark: warm pools on the paths, and nothing standing in them.
+   *
+   * NO LAMP POSTS, deliberately. A post is a piece of street furniture the map
+   * does not otherwise draw, at a scale where it would be two pixels of grey,
+   * and drawing 251 of them would say "here is some clutter" rather than "this
+   * is lit". What a person actually navigates by after dark is the LIGHT — which
+   * way is bright — so the light is the thing drawn.
+   *
+   * Two circles per lamp, and both are needed. A single soft one is a smudge
+   * with no centre and reads as fog; a single hard one is a dot and reads as a
+   * marker. A wide blurred pool with a small bright core inside it is what a
+   * lamp on paving actually looks like from above, and the core is what makes
+   * the pool read as coming FROM somewhere.
+   *
+   * Positions are inferred rather than surveyed — see scripts/build-lamps.mjs,
+   * which places them along the walk network at the spacing campus lighting is
+   * designed to and refuses to put one inside a building.
+   *
+   * `circle-blur: 1` is the whole of the softness: at 1 the gradient runs from
+   * the centre to the full radius with no hard edge anywhere, which is the only
+   * way to get a falloff out of a circle layer. The alternative is a raster
+   * sprite per lamp, which is 251 textures to draw a gradient.
+   */
+  const LAMP_WARM = '#ffc266';
+  const LAMP_CORE = '#fff0d0';
+
+  function addLampLayers() {
+    if (!map.getSource('campus-lamps')) {
+      map.addSource('campus-lamps', { type: 'geojson', data: campusLamps });
+    }
+    // Under everything that carries meaning — the paths, the pins, the labels —
+    // because this is ground and not information. A pin lost inside its own
+    // glow would be the light winning an argument it should not be in.
+    const before = map.getLayer('campus-paths') ? 'campus-paths' : undefined;
+    if (!map.getLayer('campus-lamp-pool')) {
+      map.addLayer({
+        id: 'campus-lamp-pool',
+        type: 'circle',
+        source: 'campus-lamps',
+        slot: 'middle',
+        paint: {
+          'circle-color': LAMP_WARM,
+          // Metres would be truer and Mapbox does not offer them here, so the
+          // radius is interpolated over zoom to hold a roughly constant pool on
+          // the ground — about 14 m across, which is what a 4 m pole throws.
+          'circle-radius': ['interpolate', ['exponential', 2], ['zoom'],
+            14, 3, 16, 11, 18, 42, 20, 168],
+          'circle-blur': 1,
+          'circle-opacity': 0,
+          'circle-emissive-strength': 1,
+          'circle-pitch-alignment': 'map',
+        },
+      }, before);
+    }
+    if (!map.getLayer('campus-lamp-core')) {
+      map.addLayer({
+        id: 'campus-lamp-core',
+        type: 'circle',
+        source: 'campus-lamps',
+        slot: 'middle',
+        paint: {
+          'circle-color': LAMP_CORE,
+          'circle-radius': ['interpolate', ['exponential', 2], ['zoom'],
+            14, 0.6, 16, 2.2, 18, 8.4, 20, 33.6],
+          'circle-blur': 0.9,
+          'circle-opacity': 0,
+          'circle-emissive-strength': 1,
+          'circle-pitch-alignment': 'map',
+        },
+      }, before);
+    }
+    paintLamps();
+  }
+
+  /**
+   * How lit the campus is, which is the inverse of how lit the sky is.
+   *
+   * Off in daylight — a lamp pool on sunlit paving is a stain — and up through
+   * dusk to full at night. Dawn gets the same as dusk: the lights are still on,
+   * they are just about to stop mattering.
+   */
+  const LAMP_BY_PRESET = { day: 0, dawn: 0.35, dusk: 0.55, night: 1 };
+
+  function paintLamps() {
+    if (!map.getLayer('campus-lamp-pool')) return;
+    const preset = lightingBench && lightingBench.preset !== 'auto'
+      ? lightingBench.preset : clockPreset();
+    const lit = LAMP_BY_PRESET[preset] ?? 0;
+    // The pool is weak even at full: it is a wash over ground somebody is trying
+    // to read a map on, not a light source. The core carries the brightness.
+    map.setPaintProperty('campus-lamp-pool', 'circle-opacity', 0.30 * lit);
+    map.setPaintProperty('campus-lamp-core', 'circle-opacity', 0.55 * lit);
+  }
+
   function addAmenityLayer() {
     if (map.getLayer('campus-amenities')) {
       map.setPaintProperty('campus-amenities', 'text-color', inkFor('kind'));
@@ -3580,6 +3678,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     // Last, so the symbols and labels sit above the route rather than under it.
     addDirectoryLayers();
+    addLampLayers();
     addAmenityLayer();
     addCategoryLayer();
     addLabelLayers();
@@ -4686,6 +4785,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // withAmenityNames — the other eighty said the icon's own meaning, in
       // type, four times over on a single building.
       campusAmenities = withAmenityNames(amenities.value);
+      addLampLayers();
       addAmenityLayer();
     } else {
       console.error(amenities.reason);
