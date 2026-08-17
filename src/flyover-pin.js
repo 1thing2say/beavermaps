@@ -147,16 +147,14 @@ const MIN_DROP_PINS = 1;
  * the landing speed the trail is wanted at.
  */
 /**
- * Whether the falling pin trails copies of itself at all. Off for now, by
- * request.
+ * Whether the falling pin trails copies of itself. Back on.
  *
- * One flag rather than a deletion, for the reason SHOW_HIGHLIGHT in
- * src/flyover-view.js is one: everything below still works and still says what
- * a shutter is, and turning it back on is `true`. The constants under it are
- * left alone deliberately — `shutterMs` is what solves the trail's length from
- * the landing speed, and that derivation is the part worth keeping legible.
+ * Kept as a flag rather than being inlined again, because it has now been
+ * switched twice and will be switched again — and because the two other marks
+ * on this picture (the box in src/flyover-view.js, this) are the kind of thing
+ * that is best judged by turning off and on rather than by argument.
  */
-const SHOW_TRAIL = false;
+const SHOW_TRAIL = true;
 
 const GHOSTS = 6;
 const TRAIL_PINS = 0.85;

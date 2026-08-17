@@ -598,6 +598,18 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
       // defaults and asked for them.
       tileset: {
         maximumScreenSpaceError: SCREEN_SPACE_ERROR,
+        // HOW MANY TILES MAY BE IN FLIGHT AT ONCE. The library's default is 64,
+        // which on a cold flyover means the whole first traversal is requested
+        // together and lands together — and every arrival is a GPU upload and a
+        // deck.gl sub-layer built on the main thread, whatever the parsing
+        // thread did. That burst is the three seconds at twenty frames a second
+        // the pin used to fall through.
+        //
+        // Twelve is about a screenful at this error budget, so nothing waits
+        // that is actually needed to draw the first picture; what it delays is
+        // the tail, which is refinement nobody is looking at yet. The total
+        // bytes are identical — this changes when they arrive, not how many.
+        maxRequests: 12,
         // Deliberately not `maximumTilesSelected` and not `maximumMemoryUsage`.
         // Both are applied elsewhere — see the notes on MAX_TILES_DRAWN, which
         // the library cannot enforce without throwing, and on MAX_GPU_MB, which
@@ -782,14 +794,69 @@ export function createFlyover({
     meter.setAttribute('aria-hidden', 'true');
   }
 
+  /**
+   * How long the last few frames took, always — not only when the readout is on.
+   *
+   * The drop reads this too. See `calm`.
+   */
+  const recent = [];
+  const RECENT = 24;
   /** Frame gaps since the last time the readout was written. */
   const gaps = [];
   let lastFrame = 0;
   let lastWrite = 0;
+
+  function noteFrame(now) {
+    if (lastFrame) {
+      const gap = now - lastFrame;
+      recent.push(gap);
+      if (recent.length > RECENT) recent.shift();
+      gaps.push(gap);
+    }
+    lastFrame = now;
+  }
+
+  /**
+   * Whether this viewport is currently drawing fast enough to animate in.
+   *
+   * THE FIRST THREE SECONDS OF A COLD FLYOVER ARE NOT LIKE THE REST. Nothing is
+   * cached: the tileset root is fetched, the tree is walked, and then thirty or
+   * forty tiles arrive at once and each one is a glTF to parse, a set of buffers
+   * to upload and a deck.gl sub-layer to build. Parsing moved to a worker, but
+   * the GPU upload and the layer construction are main-thread by nature, and
+   * they land in a burst. Measured on a cold load, that burst is about three
+   * seconds at roughly twenty frames a second.
+   *
+   * The pin used to fall straight into it — the drop began the moment the roof's
+   * own tile reported content, which is the PEAK of the flood rather than the
+   * end of it. A hundred and sixty milliseconds of animation over three or four
+   * frames is not a fall, it is a jump, and no amount of easing fixes a frame
+   * that was never drawn.
+   *
+   * So it waits for calm — and "calm" took two goes to define, which is the
+   * interesting part. Eight frames under 24 ms was the first attempt, and
+   * measured under a 6x CPU throttle it fired 742 ms in, reported calm, and the
+   * fall still ran at 24 fps: a burst that big has lulls in it, and eight frames
+   * is short enough to sit inside one. Half a second of evidence and a ceiling
+   * on the WORST frame in it is what actually distinguishes a lull from the end.
+   *
+   * Median for the floor, because a single 90 ms upload should not veto an
+   * otherwise smooth run; a separate cap on the worst, because a run containing
+   * a 120 ms frame is not calm however good its median is, and that frame is
+   * precisely what a 160 ms fall cannot survive.
+   */
+  const CALM_MS = 20;
+  const CALM_WORST_MS = 45;
+  const CALM_FRAMES = 16;
+  const CALM_WAIT_MS = 2500;
+  const calm = () => {
+    if (recent.length < CALM_FRAMES) return false;
+    const last = recent.slice(-CALM_FRAMES).sort((a, b) => a - b);
+    return last[CALM_FRAMES >> 1] < CALM_MS && last.at(-1) < CALM_WORST_MS;
+  };
+
   function tickMeter(now) {
     if (!meter) return;
-    if (lastFrame) gaps.push(now - lastFrame);
-    lastFrame = now;
     // Four times a second: often enough to watch, slow enough to read.
     if (now - lastWrite < 250 || gaps.length < 2) return;
     lastWrite = now;
@@ -1090,6 +1157,7 @@ export function createFlyover({
       // the instant there is ANY geometry, because watching a coarse roof sharpen
       // is a better wait than watching a ring turn. The pin waits for the roof's
       // own tile on top of that, because it is about to stand on it.
+      noteFrame(now);
       tickMeter(now);
       if (busy.isConnected && drawn()) reveal();
       if (!shownAt && roofReady && drawn()) {
@@ -1102,8 +1170,20 @@ export function createFlyover({
         // idempotent, so the measurement below is free to ask again.
         if (roof) warmPinIcons(PUSH_PIN_RED, measureDrop(bearing).px);
       }
-      if (shownAt && !dropAt && now - shownAt >= HOLD_MS) {
+      // The beat, AND frames to spend it on. The ceiling is what stops a slow
+      // device waiting for a calm that is not coming: past it the pin falls
+      // regardless, because a pin that never drops is worse than one that drops
+      // roughly. Two and a half seconds is longer than the cold burst measured
+      // above and shorter than anyone will sit still for.
+      const waited = shownAt ? now - shownAt : 0;
+      if (shownAt && !dropAt && waited >= HOLD_MS && (calm() || waited >= HOLD_MS + CALM_WAIT_MS)) {
         dropAt = now;
+        // A dev-only mark, the same kind of handle as `window.__map`. Whether
+        // the pin waited for calm or timed out is the one thing about this that
+        // cannot be read off the outside, and it is stripped from the build.
+        if (import.meta.env.DEV) {
+          window.__flyoverDrop = { at: now, waited: Math.round(waited), calm: calm() };
+        }
         if (roof) fall = measureDrop(bearing);
       }
       stage.deck.setProps({
