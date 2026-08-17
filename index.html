@@ -501,31 +501,6 @@
                 <input id="debug-gps" type="checkbox" class="g-switch">
             </label>
 
-            <!-- Motion blur on the selected pin, which the browser will not do
-                 for you: CSS has no directional blur and nothing hands out a
-                 velocity. Two ways of getting one anyway, and they are here as a
-                 choice rather than a switch because they fail differently and
-                 the only way to pick is to watch both. See GHOSTS and SMEAR_MS
-                 in src/pin-select.js.
-
-                 Its own heading rather than a third row under Pretend: nothing
-                 here tells the app anything untrue, it changes how one thing is
-                 drawn. -->
-            <p class="g-layers-heading g-layers-heading--split">Motion blur</p>
-            <div id="debug-blur" class="g-seg-row" role="radiogroup" aria-label="Motion blur method">
-                <button type="button" class="g-seg" role="radio" aria-checked="false"
-                    data-choice="off">Off</button>
-                <button type="button" class="g-seg" role="radio" aria-checked="false"
-                    data-choice="ghost">Trail</button>
-                <button type="button" class="g-seg" role="radio" aria-checked="false"
-                    data-choice="smear">Smear</button>
-            </div>
-            <p class="g-debug-hint">
-                Trail stacks five lagged copies of the pin, so it shows the
-                growth. Smear blurs the one pin along its measured velocity, so
-                it does not.
-            </p>
-
             <!-- The campus directory, off src/directory.json. It held the
                  sidebar until it did not earn the room; the note where it used
                  to be says why. It is here rather than deleted because this is

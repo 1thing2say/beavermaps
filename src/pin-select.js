@@ -193,131 +193,6 @@ export const SELECTED_W = 55;
  * with the sign broken out, on the grounds that a marker that picked its own
  * direction per tap would be the more surprising claim to make from one sample.
  */
-/**
- * The ghost trail — motion blur, done the only way a DOM element can have it.
- *
- * There is no directional blur in CSS. `filter: blur()` is isotropic, so a pin
- * blurred while it swings looks like a pin that has been smudged in every
- * direction at once, which reads as fog rather than as speed. And the browser
- * hands nothing else out: no velocity buffer, no per-object motion vectors, no
- * shutter. Every one of those needs a renderer that knows where the thing was
- * on the previous frame, and for a DOM element nothing does.
- *
- * So it is done by SAMPLING TIME instead of by filtering space, which is what a
- * camera shutter actually is. Behind the real pin sit five copies of it, each
- * running the SAME two animations with a delay — so ghost k is not an
- * approximation of where the pin has been, it is literally the pin as it was
- * `k * GHOST_LAG_MS` ago, on the identical spring and the identical swing. Stack
- * them at falling opacity and the composite is the marker integrated over the
- * last 150 milliseconds, which is a shutter.
- *
- * WHY 150 MS AND NOT 17. A 60 fps shutter is 16.7 ms and is invisible here,
- * because this pin barely moves. The sway travels 7.13 px over a 758 ms period,
- * so its peak speed is 0.059 px/ms — three and a half pixels per frame on a
- * 55 px marker, and it damps: by halfway through the swing one frame of it is
- * under a pixel. The lift is the faster of the two motions and still only
- * reaches about eight.
- *
- * 60 ms was the first setting, and it was photographed and rejected. At 260 ms
- * into a selection the trail was a faint edge tucked under the pin's own
- * outline, because the lift is mostly a SCALE and every past sample of a growing
- * object is smaller than the present one and hides behind it. 150 ms is long
- * enough that the oldest ghost is small enough, and low enough, to clear the
- * head — which is what makes the motion legible at all.
- *
- * That is the honest description of this effect, then: not photographic blur but
- * a deliberate exaggeration of one, nine shutters long, sized to be seen at the
- * speed this particular pin actually moves. It costs nothing once the pin is
- * still — every ghost converges on the resting pose and vanishes underneath it.
- *
- * Five copies rather than more because the trail is short. Spaced 30 ms apart
- * they still overlap into a smear; spaced much further they separate into
- * countable pins, which is a strobe and not a blur.
- */
-export const GHOSTS = 5;
-export const GHOST_LAG_MS = 30;
-/** The nearest ghost's opacity. The rest fall away linearly behind it. */
-export const GHOST_ALPHA = 0.45;
-
-/**
- * The other way of doing it: filter SPACE instead of sampling time.
- *
- * The block above says there is no directional blur in CSS, and there is not.
- * There is one in SVG, though, and it is the same primitive: `feGaussianBlur`
- * takes `stdDeviation` as TWO numbers rather than one, so it can blur eight
- * pixels along x and none along y. That is the whole reason this method exists —
- * an anisotropic blur is a smear, and an isotropic one is fog.
- *
- * What it still needs is a velocity, and the browser hands out none. So this one
- * MEASURES rather than models: every frame it reads where the head's box
- * actually is and diffs it against where the box was `SMEAR_MS` ago. That is
- * deliberately not the same trick as the ghosts, which replay the curves from
- * pin-select's own constants. Two methods that both got their motion from the
- * same model would be one method drawn twice; this one would still be right if
- * something else moved the pin.
- *
- * MEASURED AGAINST THE MARKER, NOT THE SCREEN, and that is the load-bearing
- * detail. Mapbox rewrites the marker's own transform on every frame of a pan or
- * a fly, so a head sampled in screen coordinates is carrying the camera's travel
- * as well as its own — and blurring an object for the camera's motion is exactly
- * the lie the arriving-pins trail was cut back for (see playCategoryEntrance in
- * main.js). Differencing the head's box against the MARKER's box subtracts the
- * camera out by construction, because the camera moves both equally.
- *
- * THE WINDOW IS THE TRAIL'S WINDOW, derived from it rather than chosen, so the
- * two methods integrate the same span of time and the choice between them is
- * about technique and not about being handed a longer exposure.
- *
- * SIGMA. A shutter open for the window smears a point over the distance L it
- * travelled, which is a box of length L, not a Gaussian. Matching the two by
- * variance — a box of length L has variance L^2/12 — gives sigma = L/(2*sqrt 3).
- * The distance used is the CHORD across the window and not the path length,
- * which matters once the sway reverses: a head that swung out and came back is
- * blurred by how far apart its two extremes are, and a linear blur cannot say
- * anything more interesting than that anyway.
- *
- * WHY THE TWO LOOK SO UNALIKE ON THE SAME WINDOW, which is worth knowing before
- * choosing between them from a screenshot. The trail keeps the present pin fully
- * opaque and stacks its history BEHIND it, so the marker stays crisp and grows a
- * wake. A shutter has no privileged sample — every instant in the window weighs
- * the same — so the smear spends the pin's own edges on the blur. Photographed
- * at 260 ms into a selection, where the head has travelled 19.9 px in the
- * preceding 150, the trail is a sharp marker with four fainter ones behind it
- * and the smear is one marker with its white ring dissolved. Both are 150 ms of
- * the same motion, and the trail is the flattering one by construction.
- *
- * TWO THINGS IT CANNOT DO, and they are the reason this is a bench and not a
- * replacement:
- *
- *   IT CANNOT EXPRESS A SCALE. The lift is mostly growth, and growth moves the
- *   head's edges apart without moving its centre much. A directional blur
- *   renders travel, so the grow comes out comparatively crisp under this method
- *   and smeared under the trail, where every past copy is genuinely smaller.
- *
- *   STDDEVIATION IS AXIS-ALIGNED. Motion at 45 degrees comes out as a square
- *   smudge rather than a diagonal streak, because two numbers describe an
- *   ellipse with axes on x and y and nothing else. Here it mostly does not bite
- *   — the lift is very nearly pure vertical and the sway very nearly pure
- *   horizontal — but they overlap between 187 ms and 540 ms and that is where to
- *   look for it.
- *
- * It costs two `getBoundingClientRect` calls a frame, which is a forced layout a
- * frame, on one element, while a pin is being picked up. That is the price of
- * measuring instead of modelling and it is worth stating rather than hiding.
- */
-export const SMEAR_MS = GHOSTS * GHOST_LAG_MS;
-/** A Gaussian with the variance of a box of length L. See above. */
-export const SMEAR_SIGMA = 1 / (2 * Math.sqrt(3));
-/**
- * The cap, as a fraction of the marker's width.
- *
- * A sigma much past the head's own radius stops reading as a fast object and
- * starts reading as weather. Nothing this pin does gets near it — the cap is
- * here so that a stall, a tab coming back from the background, or any other
- * source of one enormous frame-to-frame delta cannot dissolve the marker.
- */
-export const SMEAR_MAX = 0.35;
-
 export const SWAY_AMP = 0.1297;
 export const SWAY_DECAY_MS = 344;
 export const SWAY_PERIOD_MS = 758;
@@ -586,12 +461,8 @@ export function sizeAt(stops, zoom) {
  *   wins that outright, so sharing the property would not blend the two — it
  *   would delete the growth for the duration of the swing.
  */
-/** Ids have to be unique in the document for `url(#...)` to find the right one. */
-let smearSerial = 0;
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
 export function mountSelectedPin({
-  map, marker: Marker, kind, coords, label, ink, ring, from, blur = 'off',
+  map, marker: Marker, kind, coords, label, ink, ring, from,
 }) {
   const el = document.createElement('div');
   el.className = 'pin-selected';
@@ -629,66 +500,7 @@ export function mountSelectedPin({
   sway.style.transformOrigin = origin;
   sway.append(scaler);
 
-  // The trail, appended BEFORE the pin so it is behind it. Same structure, same
-  // origins, so a ghost handed the same keyframes lands where the pin landed.
-  const ghosts = [];
-  if (blur === 'ghost') {
-    for (let k = 1; k <= GHOSTS; k += 1) {
-      const layer = document.createElement('div');
-      layer.className = 'pin-selected-ghost';
-      layer.style.opacity = (GHOST_ALPHA * (1 - (k - 1) / GHOSTS)).toFixed(3);
-
-      const ghostSway = document.createElement('div');
-      ghostSway.className = 'pin-selected-sway';
-      ghostSway.style.transformOrigin = origin;
-      const ghostScale = document.createElement('div');
-      ghostScale.className = 'pin-selected-scale pin-selected-scale--ghost';
-      ghostScale.style.transformOrigin = origin;
-      ghostScale.append(pinElement(kind, SELECTED_W, ring));
-      ghostSway.append(ghostScale);
-      layer.append(ghostSway);
-
-      el.append(layer);
-      ghosts.push({ sway: ghostSway, scale: ghostScale, lag: k * GHOST_LAG_MS });
-    }
-  }
-
   el.append(sway);
-
-  // ...and the other method, which needs no extra copies of anything: one
-  // filter, on the wrapper the whole head turns inside, so what smears is the
-  // head and its own shadow together. The dot is outside it and stays sharp,
-  // which is right — the dot does not move.
-  //
-  // `color-interpolation-filters="sRGB"` because SVG filters default to
-  // linearRGB and CSS `filter: blur()` does not. Left at the default this would
-  // be a fair comparison between the two methods only if you did not mind one of
-  // them being composited in a different colour space from everything else on
-  // the page.
-  let smearBlur = null;
-  if (blur === 'smear') {
-    const id = `pin-smear-${(smearSerial += 1)}`;
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('width', '0');
-    svg.setAttribute('height', '0');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.classList.add('pin-selected-filter');
-    const filter = document.createElementNS(SVG_NS, 'filter');
-    filter.setAttribute('id', id);
-    filter.setAttribute('color-interpolation-filters', 'sRGB');
-    // Room to spill. The default filter region is the box plus a tenth, which is
-    // five pixels here and less than a quarter of the widest blur allowed.
-    filter.setAttribute('x', '-50%');
-    filter.setAttribute('y', '-50%');
-    filter.setAttribute('width', '200%');
-    filter.setAttribute('height', '200%');
-    smearBlur = document.createElementNS(SVG_NS, 'feGaussianBlur');
-    smearBlur.setAttribute('stdDeviation', '0 0');
-    filter.append(smearBlur);
-    svg.append(filter);
-    el.append(svg);
-    sway.style.filter = `url(#${id})`;
-  }
 
   // The dot: placed once, at the place, and left alone.
   const dot = document.createElement('div');
@@ -760,58 +572,6 @@ export function mountSelectedPin({
     { duration: SWAY_MS, easing: 'linear' },
   );
 
-  // The same grow and the same swing, each one lagged. `fill: 'both'` is what
-  // makes the delay mean "earlier" rather than "not started": before its turn a
-  // ghost holds the opening pose, which is where the pin genuinely was.
-  //
-  // The pin's own grow is a CSS transition and these are WAAPI, which is a
-  // difference in mechanism and not in motion — same duration, same easing
-  // string, same two transforms.
-  for (const ghost of ghosts) {
-    ghost.scale.animate(
-      [{ transform: resting(start) }, { transform: LIFTED }],
-      { duration: GROW_MS, easing: GROW_EASE, delay: ghost.lag, fill: 'both' },
-    );
-    if (!still) {
-      ghost.sway.animate(
-        swayKeyframes(SELECTED_W),
-        { duration: SWAY_MS, easing: 'linear', delay: ghost.lag, fill: 'both' },
-      );
-    }
-  }
-
-  // The velocity buffer nothing hands out, kept by hand. Started after the
-  // animations rather than before them so the first sample is the pose the pin
-  // opens in, and run until the marker is taken down — the shrink is motion too,
-  // and a pin that stopped being blurred halfway out would flick sharp.
-  let smearing = Boolean(smearBlur);
-  if (smearing) {
-    const cap = SMEAR_MAX * SELECTED_W;
-    // The head's box against the marker's own box: pin-local, so Mapbox's
-    // per-frame translate is subtracted out rather than measured. See SMEAR_MS.
-    const centre = () => {
-      const head = scaler.getBoundingClientRect();
-      const box = el.getBoundingClientRect();
-      return { x: head.x + head.width / 2 - box.x, y: head.y + head.height / 2 - box.y };
-    };
-    const history = [];
-    const step = (now) => {
-      if (!smearing) return;
-      const here = centre();
-      history.push({ t: now, x: here.x, y: here.y });
-      // Everything older than the window, dropped — so `history[0]` is where the
-      // head was when this frame's shutter opened. One sample in means nothing
-      // has moved yet, which is a sigma of zero, which is a pass-through.
-      while (history.length > 1 && now - history[0].t > SMEAR_MS) history.shift();
-      const was = history[0];
-      const sx = Math.min(cap, SMEAR_SIGMA * Math.abs(here.x - was.x));
-      const sy = Math.min(cap, SMEAR_SIGMA * Math.abs(here.y - was.y));
-      smearBlur.setAttribute('stdDeviation', `${sx.toFixed(2)} ${sy.toFixed(2)}`);
-      requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }
-
   return {
     element: el,
     /** Shrink back to the ambient size, then take the marker down. */
@@ -820,25 +580,13 @@ export function mountSelectedPin({
       // should shrink from where it is on the way to the place, not carry a
       // sideways wobble down into a marker that has stopped being selected.
       swaying?.cancel();
-      for (const ghost of ghosts) {
-        for (const running of ghost.sway.getAnimations()) running.cancel();
-        ghost.scale.animate(
-          [{ transform: LIFTED }, { transform: resting(to / SELECTED_W) }],
-          { duration: SHRINK_MS, easing: SHRINK_EASE, delay: ghost.lag, fill: 'both' },
-        );
-      }
       scaler.style.transition = `transform ${SHRINK_MS}ms ${SHRINK_EASE}`;
       scaler.style.transform = resting(to / SELECTED_W);
       el.classList.remove('is-in');
       // Removed on a timer rather than on transitionend: a marker whose tab is
       // backgrounded mid-animation never fires the event, and the pin would
       // stay hidden from its own layer for as long as the tab stayed away.
-      setTimeout(() => {
-        // The rAF loop holds a reference to the element it is measuring, so it
-        // has to stop when the element goes rather than when the motion does.
-        smearing = false;
-        instance.remove();
-      }, SHRINK_MS);
+      setTimeout(() => instance.remove(), SHRINK_MS);
     },
   };
 }
