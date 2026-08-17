@@ -54,6 +54,17 @@ import {
   pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS, DROP_MS, warmPinIcons,
 } from './flyover-pin.js';
 import { highlightLayers, HIGHLIGHT_UP_MS } from './flyover-cage.js';
+
+/**
+ * Whether the flown-over building is boxed at all. Off for now, by request.
+ *
+ * Switched HERE rather than inside src/flyover-cage.js, and that is the whole
+ * reason this is one line: the module keeps working, keeps its tests, and keeps
+ * being the thing that describes what a highlight is. Only the view's decision
+ * to ask for one has changed. Flip this back to `true` and the box returns
+ * exactly as it was — there is nothing else to put back.
+ */
+const SHOW_HIGHLIGHT = false;
 import { PUSH_PIN_RED } from './push-pin.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
@@ -957,7 +968,7 @@ export function createFlyover({
     // so it is not inside the `roof` guard the pin is — a building with a traced
     // outline and no measured centre still gets outlined, at its peak.
     const marks = (ms) => (ms === null ? [] : [
-      ...highlightLayers(tools, { footprint, mass, roof, ms }),
+      ...(SHOW_HIGHLIGHT ? highlightLayers(tools, { footprint, mass, roof, ms }) : []),
       ...(roof ? pinLayers(tools, { roof, ...fall, span, width, height, ms }) : []),
     ]);
 
@@ -983,7 +994,9 @@ export function createFlyover({
       // borrowing the pin's number parks the still on a mark at a sixth of its
       // strength. It used to agree by accident — the pin waited a second for a
       // label it no longer has.
-      const STILL_MS = Math.max(SETTLED_MS, DROP_MS + HIGHLIGHT_UP_MS);
+      const STILL_MS = SHOW_HIGHLIGHT
+        ? Math.max(SETTLED_MS, DROP_MS + HIGHLIGHT_UP_MS)
+        : SETTLED_MS;
       const settle = (landed) => stage.deck?.setProps({
         viewState: { ...view, bearing: 35 },
         layers: [...stage.base, ...marks(landed ? STILL_MS : null)],
