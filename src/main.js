@@ -192,6 +192,41 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // at the default view" is only answerable by asking the running map.
   if (import.meta.env.DEV) window.__map = map;
 
+  /**
+   * The boot splash, taken down.
+   *
+   * The mark and the ring are in index.html rather than built here, because a
+   * splash assembled by the bundle arrives after the wait it exists to cover.
+   * All this does is start the ring — spin.js is in the bundle, so it cannot be
+   * in the markup — and arrange for the whole thing to go.
+   *
+   * IT GOES ON A RACE, not on one event, and that is deliberate. `map.on('load')`
+   * is the honest signal and is what normally wins; the timer behind it is there
+   * so that a style that never loads, a token that has expired or a throw
+   * somewhere above shows the app rather than a logo forever. A splash you can
+   * get stuck behind is worse than no splash.
+   */
+  const boot = document.getElementById('boot');
+  if (boot) {
+    const stopBoot = spin(document.getElementById('boot-spin'), { size: 'md' });
+    let gone = false;
+    const dismissBoot = () => {
+      if (gone) return;
+      gone = true;
+      stopBoot();
+      boot.classList.add('g-boot--gone');
+      // After the fade, not with it: removing the node immediately would cut
+      // the transition off at its first frame.
+      setTimeout(() => boot.remove(), 400);
+    };
+    map.once('load', dismissBoot);
+    // The floor is a beat rather than zero, so a warm reload does not flash the
+    // mark for one frame — which reads as a glitch rather than as a splash.
+    const shown = performance.now();
+    map.once('load', () => setTimeout(dismissBoot, Math.max(0, 450 - (performance.now() - shown))));
+    setTimeout(dismissBoot, 8000);
+  }
+
   // The path network now arrives from the server rather than the bundle, so
   // these start empty.
   let customNetwork = null;

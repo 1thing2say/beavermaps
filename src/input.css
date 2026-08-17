@@ -3091,3 +3091,52 @@ body.no-routing #side-panel {
         max-height: 70dvh;
     }
 }
+
+/* --- the boot splash ------------------------------------------------------- */
+
+/* Over everything, including Mapbox's own controls, until the map is up. Its
+   colours are the app's own tokens rather than fixed, so the splash is already
+   in the right theme at first paint instead of flashing white and correcting. */
+.g-boot {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    background: var(--g-surface);
+    /* The fade is on the way OUT only — see .g-boot--gone. Fading in would mean
+       the first thing a cold load shows is a blank page. */
+    transition: opacity 320ms ease-out;
+}
+
+.g-boot--gone {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* THE MARK IS 32 PIXELS AND IS DRAWN AT 128, and every one of those pixels is
+   meant to be seen. `image-rendering: pixelated` is the whole of that: the
+   browser's default is a smooth resample, which at 4x turns a hard-edged mark
+   into a blur of it. `crisp-edges` is the older spelling and is kept underneath
+   because Firefox spelled it that way first.
+
+   A fixed multiple of the source rather than a percentage, so the scaling stays
+   a whole number of pixels and no row of the mark is a row and a half. */
+.g-boot-mark img {
+    width: 128px;
+    height: 128px;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+}
+
+/* The ring needs a positioning context of its own: spin.js places its twelve
+   lines at top/left 50% absolutely, so without a box to be 50% of they stack in
+   the corner of whatever is. */
+.g-boot-spin {
+    position: relative;
+    width: 28px;
+    height: 28px;
+}

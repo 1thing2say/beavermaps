@@ -562,6 +562,21 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
     loader: Tiles3DLoader,
     loadOptions: {
       fetch: keyedFetch(key),
+      // OFF THE MAIN THREAD, and this is the difference between a fall and a
+      // stutter. loaders.gl will parse a glTF inline unless it is told not to,
+      // and Google's tiles arrive Draco-compressed — so a tile landing during
+      // the pin's 160 ms drop decodes its meshes on the same thread that is
+      // supposed to be drawing them. Measured before this, the orbit held an
+      // 8.3 ms median frame and still threw four frames past 25 ms with a
+      // single 83 ms stall in it; 83 ms is half the drop, and it is exactly the
+      // kind of hitch that reads as "the animation is laggy" rather than as
+      // "the network is slow".
+      worker: true,
+      // The worker pool has to be big enough that one slow mesh does not queue
+      // the rest behind it, and small enough not to fight the render thread for
+      // cores. Four is the library's own default for tile loading and is a
+      // reasonable share of the phones this has to run on.
+      maxConcurrency: 4,
       // Draco is not optional here: Google serves this geometry compressed and
       // says so in every glTF it returns (`"generator":"draco_decoder"`).
       '3d-tiles': { loadGLTF: true },
@@ -1011,7 +1026,16 @@ export function createFlyover({
       // is a better wait than watching a ring turn. The pin waits for the roof's
       // own tile on top of that, because it is about to stand on it.
       if (busy.isConnected && drawn()) reveal();
-      if (!shownAt && roofReady && drawn()) shownAt = now;
+      if (!shownAt && roofReady && drawn()) {
+        shownAt = now;
+        // Warm the pin's icons HERE rather than at the drop, which is HOLD_MS
+        // away. They were being decoded inside `measureDrop`, and measureDrop
+        // runs on the very frame the fall starts — thirteen image decodes and an
+        // atlas repack landing on frame one of a nineteen-frame animation, which
+        // is a stall exactly where it is most visible. `warmPinIcons` is
+        // idempotent, so the measurement below is free to ask again.
+        if (roof) warmPinIcons(PUSH_PIN_RED, measureDrop(bearing).px);
+      }
       if (shownAt && !dropAt && now - shownAt >= HOLD_MS) {
         dropAt = now;
         if (roof) fall = measureDrop(bearing);

@@ -442,7 +442,14 @@ export function pinIcon(colour, px, squash = 1) {
  * atlas repack inside the 190 ms the pin is compressing, and the pin flickers
  * exactly where it is supposed to look solid.
  */
+const warmed = new Set();
 export function warmPinIcons(colour, px) {
+  // IDEMPOTENT, because the caller is inside an animation loop and the whole
+  // point is to do this work once, early. Thirteen image decodes are cheap in
+  // the abstract and are not cheap on the frame the pin starts falling.
+  const key = `${colour}@${px}`;
+  if (warmed.has(key)) return;
+  warmed.add(key);
   for (let i = 0; i <= SQUASH_STEPS; i += 1) {
     const icon = pinIcon(colour, px, i / SQUASH_STEPS);
     if (typeof Image === 'undefined') continue;

@@ -32,6 +32,24 @@
 -->
 
 <body class="g-body">
+
+    <!-- The boot splash, which is markup rather than a thing main.js builds.
+         The bundle is a megabyte and a half and the map is a network away, so
+         anything constructed in JavaScript arrives after the wait it exists to
+         cover. This is in the document, so it is on screen at first paint.
+
+         Removed by main.js the moment the map reports itself loaded — see
+         `dismissBoot`. It also removes ITSELF on a timer, so a build that
+         throws before the map exists shows a page rather than a logo forever. -->
+    <div id="boot" class="g-boot">
+        <picture class="g-boot-mark">
+            <source srcset="/src/logo-dark.png" media="(prefers-color-scheme: dark)">
+            <img id="boot-logo" src="/src/logo.png" width="32" height="32"
+                alt="beavermaps">
+        </picture>
+        <div id="boot-spin" class="g-boot-spin"></div>
+    </div>
+
     <div class="app-shell">
         <div id="map"></div>
 

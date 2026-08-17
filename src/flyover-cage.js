@@ -134,6 +134,79 @@ function polygonsOf(geometry) {
 }
 
 /**
+ * The box's geometry, built once per building rather than once per frame.
+ *
+ * THIS IS A PERFORMANCE FIX AND IT IS NOT A MICRO-ONE. `highlightLayers` is
+ * called on every frame of the orbit, and the first cut rebuilt all of it every
+ * time: five layers, each handed a freshly allocated array, with the ring
+ * coordinates re-mapped and the corners re-detected from scratch. deck.gl
+ * compares `data` by identity, so a new array every frame means it re-uploads
+ * every attribute buffer every frame — for a footprint traced to forty points a
+ * side, across nine polygons on the Student Center. That lands squarely on the
+ * frames the pin is falling through, which is the one part of this anyone is
+ * watching.
+ *
+ * Nothing in here depends on time. The only thing that changes frame to frame is
+ * the alpha, and alpha is an accessor, not geometry. So it is computed once,
+ * keyed on the footprint object the caller already holds — a card is one
+ * building and holds one of these, and a second card gets a second entry — and
+ * every layer below reads the same arrays for the whole life of the highlight.
+ *
+ * One entry, not a map: consecutive frames ask about the same building, and a
+ * card that is replaced never asks again. Keeping the last answer is the whole
+ * of the cache this needs and cannot grow.
+ */
+let lastShape = null;
+function shapeFor(footprint, mass, roof) {
+  if (lastShape && lastShape.footprint === footprint
+    && lastShape.mass === mass && lastShape.roof === roof) return lastShape.value;
+
+  const polygons = polygonsOf(footprint);
+  if (!polygons.length || !mass) return null;
+  const { ground, top } = mass;
+  if (!(top - ground > 0)) return null;
+
+  // THE ROOF PLANE, not the peak. `mass.top` is the highest point the building
+  // reaches and roofs.json's centre is the roof it actually has — an area
+  // weighted level rather than whatever aerial or parapet won. A ring hung at
+  // the peak floats over most roofs; a ring at the roof lies on it. The peak is
+  // the fallback for anything with no measured centre, which is nothing on this
+  // campus but is a better answer than no highlight.
+  const z = Number.isFinite(roof?.[2]) ? roof[2] : top;
+  const at = (p, height) => [p[0], p[1], height];
+  const rings = polygons.map((polygon) => polygon[0]);
+
+  // THE CORNERS, as uprights from the ground ring to the roof ring. A ring is
+  // closed — its last point is its first — so the turn at vertex i is measured
+  // between the segment arriving at it and the segment leaving it, and the
+  // closing duplicate is skipped rather than counted as a vertex of its own.
+  const posts = [];
+  for (const ring of rings) {
+    const n = ring.length - 1;
+    for (let i = 0; i < n; i += 1) {
+      const before = ring[(i - 1 + n) % n];
+      const here = ring[i];
+      const after = ring[(i + 1) % n];
+      const inbound = Math.atan2(here[1] - before[1], here[0] - before[0]);
+      const outbound = Math.atan2(after[1] - here[1], after[0] - here[0]);
+      let turn = Math.abs(outbound - inbound) * (180 / Math.PI);
+      if (turn > 180) turn = 360 - turn;
+      if (turn >= CORNER_DEG) posts.push({ from: at(here, ground), to: at(here, z) });
+    }
+  }
+
+  const value = {
+    volume: polygons.map((polygon) => polygon.map((ring) => ring.map((p) => at(p, ground)))),
+    roofRing: rings.map((ring) => ring.map((p) => at(p, z))),
+    baseRing: rings.map((ring) => ring.map((p) => at(p, ground))),
+    posts,
+    lift: z - ground,
+  };
+  lastShape = { footprint, mass, roof, value };
+  return value;
+}
+
+/**
  * The highlight, as a box, or nothing at all before it is due.
  *
  * @param {object} tools             the deck.gl toolkit
@@ -146,19 +219,8 @@ function polygonsOf(geometry) {
 export function highlightLayers({ PathLayer, SolidPolygonLayer, LineLayer }, {
   footprint, mass, roof, ms,
 }) {
-  const polygons = polygonsOf(footprint);
-  if (!polygons.length || !mass || !(ms > DROP_MS + WAIT_MS)) return [];
-
-  const { ground, top } = mass;
-  if (!(top - ground > 0)) return [];
-
-  // THE ROOF PLANE, not the peak. `mass.top` is the highest point the building
-  // reaches and roofs.json's centre is the roof it actually has — an area
-  // weighted level rather than whatever aerial or parapet won. A ring hung at
-  // the peak floats over most roofs; a ring at the roof lies on it. The peak is
-  // the fallback for anything with no measured centre, which is nothing on this
-  // campus but is a better answer than no highlight.
-  const z = Number.isFinite(roof?.[2]) ? roof[2] : top;
+  const shape = shapeFor(footprint, mass, roof);
+  if (!shape || !(ms > DROP_MS + WAIT_MS)) return [];
 
   // Up, held, then away — and nothing at all once it is over, which is the half
   // that matters for cost: this is asked on every frame of a ninety-second orbit
@@ -168,33 +230,12 @@ export function highlightLayers({ PathLayer, SolidPolygonLayer, LineLayer }, {
   const up = t < RISE_MS
     ? clamp01(t / RISE_MS)
     : 1 - clamp01((t - RISE_MS - HOLD_MS) / FALL_MS);
-  const at = (p, height) => [p[0], p[1], height];
+
+  const { volume, roofRing, baseRing, posts, lift } = shape;
 
   // Depth off, so the whole box is visible even where a neighbouring roof stands
   // in front of the far side of it. See the head of this file.
   const parameters = { depthCompare: 'always', depthWriteEnabled: false };
-
-  const rings = polygons.map((polygon) => polygon[0]);
-  const ringAt = (height) => rings.map((ring) => ring.map((p) => at(p, height)));
-
-  // THE CORNERS, as uprights from the ground ring to the roof ring. A ring is
-  // closed — its last point is its first — so the turn at vertex i is measured
-  // between the segment arriving at it and the segment leaving it, and the
-  // closing duplicate is skipped rather than counted as a vertex of its own.
-  const posts = [];
-  for (const ring of rings) {
-    const n = ring.length - 1;
-    for (let i2 = 0; i2 < n; i2 += 1) {
-      const before = ring[(i2 - 1 + n) % n];
-      const here = ring[i2];
-      const after = ring[(i2 + 1) % n];
-      const inbound = Math.atan2(here[1] - before[1], here[0] - before[0]);
-      const outbound = Math.atan2(after[1] - here[1], after[0] - here[0]);
-      let turn = Math.abs(outbound - inbound) * (180 / Math.PI);
-      if (turn > 180) turn = 360 - turn;
-      if (turn >= CORNER_DEG) posts.push({ from: at(here, ground), to: at(here, z) });
-    }
-  }
 
   const outline = (id, data, ink, alpha, width) => new PathLayer({
     id,
@@ -210,9 +251,6 @@ export function highlightLayers({ PathLayer, SolidPolygonLayer, LineLayer }, {
     updateTriggers: { getColor: up },
   });
 
-  const roofRing = ringAt(z);
-  const baseRing = ringAt(ground);
-
   return [
     // THE VOLUME. Based at the ground ring and extruded to the roof, so the
     // box is the building's own mass rather than a prism starting at sea level
@@ -220,10 +258,10 @@ export function highlightLayers({ PathLayer, SolidPolygonLayer, LineLayer }, {
     // polygons are handed over in three dimensions.
     new SolidPolygonLayer({
       id: 'flyover-highlight-volume',
-      data: polygons.map((polygon) => polygon.map((ring) => ring.map((p) => at(p, ground)))),
+      data: volume,
       getPolygon: (d) => d,
       getFillColor: [...INK, Math.round(FILL_ALPHA * up)],
-      getElevation: z - ground,
+      getElevation: lift,
       extruded: true,
       wireframe: false,
       // Unlit, or deck.gl's default material shades the four walls differently
@@ -231,7 +269,7 @@ export function highlightLayers({ PathLayer, SolidPolygonLayer, LineLayer }, {
       // a mark drawn over it.
       material: false,
       parameters,
-      updateTriggers: { getFillColor: up, getElevation: z },
+      updateTriggers: { getFillColor: up },
     }),
     // The uprights, under the rings so a corner reads as the ring passing over
     // a post rather than the other way round. LineLayer because this is the one
