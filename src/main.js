@@ -177,6 +177,23 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const clockPreset = () => lightPresetAt(new Date(), CAMPUS_CENTRE[0], CAMPUS_CENTRE[1]);
 
   /**
+   * The preset the CAMPUS is currently painted for.
+   *
+   * The city and the campus are lit by two different mechanisms — Standard takes
+   * a config value and relights itself, while our overlay is emissive and has to
+   * be repainted in a new colour (see `underPreset` in src/palette.js). Only the
+   * first of those was happening: setting the bench to Day made the city
+   * daylight and left the campus at whatever the clock had baked in when the
+   * style was built, which at dusk is a college sitting in shadow at noon.
+   *
+   * Kept here so the repaint fires on a CHANGE rather than on every apply, which
+   * matters twice: `syncBasemapStyle` rebuilds layers, and it calls back into
+   * applyLighting — writing this before the call is what stops that being a
+   * loop.
+   */
+  let paintedFor = null;
+
+  /**
    * Re-light the map when the sun has moved enough to matter.
    *
    * A self-rescheduling timeout rather than a fixed interval, because the gap to
@@ -799,6 +816,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // so. Skipped outright rather than left to setConfig's warning, because a
     // bench pointed at a style that has no lighting should be quiet, not noisy.
     paintLamps();
+
+    // The campus is emissive and cannot be relit; it has to be repainted. See
+    // `paintedFor`.
+    const wanted = bench && bench.preset !== 'auto' ? bench.preset : clockPreset();
+    if (wanted !== paintedFor) {
+      paintedFor = wanted;
+      syncBasemapStyle();
+    }
 
     if (colors.lightPreset === null) return;
 

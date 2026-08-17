@@ -718,6 +718,26 @@ function buildStage(tools, view) {
     // what keeps the tiles this pulls inside the campus.
     controller: false,
     initialViewState: view,
+    /**
+     * HOW MANY REAL PIXELS PER CSS PIXEL, capped.
+     *
+     * deck.gl defaults to `window.devicePixelRatio`, which on a Retina panel is
+     * 2 or 3 — so this canvas was being rendered at four to nine times the
+     * fragments of its own size. That is the correct default for a full-screen
+     * map, where the display IS the subject. It is a poor one here: the flyover
+     * is a card illustration about 370 px wide, showing photographic imagery
+     * that is already softer than the screen, under an orbit that never stops
+     * moving. Nobody has ever counted its pixels.
+     *
+     * What they do notice is the frame rate, and fragment cost is the one term
+     * in it that scales with the square of this number. 1.5 keeps the pin's
+     * edges and the type in the credit clean — both are vector, both are drawn
+     * at this ratio — while spending a quarter of what 3 would.
+     *
+     * `Math.min`, not a constant, so a 1x display is not scaled UP to 1.5 and
+     * asked to render more pixels than it has.
+     */
+    useDevicePixels: Math.min(window.devicePixelRatio || 1, 1.5),
     // Nothing sets a clear colour here because deck.gl's own default is already
     // a transparent clear, which is what this wants: the grid behind the canvas
     // shows through everywhere the clip discarded, which is the whole point of
