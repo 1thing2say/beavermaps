@@ -197,8 +197,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    *
    * The mark and the ring are in index.html rather than built here, because a
    * splash assembled by the bundle arrives after the wait it exists to cover.
-   * All this does is start the ring — spin.js is in the bundle, so it cannot be
-   * in the markup — and arrange for the whole thing to go.
+   * The ring is CSS for the same reason, so it turns at first paint instead of
+   * waiting for spin.js to arrive inside the bundle. All this does is arrange
+   * for the whole thing to go.
    *
    * IT GOES ON A RACE, not on one event, and that is deliberate. `map.on('load')`
    * is the honest signal and is what normally wins; the timer behind it is there
@@ -208,12 +209,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    */
   const boot = document.getElementById('boot');
   if (boot) {
-    const stopBoot = spin(document.getElementById('boot-spin'), { size: 'md' });
     let gone = false;
     const dismissBoot = () => {
       if (gone) return;
       gone = true;
-      stopBoot();
       boot.classList.add('g-boot--gone');
       // After the fade, not with it: removing the node immediately would cut
       // the transition off at its first frame.

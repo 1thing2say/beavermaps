@@ -8,6 +8,31 @@
     <!-- mapbox-gl.css is imported by src/main.js from the installed package, so
          it always matches the library version rather than a pinned CDN copy. -->
     <link href="/src/input.css" rel="stylesheet">
+    <!-- THE THEME, BEFORE THE FIRST PAINT.
+         Every themed colour in this app hangs off `data-theme` on <html>, and
+         that attribute is set by src/theme.js — which is inside a bundle a
+         megabyte and a half long. So the first paint happens at the light
+         defaults whatever the device asked for, and a dark-mode visitor gets a
+         white flash followed by a correction. The boot splash below made that
+         impossible to ignore: it drew its white ground under a mark that had
+         already picked its dark variant.
+
+         Duplicated here rather than imported, deliberately, because anything
+         importable arrives too late by definition — this has to run before the
+         body renders. `mapper-theme` and the three modes are theme.js's
+         contract; the only thing restated is which of them means "ask the
+         device". -->
+    <script>
+        (function () {
+            try {
+                var chosen = localStorage.getItem('mapper-theme');
+                if (chosen !== 'light' && chosen !== 'dark' && chosen !== 'auto') chosen = 'auto';
+                document.documentElement.dataset.theme = chosen;
+            } catch (e) {
+                document.documentElement.dataset.theme = 'auto';
+            }
+        }());
+    </script>
 </head>
 
 <!--
@@ -42,12 +67,15 @@
          `dismissBoot`. It also removes ITSELF on a timer, so a build that
          throws before the map exists shows a page rather than a logo forever. -->
     <div id="boot" class="g-boot">
-        <picture class="g-boot-mark">
-            <source srcset="/src/logo-dark.png" media="(prefers-color-scheme: dark)">
-            <img id="boot-logo" src="/src/logo.png" width="32" height="32"
-                alt="beavermaps">
-        </picture>
-        <div id="boot-spin" class="g-boot-spin"></div>
+        <div id="boot-logo" class="g-boot-mark" role="img" aria-label="beavermaps"></div>
+        <!-- CSS, not spin.js, and that is the whole point of it. spin.js lives
+             in the bundle, so a ring it draws cannot appear until the bundle
+             has — which on a throttled load is seconds after the mark, leaving
+             the splash sitting there looking stuck at exactly the moment it is
+             meant to say "working". This one turns at first paint. It is the
+             same drawing: twelve fading spokes is spin.js's shape, and a
+             conic-gradient ring reads as the same object. -->
+        <div class="g-boot-spin" aria-hidden="true"></div>
     </div>
 
     <div class="app-shell">

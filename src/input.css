@@ -3123,20 +3123,64 @@ body.no-routing #side-panel {
    into a blur of it. `crisp-edges` is the older spelling and is kept underneath
    because Firefox spelled it that way first.
 
-   A fixed multiple of the source rather than a percentage, so the scaling stays
-   a whole number of pixels and no row of the mark is a row and a half. */
-.g-boot-mark img {
+   128 is a fixed multiple of the source rather than a percentage, so the
+   scaling stays a whole number of pixels and no row of the mark is a row and a
+   half — which is the one way to reintroduce the blur this is avoiding.
+
+   A BACKGROUND RATHER THAN AN <img>, and that is the theme and not taste. The
+   mark has three colours and no alpha in the file it came from: white ground,
+   black body, red dot. White becomes transparent in both variants, and the
+   BLACK has to become white on a dark ground or half the mark disappears. An
+   <img> can only choose its file with `prefers-color-scheme`, and this app's
+   theme is a `data-theme` attribute that JavaScript sets — the two disagree
+   whenever somebody has chosen a theme, and the first version of this
+   photographed as a white mark on a white page. A background-image is picked by
+   the same selectors every other themed thing here uses, so it cannot. */
+.g-boot-mark {
     width: 128px;
     height: 128px;
+    background-image: url('/src/logo.png');
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
     image-rendering: crisp-edges;
     image-rendering: pixelated;
 }
 
-/* The ring needs a positioning context of its own: spin.js places its twelve
-   lines at top/left 50% absolutely, so without a box to be 50% of they stack in
-   the corner of whatever is. */
+/* Dark by preference, unless a light theme has been chosen explicitly... */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .g-boot-mark {
+        background-image: url('/src/logo-dark.png');
+    }
+}
+
+/* ...and dark by choice, which wins over the preference in both directions. */
+:root[data-theme="dark"] .g-boot-mark {
+    background-image: url('/src/logo-dark.png');
+}
+
+:root[data-theme="light"] .g-boot-mark {
+    background-image: url('/src/logo.png');
+}
+
+/* A conic sweep masked into a ring, which is one element and no JavaScript.
+   `mask` rather than a border so the fade goes all the way round rather than
+   living in one quadrant of a rotating arc. */
 .g-boot-spin {
-    position: relative;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 0%, var(--g-text-dim) 90%, var(--g-text-dim));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+    animation: g-boot-turn 900ms linear infinite;
+}
+
+@keyframes g-boot-turn {
+    to { transform: rotate(360deg); }
+}
+
+/* Somebody who asked for less motion has not asked for less information, so the
+   ring stays and stops — the same call src/spinner.js makes for its own. */
+@media (prefers-reduced-motion: reduce) {
+    .g-boot-spin { animation: none; }
 }
