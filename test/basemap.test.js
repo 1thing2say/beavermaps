@@ -268,6 +268,28 @@ test('the campus and the city agree about the time of day', () => {
   assert.ok(lum(night.basemapConfig.colorLand) > lum(THEMES.light.basemapConfig.colorLand),
     'the city was not lifted to meet the campus');
 
+  // AND IT IS THE RIGHT COLOUR, not just the right lightness. This is the
+  // regression this test exists for: the first version mixed toward black,
+  // which takes light away and adds nothing, so a campus set to Dawn went GREY
+  // beside a city Standard had just turned amber. A low sun is a warmer light,
+  // not a weaker one, and the absence of it is a cooler one.
+  const warmth = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    return ((n >> 16) & 255) - (n & 255);      // red minus blue
+  };
+  const flat = warmth(THEMES.light.mask);
+  assert.ok(warmth(underPreset(THEMES.light, 'dawn').mask) > flat,
+    'the campus is not warmer at dawn than at noon');
+  assert.ok(warmth(underPreset(THEMES.light, 'dusk').mask) > flat,
+    'the campus is not warmer at dusk than at noon');
+  assert.ok(warmth(underPreset(THEMES.light, 'night').mask) < 0,
+    'the campus is not cooler than neutral at night');
+  // Dusk is lower and redder than dawn, so it is both warmer and darker.
+  assert.ok(warmth(underPreset(THEMES.light, 'dusk').mask)
+    > warmth(underPreset(THEMES.light, 'dawn').mask), 'dusk is not warmer than dawn');
+  assert.ok(lum(underPreset(THEMES.light, 'dusk').mask)
+    < lum(underPreset(THEMES.light, 'dawn').mask), 'dusk is not darker than dawn');
+
   // Type is excluded on purpose: a halo that dims with its own label cancels
   // itself out, and the ground is moving under both.
   for (const key of ['label', 'labelHalo', 'pinRing']) {

@@ -764,11 +764,42 @@ export function styleKey(provider, basemap, theme, skin) {
  * clamping. The numbers are per preset and are the shallow end of what looks
  * right rather than the deep end: a campus map at night still has to be a map.
  */
+/**
+ * TOWARD A COLOUR, NOT TOWARD BLACK, and the first version got this wrong in a
+ * way that is obvious the moment you look at it.
+ *
+ * Mixing the campus toward black is achromatic: it takes lightness away and adds
+ * nothing. But a low sun is not a dimmer — it is a warmer, redder light, and
+ * Standard tints the city accordingly. Set to Dawn, the city went amber and the
+ * campus went GREY, so the college read as a slab of dead concrete dropped into
+ * a warm morning. Same failure at dusk, mirrored at night: the city cools toward
+ * blue and an achromatic campus stays neutral beside it.
+ *
+ * So each preset names the colour its light is, and the campus is mixed toward
+ * that — which darkens and tints in one move, because a dark warm brown is
+ * exactly what "less light, and what there is of it is orange" means.
+ *
+ * `lit` is the other half, for the city: Standard takes its own colours DOWN
+ * under these presets, so the authored values are mixed toward a light version
+ * of the same hue rather than toward pure white. Lifting a dawn city toward
+ * white would bleach out the warmth the campus has just been given.
+ *
+ * Each `lit` has to be LIGHTER than what it is lifting or it is not a lift. The
+ * light theme's city land is already #f3f3f1, so there is very little headroom
+ * above it — a night target that was merely cooler came out fractionally darker
+ * and the test caught it. These are near-white with a hue rather than mid-tones
+ * with one.
+ */
 const TIME_OF_DAY = {
-  day: { dim: 0, lift: 0 },
-  dawn: { dim: 0.10, lift: 0.10 },
-  dusk: { dim: 0.16, lift: 0.16 },
-  night: { dim: 0.34, lift: 0.30 },
+  day: { ink: null, mix: 0, lit: null, lift: 0 },
+  // Morning sun: warm, and the weakest of the three because dawn light is thin
+  // rather than heavy.
+  dawn: { ink: '#5c4630', mix: 0.16, lit: '#fff8ee', lift: 0.12 },
+  // Evening sun: the same hue further round and further down. Dusk is redder
+  // and lower than dawn, which is why it is warmer AND darker.
+  dusk: { ink: '#4d3524', mix: 0.24, lit: '#fff5e6', lift: 0.18 },
+  // No sun. Cool rather than warm, and much further down.
+  night: { ink: '#111a2e', mix: 0.40, lit: '#f8fafd', lift: 0.30 },
 };
 
 const channels = (hex) => {
@@ -779,15 +810,18 @@ const channels = (hex) => {
 };
 const hex = (rgb) => `#${rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
 
-/** Toward black by `t` of the way. Non-colours are passed through untouched. */
-export const dimmed = (colour, t) => {
-  const rgb = channels(colour);
-  return rgb ? hex(rgb.map((v) => v * (1 - t))) : colour;
-};
-/** ...and toward white, which is the same move in the other direction. */
-export const lifted = (colour, t) => {
-  const rgb = channels(colour);
-  return rgb ? hex(rgb.map((v) => v + (255 - v) * t)) : colour;
+/**
+ * `t` of the way from one colour toward another. Non-colours pass through.
+ *
+ * One function for both directions, because darkening toward a warm brown and
+ * lifting toward a warm white are the same operation with different targets —
+ * and writing them as two invited the mistake of making one of them achromatic.
+ */
+export const toward = (colour, target, t) => {
+  const from = channels(colour);
+  const to = channels(target);
+  if (!from || !to || !t) return colour;
+  return hex(from.map((v, i) => v + (to[i] - v) * t));
 };
 
 /**
@@ -803,17 +837,17 @@ const KEEP = new Set(['label', 'labelHalo', 'pinRing', 'style', 'lightPreset']);
 
 export function underPreset(colors, preset) {
   const move = TIME_OF_DAY[preset];
-  if (!move || (!move.dim && !move.lift)) return colors;
+  if (!move || (!move.mix && !move.lift)) return colors;
 
   const out = { ...colors };
   for (const [key, value] of Object.entries(colors)) {
     if (KEEP.has(key)) continue;
-    if (typeof value === 'string') out[key] = dimmed(value, move.dim);
+    if (typeof value === 'string') out[key] = toward(value, move.ink, move.mix);
     // `land` is a map of ground class to colour, and every one of them is
     // ground — so the whole object moves together or the sheet comes apart.
     else if (value && typeof value === 'object' && key === 'land') {
       out.land = Object.fromEntries(
-        Object.entries(value).map(([k, v]) => [k, dimmed(v, move.dim)]),
+        Object.entries(value).map(([k, v]) => [k, toward(v, move.ink, move.mix)]),
       );
     }
   }
@@ -822,7 +856,7 @@ export function underPreset(colors, preset) {
   if (colors.basemapConfig) {
     out.basemapConfig = Object.fromEntries(
       Object.entries(colors.basemapConfig).map(([k, v]) => [
-        k, typeof v === 'string' ? lifted(v, move.lift) : v,
+        k, typeof v === 'string' ? toward(v, move.lit, move.lift) : v,
       ]),
     );
   }
