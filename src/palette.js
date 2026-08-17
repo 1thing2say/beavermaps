@@ -776,8 +776,29 @@ export function styleKey(provider, basemap, theme, skin) {
  * blue and an achromatic campus stays neutral beside it.
  *
  * So each preset names the colour its light is, and the campus is mixed toward
- * that — which darkens and tints in one move, because a dark warm brown is
- * exactly what "less light, and what there is of it is orange" means.
+ * that.
+ *
+ * BUT THE MIX MUST NOT ALSO DARKEN, and that was the second mistake. Tinting by
+ * mixing toward a DARK warm brown moves hue and lightness together, and the two
+ * sides of the campus boundary were already being moved in opposite directions —
+ * the campus down by the mix, the city up by the lift. Opposite directions
+ * guarantee a seam, and the seam showed: at dawn the lawn inside the campus was
+ * visibly darker than the same grass across the creek, which is one continuous
+ * field of grass in the world and read as two in the picture.
+ *
+ * So the mix carries HUE ONLY. Each colour's own lightness is measured before
+ * the mix and restored after it, and any actual darkening is a separate,
+ * explicit `dim` — which is ZERO at dawn, almost zero at dusk, and real only at
+ * night, when the ground genuinely is darker.
+ *
+ * Zero rather than small, because the campus and the city are still being moved
+ * in opposite directions by the two halves of this — the campus by `dim`, the
+ * city by `lift` — and any daylight between them lands on the campus boundary
+ * as a step. Measured on the lawn against Standard's own greenspace across the
+ * creek, which is the same grass in the world: a 0.02 dim at dawn was a
+ * six-point gap in luminance, and it was visible. At zero they match. The tint colours are therefore
+ * mid-tones rather than near-blacks: only their hue survives, so a dark one just
+ * wastes the range.
  *
  * `lit` is the other half, for the city: Standard takes its own colours DOWN
  * under these presets, so the authored values are mixed toward a light version
@@ -791,15 +812,15 @@ export function styleKey(provider, basemap, theme, skin) {
  * with one.
  */
 const TIME_OF_DAY = {
-  day: { ink: null, mix: 0, lit: null, lift: 0 },
+  day: { ink: null, mix: 0, dim: 0, lit: null, lift: 0 },
   // Morning sun: warm, and the weakest of the three because dawn light is thin
   // rather than heavy.
-  dawn: { ink: '#5c4630', mix: 0.16, lit: '#fff8ee', lift: 0.12 },
+  dawn: { ink: '#8a6a45', mix: 0.20, dim: 0, lit: '#fff8ee', lift: 0.12 },
   // Evening sun: the same hue further round and further down. Dusk is redder
   // and lower than dawn, which is why it is warmer AND darker.
-  dusk: { ink: '#4d3524', mix: 0.24, lit: '#fff5e6', lift: 0.18 },
+  dusk: { ink: '#7a5433', mix: 0.26, dim: 0.02, lit: '#fff5e6', lift: 0.18 },
   // No sun. Cool rather than warm, and much further down.
-  night: { ink: '#111a2e', mix: 0.40, lit: '#f8fafd', lift: 0.30 },
+  night: { ink: '#2a3a5e', mix: 0.42, dim: 0.18, lit: '#f8fafd', lift: 0.30 },
 };
 
 const channels = (hex) => {
@@ -824,6 +845,34 @@ export const toward = (colour, target, t) => {
   return hex(from.map((v, i) => v + (to[i] - v) * t));
 };
 
+/** Rec. 709 relative luminance, which is the lightness a person sees. */
+const luma = (rgb) => rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+
+/**
+ * Tint toward `target`, keep the original lightness, then darken by `dim`.
+ *
+ * The restore is a scale rather than an offset so it cannot push a channel out
+ * of range on the way back — and it is skipped for a colour that was already
+ * black, where there is no lightness to preserve and dividing by it would be a
+ * division by zero.
+ */
+export function relit(colour, target, mix, dim) {
+  const from = channels(colour);
+  if (!from || (!mix && !dim)) return colour;
+  const was = luma(from);
+  let rgb = from;
+  if (mix && channels(target)) {
+    const to = channels(target);
+    rgb = from.map((v, i) => v + (to[i] - v) * mix);
+    const now = luma(rgb);
+    if (now > 0 && was > 0) {
+      const scale = was / now;
+      rgb = rgb.map((v) => Math.min(255, v * scale));
+    }
+  }
+  return hex(rgb.map((v) => v * (1 - dim)));
+}
+
 /**
  * A palette re-lit for a preset.
  *
@@ -837,17 +886,17 @@ const KEEP = new Set(['label', 'labelHalo', 'pinRing', 'style', 'lightPreset']);
 
 export function underPreset(colors, preset) {
   const move = TIME_OF_DAY[preset];
-  if (!move || (!move.mix && !move.lift)) return colors;
+  if (!move || (!move.mix && !move.dim && !move.lift)) return colors;
 
   const out = { ...colors };
   for (const [key, value] of Object.entries(colors)) {
     if (KEEP.has(key)) continue;
-    if (typeof value === 'string') out[key] = toward(value, move.ink, move.mix);
+    if (typeof value === 'string') out[key] = relit(value, move.ink, move.mix, move.dim);
     // `land` is a map of ground class to colour, and every one of them is
     // ground — so the whole object moves together or the sheet comes apart.
     else if (value && typeof value === 'object' && key === 'land') {
       out.land = Object.fromEntries(
-        Object.entries(value).map(([k, v]) => [k, toward(v, move.ink, move.mix)]),
+        Object.entries(value).map(([k, v]) => [k, relit(v, move.ink, move.mix, move.dim)]),
       );
     }
   }

@@ -290,6 +290,18 @@ test('the campus and the city agree about the time of day', () => {
   assert.ok(lum(underPreset(THEMES.light, 'dusk').mask)
     < lum(underPreset(THEMES.light, 'dawn').mask), 'dusk is not darker than dawn');
 
+  // NO STEP AT THE CAMPUS BOUNDARY, which is what all of the above is for. The
+  // lawn inside the campus and Standard's greenspace across the creek are one
+  // field of grass in the world; if the two halves are moved by different
+  // amounts, the boundary draws itself as a line. Daylight and the two low-sun
+  // presets have to match closely — night is allowed to diverge, because there
+  // the campus genuinely is unlit ground and the city is not.
+  for (const preset of ['day', 'dawn', 'dusk']) {
+    const c = underPreset(THEMES.light, preset);
+    const gap = Math.abs(lum(c.land.lawn) - lum(c.basemapConfig.colorGreenspace));
+    assert.ok(gap <= 8, `at ${preset} the campus lawn is ${gap.toFixed(0)} off the grass beside it`);
+  }
+
   // Type is excluded on purpose: a halo that dims with its own label cancels
   // itself out, and the ground is moving under both.
   for (const key of ['label', 'labelHalo', 'pinRing']) {
