@@ -363,7 +363,9 @@ function needlePath() {
  * `id` keys every gradient in it, because two of these in one document with the
  * same ids is one pin wearing the other's light.
  */
-export function pushPinSvg({ colour = PUSH_PIN_RED, id = 'pp', title = '', height = 0 } = {}) {
+export function pushPinSvg({
+  colour = PUSH_PIN_RED, id = 'pp', title = '', height = 0, squash = 1,
+} = {}) {
   const [hue] = toHsl(colour);
   const { w, h, cx, cy, r } = PUSH_PIN;
   // An INTRINSIC size, when asked for, and it is not cosmetic. A percentage-sized
@@ -373,8 +375,18 @@ export function pushPinSvg({ colour = PUSH_PIN_RED, id = 'pp', title = '', heigh
   // pin. Callers that place this in the DOM want the percentages; callers that
   // rasterise it want pixels, at whatever multiple of the display size their
   // device pixel ratio asks for.
+  // SQUASHED, NOT SCALED, when a caller asks for it. The box gets shorter and
+  // keeps its width, and `preserveAspectRatio="none"` is what lets the drawing
+  // follow it — without that the artwork letterboxes inside the shorter box and
+  // the pin gets smaller with a gap under it, which is the thing being fixed.
+  //
+  // A landing pin should COMPRESS. Scaling one down uniformly is the wrong
+  // motion twice over: it reads as the pin receding from the camera rather than
+  // hitting something, and it moves the outline in from the sides at the exact
+  // moment the eye is checking where the point landed.
   const box = height
-    ? ` width="${n(height / PUSH_PIN.aspect)}" height="${n(height)}"`
+    ? ` width="${n(height / PUSH_PIN.aspect)}" height="${n(height * squash)}"`
+      + (squash === 1 ? '' : ' preserveAspectRatio="none"')
     : ' width="100%" height="100%"';
   // Where the needle leaves the ball, which is where its own shading starts.
   const collar = cy + r;

@@ -51,9 +51,10 @@ import { spinnerOverlay } from './spinner.js';
 // comparison of two different things that happen to share a unit.
 import { M_PER_DEG_LAT, M_PER_DEG_LON, campusBox } from './flyover.js';
 import {
-  pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS, DROP_MS,
+  pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS, DROP_MS, warmPinIcons,
 } from './flyover-pin.js';
 import { highlightLayers, HIGHLIGHT_UP_MS } from './flyover-cage.js';
+import { PUSH_PIN_RED } from './push-pin.js';
 
 const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
@@ -922,7 +923,13 @@ export function createFlyover({
       const above = seen.project([roof[0], roof[1], roof[2] + CLEAR_M])[1];
       // The pin's size comes from here too, because it is the only place that
       // knows how much sky the roof has over it. See HEADROOM.
-      return { drop: dropPixels(at, height), clear: at - above, px: pinHeight(height, at) };
+      const px = pinHeight(height, at);
+      // Every compression the landing will draw, decoded now. This runs when the
+      // drop is MEASURED, which is a beat and a fall ahead of the first squashed
+      // frame — without it each step's first appearance is an image decode and an
+      // atlas repack inside the 190 ms the pin is compressing. See warmPinIcons.
+      warmPinIcons(PUSH_PIN_RED, px);
+      return { drop: dropPixels(at, height), clear: at - above, px };
     };
 
     // `ms` of null means "not yet": before the drop has a reason to start there

@@ -380,16 +380,50 @@ export function dropPixels(roofY, viewportHeight) {
  * anchor comes from the drawing's own measurement of where its foot is.
  */
 const icons = new Map();
-export function pinIcon(colour, px) {
-  const key = `${colour}@${px}`;
+/**
+ * How many distinct heights the squash is allowed to be drawn at.
+ *
+ * The compression is a half-sine over SQUASH_MS, so it passes through every
+ * height twice and only STEPS of it are ever distinct pictures. Quantising is
+ * not an economy here, it is a correctness measure: deck.gl loads an icon the
+ * first time it sees its id and repacks its atlas when it does, so an unbounded
+ * set would mean a fresh image decode on nearly every frame of the landing —
+ * which is precisely the moment that must not hitch. Twelve steps over a 26%
+ * compression is a little over two percent per step, which is under a pixel on
+ * a hundred-pixel pin and is invisible; and all twelve are warmed before the
+ * fall begins. See `warmPinIcons`.
+ */
+const SQUASH_STEPS = 12;
+const quantise = (squash) => Math.round(squash * SQUASH_STEPS) / SQUASH_STEPS;
+
+/**
+ * The pin, at a height and a compression.
+ *
+ * THE WIDTH IS THE SAME AT EVERY COMPRESSION, and getting that right is the
+ * whole point of taking a `squash` here rather than scaling the layer's own
+ * `getSize`. deck.gl draws an icon `getSize` tall and derives its width from the
+ * icon's own aspect, so a caller that squashes by handing a smaller size gets a
+ * pin that is shorter AND narrower — a pin moving away from the camera. Baking
+ * the compression into the icon's box instead means its declared aspect widens
+ * by exactly the factor the size shrinks by, and the two cancel: the drawing
+ * loses height and keeps its width, which is what hitting the ground looks like.
+ *
+ * The anchor moves with the box, so the point of the pin stays on the roof
+ * rather than sinking into it as the ball comes down.
+ */
+export function pinIcon(colour, px, squash = 1) {
+  const s = quantise(squash);
+  const key = `${colour}@${px}@${s}`;
   const cached = icons.get(key);
   if (cached) return cached;
-  const height = px * 2;
-  const width = Math.round(height / PUSH_PIN.aspect);
+  // The FULL height is what the width is derived from, so it does not move.
+  const full = px * 2;
+  const height = full * s;
+  const width = Math.round(full / PUSH_PIN.aspect);
   const icon = {
     id: key,
     url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-      pushPinSvg({ colour, id: key.replace(/[^a-z0-9]/gi, ''), height })) }`,
+      pushPinSvg({ colour, id: key.replace(/[^a-z0-9]/gi, ''), height: full, squash: s })) }`,
     width,
     height,
     anchorX: width / 2,
@@ -397,6 +431,24 @@ export function pinIcon(colour, px) {
   };
   icons.set(key, icon);
   return icon;
+}
+
+/**
+ * Decode every compression the landing will ask for, before it asks.
+ *
+ * Called once when a flyover knows what size it is drawing, which is a beat and
+ * a fall — the better part of a second — before the first squashed frame is
+ * needed. Without it the first appearance of each step is an image decode and an
+ * atlas repack inside the 190 ms the pin is compressing, and the pin flickers
+ * exactly where it is supposed to look solid.
+ */
+export function warmPinIcons(colour, px) {
+  for (let i = 0; i <= SQUASH_STEPS; i += 1) {
+    const icon = pinIcon(colour, px, i / SQUASH_STEPS);
+    if (typeof Image === 'undefined') continue;
+    const img = new Image();
+    img.src = icon.url;
+  }
 }
 
 /**
@@ -460,7 +512,10 @@ export function pinLayers(
   { IconLayer },
   { roof, drop, clear, px, span, width, height, ms, colour = PUSH_PIN_RED },
 ) {
-  const icon = pinIcon(colour, px);
+  // The compression is the icon's, so the icon is chosen per frame. The ghosts
+  // share it: a trail of uncompressed pins behind a compressed one would read
+  // as the pin having been replaced rather than squashed.
+  const icon = pinIcon(colour, px, squashed(ms));
   const shutter = shutterMs(drop, px);
 
   const lift = fallen(ms, drop);
@@ -560,7 +615,14 @@ export function pinLayers(
       getIcon: () => icon,
       // The landing squash. Anchored at the point, so compressing the pin drops
       // its head toward the roof and leaves the point where it landed.
-      getSize: px * squashed(ms),
+      // DERIVED FROM THE ICON rather than recomputed, and it has to be. The
+      // compression rides the icon's box (see pinIcon) and is quantised to
+      // twelve steps there; asking `squashed(ms)` for the size again would hand
+      // deck.gl a continuous height against a stepped aspect, and the width
+      // would wobble by up to four percent through the landing. Taken from the
+      // chosen icon the two cannot disagree: the drawn width is `icon.width / 2`
+      // whatever the compression is.
+      getSize: icon.height / 2,
       // Only the alpha is read: the icon is not a mask, so the shader keeps the
       // pin's own colours and multiplies this in. That is what a ghost needs —
       // a fainter copy of the same drawing, not a flat silhouette of it.

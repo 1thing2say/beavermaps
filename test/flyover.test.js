@@ -22,6 +22,7 @@ import {
 } from '../src/flyover.js';
 import {
   fallen, squashed, DROP_MS, SETTLED_MS, HOLD_MS, pinHeight, dropPixels, pinIcon, pinShadowIcon,
+  warmPinIcons,
 } from '../src/flyover-pin.js';
 import {
   pushPinSvg, pinShadowSvg, SHADOW_BOX, PUSH_PIN, PUSH_PIN_RED,
@@ -290,6 +291,51 @@ test('the highlight is a box around the building, and it goes away', () => {
   assert.deepEqual(highlightLayers(tools, {
     footprint: library.geometry, mass: { ground: 3, top: 3 }, roof, ms: anyTime,
   }), []);
+});
+
+test('the landing pin gets shorter without getting narrower', () => {
+  // deck.gl draws an icon `getSize` tall and takes its WIDTH from the icon's own
+  // aspect. So a pin squashed by handing the layer a smaller size loses height
+  // and width together, which is a pin moving away from the camera rather than
+  // one hitting a roof. The compression is baked into the icon's box instead,
+  // and this is the arithmetic that says the two cancel.
+  const px = 60;
+  const drawn = (squash) => {
+    const icon = pinIcon(PUSH_PIN_RED, px, squash);
+    // Exactly what pinLayers passes, derived from the icon so the quantised box
+    // and the size cannot disagree.
+    const size = icon.height / 2;
+    return { w: size * (icon.width / icon.height), h: size, icon };
+  };
+
+  const rest = drawn(1);
+  // Across the whole range the squash actually reaches — 1 down to 1 - SQUASH.
+  for (const squash of [1, 0.95, 0.9, 0.85, 0.8, 0.75]) {
+    const now = drawn(squash);
+    assert.ok(Math.abs(now.w - rest.w) < 1e-9,
+      `at squash ${squash} the pin is ${now.w.toFixed(2)}px wide, not ${rest.w.toFixed(2)}`);
+    assert.ok(now.h <= rest.h + 1e-9, 'a squashed pin got taller');
+  }
+  // ...and it really does get shorter, or the test above passes on a pin that
+  // never moves.
+  assert.ok(drawn(0.75).h < rest.h * 0.8);
+
+  // The point stays on the roof: the anchor is a fraction of the box, so it
+  // travels down with the box instead of the pin sinking into the building.
+  assert.ok(drawn(0.75).icon.anchorY < rest.icon.anchorY);
+
+  // The drawing follows the shortened box rather than letterboxing inside it,
+  // which is the difference between a squash and a gap under a small pin.
+  assert.match(decodeURIComponent(drawn(0.75).icon.url), /preserveAspectRatio="none"/);
+  assert.doesNotMatch(decodeURIComponent(rest.icon.url), /preserveAspectRatio/);
+
+  // Quantised, because deck.gl repacks its atlas the first time it sees an id
+  // and the landing is the one moment that must not hitch.
+  const ids = new Set();
+  for (let i = 0; i <= 100; i += 1) ids.add(pinIcon(PUSH_PIN_RED, px, 1 - (i / 100) * 0.26).id);
+  assert.ok(ids.size <= 14, `${ids.size} distinct icons across the squash is an atlas repack a frame`);
+  // And warming is a no-op rather than a throw where there is no Image.
+  assert.doesNotThrow(() => warmPinIcons(PUSH_PIN_RED, px));
 });
 
 test('the campus box holds the campus, with room for a building on its edge', () => {
