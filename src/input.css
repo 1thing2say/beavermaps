@@ -3184,3 +3184,57 @@ body.no-routing #side-panel {
 @media (prefers-reduced-motion: reduce) {
     .g-boot-spin { animation: none; }
 }
+
+/* --- touch targets ---------------------------------------------------------
+
+   THE ONE THING THE PHONE LAYOUT ACTUALLY GOT WRONG. Audited at 320, 360, 390
+   and 430 px wide: no horizontal overflow anywhere, nothing pushed off screen,
+   the columns become sheets as intended. What every size failed was the size of
+   the things you press — Mapbox ships its controls at 32x32, its attribution
+   button at 24, and two of ours were 22x32 and 36x36.
+
+   44x44 is Apple's floor and 48x48 is Google's, and they are not style
+   guidance: they are the measured width of an adult fingertip's contact patch.
+   Below it the miss rate climbs, and a map is used one-handed, walking, outdoors
+   — the worst case for aim that a touch interface has.
+
+   Padding rather than a bigger drawing, everywhere it is possible. The icon
+   stays the size it was designed at and the TARGET grows around it, so nothing
+   here changes what the map looks like — only what it is like to hit. */
+@media (max-width: 640px) {
+    /* Mapbox's own stack: the group holds the visual box, so the buttons are
+       grown and the group is left to follow them. */
+    /* `!important`, and this is the case the keyword exists for rather than a
+       shortcut around specificity. mapbox-gl.css is imported by src/main.js, so
+       the browser injects it AFTER this file's <link> — a third-party sheet that
+       arrives later and wins every tie it is in. There is no selector this side
+       of the argument that can outrank a rule appended after it at equal
+       specificity, short of guessing at their internals. */
+    .mapboxgl-ctrl-group button {
+        width: 44px !important;
+        height: 44px !important;
+    }
+
+    /* Its icons are background images sized to the old 29px box, so they need
+       telling that the box moved or they sit in the top-left corner of it. */
+    .mapboxgl-ctrl-group button .mapboxgl-ctrl-icon {
+        background-position: center;
+    }
+
+    /* The attribution "i". It cannot be 44px square without becoming the most
+       prominent thing in the corner, so it gets the touch area without the
+       ink: a transparent box hung around a mark that stays 24px. */
+    .mapboxgl-ctrl-attrib-button {
+        width: 44px !important;
+        height: 44px !important;
+        background-position: center;
+    }
+
+    /* Ours. `min-` rather than `width`, so anything already larger is left
+       alone and this cannot shrink a control by accident. */
+    #search-go,
+    #directions-btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
