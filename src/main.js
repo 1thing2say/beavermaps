@@ -47,10 +47,11 @@ import { ringOf, centreOf, trimToCampus } from './campus-clip.js';
 import { bayRake } from './bay-rake.js';
 import { createGeolocation } from './geolocation.js';
 import { createDebugMenu } from './debug.js';
+import { lightPresetAt, nextCheckMs } from './daylight.js';
 import { createLightingControl } from './lighting.js';
 import roomsData from './rooms.json';
 import { buildRoomIndex, lookupRoom } from './rooms.js';
-import { FONTS, SATELLITE, palette, styleKey } from './palette.js';
+import { FONTS, SATELLITE, palette, styleKey, underPreset } from './palette.js';
 
 import {
   buildAreas,
@@ -158,9 +159,65 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /** The label face for the look currently on screen. See FONTS. */
   const mapFont = () => FONTS[currentSkin] ?? FONTS.classic;
 
+  // ---- the sky, and the palette that follows it -------------------------
+  //
+  // These sit ABOVE the map rather than with the rest of the lighting state,
+  // and they have to: `litPalette` is what hands the constructor below its
+  // style, so every name it touches must already exist when that line runs.
+  // Declared any lower they are in the temporal dead zone at first use, which
+  // is not a warning — it is a blank page.
+  /**
+   * Which lighting preset the sky is doing over my campus, right now.
+   *
+   * Read at every apply rather than captured, and re-applied on a timer — see
+   * `watchDaylight` — because a map left open through a sunset should follow it
+   * rather than hold whatever it was loaded at.
+   */
+  const clockPreset = () => lightPresetAt(new Date(), CAMPUS_CENTRE[0], CAMPUS_CENTRE[1]);
+
+  /**
+   * Re-light the map when the sun has moved enough to matter.
+   *
+   * A self-rescheduling timeout rather than a fixed interval, because the gap to
+   * the next possible change is knowable and is usually hours: `nextCheckMs`
+   * returns a minute near a threshold and a quarter of an hour in the middle of
+   * the afternoon. A phone should not be woken every minute to be told it is
+   * still daytime.
+   *
+   * `applyLighting` is idempotent and cheap when nothing has changed — it pushes
+   * the same config value Mapbox already holds — so this does not need to track
+   * what the last preset was.
+   */
+  let daylightTimer = null;
+  function watchDaylight() {
+    clearTimeout(daylightTimer);
+    daylightTimer = setTimeout(() => {
+      applyLighting();
+      watchDaylight();
+    }, nextCheckMs(new Date(), CAMPUS_CENTRE[0], CAMPUS_CENTRE[1]));
+  }
+
+  /**
+   * The palette, moved to the time of day.
+   *
+   * Every reader of the palette goes through here rather than calling
+   * `palette()` directly, because a campus drawn at one time of day over a city
+   * drawn at another is the bug this exists to close — see `underPreset` in
+   * src/palette.js. The bench wins when it is set, so the lighting bench still
+   * asks a whole question and gets a whole answer.
+   */
+  function litPalette() {
+    const base = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const preset = lightingBench && lightingBench.preset !== 'auto'
+      ? lightingBench.preset : clockPreset();
+    return underPreset(base, preset);
+  }
+
+  let lightingBench = null;
+
   const map = new mapboxgl.Map({
     container: 'map',
-    style: palette(currentProvider, currentBasemap, currentTheme, currentSkin).style,
+    style: litPalette().style,
     // Fitting the network's own bounds rather than a fixed centre/zoom means the
     // campus fills the frame on a phone and a desktop alike.
     bounds: CAMPUS_BOUNDS,
@@ -268,7 +325,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // setting from following somebody out of the back room, and `benchLights` is
   // Standard's own light array, captured on every style load so the override
   // has something to be put back to. See src/lighting.js.
-  let lightingBench = null;
   let debugOpen = false;
   let benchLights = null;
   let benchTilt = false;
@@ -619,7 +675,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * is absent from every feature, so the base coalesces to 0.
    */
   function addBuildingsLayer() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
 
     // The theme toggle no longer rebuilds the style, so an existing layer has
     // to be recoloured in place rather than left on the old palette.
@@ -696,7 +752,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function applyLighting() {
     if (!styleBuilt) return;
 
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
     const bench = debugOpen ? lightingBench : null;
 
     // The extrusions are navigation-only — see removeBuildingsLayer — and the
@@ -741,7 +797,17 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // bench pointed at a style that has no lighting should be quiet, not noisy.
     if (colors.lightPreset === null) return;
 
-    setConfig('lightPreset', bench && bench.preset !== 'auto' ? bench.preset : colors.lightPreset);
+    // THE SKY, NOT THE INTERFACE. `colors.lightPreset` is the theme's opinion —
+    // light means day, dark means night — which is a statement about the chrome
+    // and not about the world, and it left the map in broad daylight at eleven
+    // at night. The clock's answer comes from the sun's actual elevation over
+    // this campus; see src/daylight.js for why that is arithmetic rather than a
+    // table of hours.
+    //
+    // The theme is still whatever the device or the visitor says. These are two
+    // different questions — what the interface should look like, and what the
+    // ground outside looks like — and only the second one has a right answer.
+    setConfig('lightPreset', bench && bench.preset !== 'auto' ? bench.preset : clockPreset());
     // `default` is Standard's own default and the value the app runs at — the
     // app never sets this key, so `auto` means putting it back rather than
     // leaving it alone.
@@ -864,7 +930,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * layer and the campus renders inside out.
    */
   function addBasemapLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
     const { land } = colors;
 
     // Over imagery there is nothing to add — see SATELLITE.land.
@@ -1151,7 +1217,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * same shape as every other builder here.
    */
   function addClosedLayers() {
-    if (!palette(currentProvider, currentBasemap, currentTheme, currentSkin).land) {
+    if (!litPalette().land) {
       // Over imagery the sheet is not drawn at all, so neither is this.
       for (const id of ['campus-closed-line', 'campus-closed-fill']) {
         if (map.getLayer(id)) map.removeLayer(id);
@@ -1284,7 +1350,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * Mapbox honours the order it was given.
    */
   function addHighlightLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
 
     if (map.getLayer('highlight-fill')) {
       for (const [id, property] of [
@@ -1363,9 +1429,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * paint value because a symbol layer has one `text-color` and this map draws
    * eight categories through it.
    */
-  const amenityHalo = () => palette(currentProvider, currentBasemap, currentTheme, currentSkin).labelHalo;
+  const amenityHalo = () => litPalette().labelHalo;
   /** The ring the markers are drawn with, for the callers that have no `colors`. */
-  const pinRing = () => palette(currentProvider, currentBasemap, currentTheme, currentSkin).pinRing;
+  const pinRing = () => litPalette().pinRing;
 
   const inkFor = (property) => {
     // Over imagery a tint has nothing fixed to sit against — foliage, tarmac
@@ -1542,7 +1608,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * means clearing a category is a setData(EMPTY), not a filter on a mixed set.
    */
   function addCategoryLayer() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
 
     if (map.getLayer('category-pins')) {
       // Same shape as the other builders: a theme change re-runs this to
@@ -2163,7 +2229,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
   /** ...and its `text-color`, with the hovered pin's name in the accent. */
   function pinTextExpr(layer) {
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
     const base = layer === 'campus-amenities' ? inkFor('kind')
       : layer === 'category-pins' ? inkFor('icon')
         : labelPaint(layer.replace('campus-labels-', ''), colors);
@@ -2309,7 +2375,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // The hue the resting label was set in, so the caption crosses from it to
       // the map's ink rather than appearing already black.
       ink: currentBasemap === 'satellite' ? SATELLITE.label : pinInk(hit.kind, currentTheme),
-      ring: palette(currentProvider, currentBasemap, currentTheme, currentSkin).pinRing,
+      ring: litPalette().pinRing,
       from,
     });
 
@@ -2621,7 +2687,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // nothing left for it to collide with and no arithmetic to get wrong.
 
   function addDirectoryLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
 
     if (map.getLayer('campus-directory-fill')) {
       map.setPaintProperty('campus-directory-fill', 'fill-color', colors.route);
@@ -2967,7 +3033,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   function addLabelLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
 
     if (map.getLayer('campus-labels-building')) {
       for (const kind of LABEL_KINDS) {
@@ -3004,7 +3070,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // A style swap can land between the loader resolving and this running, and
     // the palette can have changed under it — so both are re-read here.
     if (map.getLayer('campus-labels-building') || !map.getSource('campus-labels')) return;
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
 
     const common = {
       type: 'symbol',
@@ -3238,7 +3304,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * Mapbox draws the campus from, so the cut lands exactly on their edge.
    */
   function addCampusMask() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
 
     if (!map.getSource('campus-boundary')) {
       map.addSource('campus-boundary', { type: 'geojson', data: campusBoundary });
@@ -3355,7 +3421,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   function addNetworkLayers() {
-    const colors = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
+    const colors = litPalette();
 
     // Mapbox Standard exposes configuration instead of addressable layers, and
     // this is where light and dark actually happen now.
@@ -3935,7 +4001,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // diff:false forces a full style reload. The default diffing path can
       // drop custom layers without firing style.load, leaving a bare basemap.
       // style.load re-adds our layers and re-requests the ground.
-      map.setStyle(palette(currentProvider, currentBasemap, currentTheme, currentSkin).style, { diff: false });
+      map.setStyle(litPalette().style, { diff: false });
       return;
     }
 
@@ -4498,6 +4564,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   renderLegend();
 
   map.on('load', async () => {
+    // From here on the sky is followed rather than sampled once. See
+    // watchDaylight.
+    watchDaylight();
     // Real GPS. Requires a secure context (https or localhost) or the browser
     // silently refuses to report a position.
     //

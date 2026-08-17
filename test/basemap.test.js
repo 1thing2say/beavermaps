@@ -6,6 +6,8 @@
 // promoted letterforms into buildings.
 
 import test from 'node:test';
+import { sunAt, lightPresetAt, nextCheckMs, HORIZON_DEG, CHECK_MIN_MS, CHECK_MAX_MS } from '../src/daylight.js';
+import { underPreset, THEMES } from '../src/palette.js';
 import assert from 'node:assert/strict';
 import {
   load, CAMPUS, eachPosition, polygonsOf, signedArea, pointInRing, ringAreaM2,
@@ -189,4 +191,88 @@ test('the parts the app draws itself are marked hidden', () => {
   for (const p of plates) {
     assert.equal(p.properties.hidden, true, `label plate ${p.properties.i} is not hidden`);
   }
+});
+
+test('the lighting follows the sun rather than the clock or the theme', () => {
+  const LON = -121.3466;
+  const LAT = 38.6489;
+  const at = (iso) => new Date(iso);
+
+  // Sacramento's published solstice times, which is the check that matters: a
+  // table of hours cannot do this. Sunset moves by three and a half hours
+  // between these two dates.
+  const crossing = (day, from, to) => {
+    let last = null;
+    for (let m = 0; m < 1440; m += 1) {
+      const t = new Date(Date.parse(`${day}T00:00:00Z`) + m * 60_000);
+      const e = sunAt(t, LON, LAT).elevation;
+      if (last !== null && ((from === 'up' && last <= HORIZON_DEG && e > HORIZON_DEG)
+        || (from === 'down' && last > HORIZON_DEG && e <= HORIZON_DEG))) return t;
+      last = e;
+    }
+    return null;
+  };
+  // June solstice: published sunrise 05:42, sunset 20:32 PDT (UTC-7).
+  const utcHm = (t, offset) => {
+    const local = new Date(t.getTime() + offset * 3_600_000);
+    return local.getUTCHours() * 60 + local.getUTCMinutes();
+  };
+  const near = (got, want, slack, what) => assert.ok(Math.abs(got - want) <= slack,
+    `${what}: ${Math.floor(got / 60)}:${String(got % 60).padStart(2, '0')} is more than `
+    + `${slack} min from ${Math.floor(want / 60)}:${String(want % 60).padStart(2, '0')}`);
+  near(utcHm(crossing('2026-06-21', 'up'), -7), 5 * 60 + 42, 8, 'june sunrise');
+  near(utcHm(crossing('2026-06-21', 'down'), -7), 20 * 60 + 32, 8, 'june sunset');
+  near(utcHm(crossing('2026-12-21', 'down'), -8), 16 * 60 + 50, 8, 'december sunset');
+
+  // The four presets, and that dawn and dusk are told apart by direction rather
+  // than by height — they are the same few degrees of sky.
+  assert.equal(lightPresetAt(at('2026-06-21T19:00:00Z'), LON, LAT), 'day');      // noon PDT
+  assert.equal(lightPresetAt(at('2026-06-22T07:00:00Z'), LON, LAT), 'night');    // midnight
+  assert.equal(lightPresetAt(at('2026-06-21T13:00:00Z'), LON, LAT), 'dawn');     // 06:00
+  assert.equal(lightPresetAt(at('2026-06-22T03:00:00Z'), LON, LAT), 'dusk');     // 20:00
+  const dawn = sunAt(at('2026-06-21T13:00:00Z'), LON, LAT);
+  const dusk = sunAt(at('2026-06-22T03:00:00Z'), LON, LAT);
+  assert.ok(dawn.rising && !dusk.rising, 'dawn and dusk are not distinguished by direction');
+
+  // The poll backs off away from a boundary and tightens near one.
+  const noon = nextCheckMs(at('2026-06-21T19:00:00Z'), LON, LAT);
+  const edge = nextCheckMs(at('2026-06-22T03:10:00Z'), LON, LAT);
+  assert.equal(noon, CHECK_MAX_MS, 'the poll does not back off in the middle of the day');
+  assert.ok(edge < noon, 'the poll does not tighten near a boundary');
+  assert.ok(edge >= CHECK_MIN_MS);
+});
+
+test('the campus and the city agree about the time of day', () => {
+  // The bug this closes: everything drawn over the campus is emissive, so
+  // lighting cannot touch it — at dusk the city went navy around a college
+  // still sitting in a summer afternoon.
+  const day = underPreset(THEMES.light, 'day');
+  assert.deepEqual(day, THEMES.light, 'day is the palette as authored');
+
+  const night = underPreset(THEMES.light, 'night');
+  const lum = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    return ((n >> 16) & 255) * 0.2126 + ((n >> 8) & 255) * 0.7152 + (n & 255) * 0.0722;
+  };
+  // The campus comes DOWN...
+  for (const key of ['mask', 'building', 'buildingLine']) {
+    assert.ok(lum(night[key]) < lum(THEMES.light[key]) - 8,
+      `${key} did not darken with the sky`);
+  }
+  for (const [kind, colour] of Object.entries(night.land)) {
+    assert.ok(lum(colour) <= lum(THEMES.light.land[kind]),
+      `land.${kind} did not darken with the sky`);
+  }
+  // ...and the city comes UP, because Standard's own lighting takes it down
+  // again and an unlifted night city is more contrast than a map can carry.
+  assert.ok(lum(night.basemapConfig.colorLand) > lum(THEMES.light.basemapConfig.colorLand),
+    'the city was not lifted to meet the campus');
+
+  // Type is excluded on purpose: a halo that dims with its own label cancels
+  // itself out, and the ground is moving under both.
+  for (const key of ['label', 'labelHalo', 'pinRing']) {
+    assert.equal(night[key], THEMES.light[key], `${key} should not follow the sky`);
+  }
+  // ...and the dark theme's own night is the authored one, not a doubling.
+  assert.equal(underPreset(THEMES.dark, 'day'), THEMES.dark);
 });

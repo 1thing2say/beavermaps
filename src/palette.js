@@ -734,3 +734,97 @@ export function styleKey(provider, basemap, theme, skin) {
     : `${palette(provider, basemap, theme, skin).style}:${skin}`;
 }
 
+/**
+ * The same palette, moved to where the sun actually is.
+ *
+ * TWO MAPS WERE DISAGREEING ABOUT THE TIME OF DAY. Everything this app draws
+ * over the campus is painted with `fill-emissive-strength: 1`, which is what
+ * makes the colours above render as authored — see the note at the top of this
+ * file, and the measurement that says Standard's night lighting is not a
+ * multiply that can be pre-compensated for. The consequence is that the campus
+ * is the one thing on screen that lighting cannot touch: at dusk the city went
+ * navy around a college still sitting in the middle of a summer afternoon.
+ *
+ * So the campus is moved by hand, here, by the amount the sky moved. This is not
+ * a simulation of Standard's lighting and does not try to be — matching it
+ * exactly would mean reimplementing it, and it changes when Mapbox retunes it.
+ * It is the far cruder claim that a campus under a dark sky should be darker,
+ * applied consistently to every emissive colour so their relationships survive.
+ *
+ * AND THE CITY IS MET HALF WAY, from the other side. Standard's own colours DO
+ * go through its lighting, so under `night` an authored light grey lands almost
+ * black — which is correct, and is a great deal more contrast than a campus map
+ * wants at the moment somebody is trying to read it. The authored values are
+ * lifted toward white under the dark presets so the rendered result comes back
+ * up. The two adjustments converge: the campus comes down, the city comes up,
+ * and they meet.
+ *
+ * `lift` is toward white and `dim` is toward black, both as a fraction of the
+ * remaining distance, so no channel can leave its range and nothing needs
+ * clamping. The numbers are per preset and are the shallow end of what looks
+ * right rather than the deep end: a campus map at night still has to be a map.
+ */
+const TIME_OF_DAY = {
+  day: { dim: 0, lift: 0 },
+  dawn: { dim: 0.10, lift: 0.10 },
+  dusk: { dim: 0.16, lift: 0.16 },
+  night: { dim: 0.34, lift: 0.30 },
+};
+
+const channels = (hex) => {
+  const m = /^#([0-9a-f]{6})$/i.exec(String(hex).trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+const hex = (rgb) => `#${rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+
+/** Toward black by `t` of the way. Non-colours are passed through untouched. */
+export const dimmed = (colour, t) => {
+  const rgb = channels(colour);
+  return rgb ? hex(rgb.map((v) => v * (1 - t))) : colour;
+};
+/** ...and toward white, which is the same move in the other direction. */
+export const lifted = (colour, t) => {
+  const rgb = channels(colour);
+  return rgb ? hex(rgb.map((v) => v + (255 - v) * t)) : colour;
+};
+
+/**
+ * A palette re-lit for a preset.
+ *
+ * Every string that names a colour is moved and everything else is left alone,
+ * so a palette gaining a key gains the behaviour without this having to be
+ * edited. `label`, `labelHalo` and `pinRing` are deliberately excluded: type has
+ * to stay legible against ground that is moving under it, and a halo that dims
+ * with its own label cancels itself out.
+ */
+const KEEP = new Set(['label', 'labelHalo', 'pinRing', 'style', 'lightPreset']);
+
+export function underPreset(colors, preset) {
+  const move = TIME_OF_DAY[preset];
+  if (!move || (!move.dim && !move.lift)) return colors;
+
+  const out = { ...colors };
+  for (const [key, value] of Object.entries(colors)) {
+    if (KEEP.has(key)) continue;
+    if (typeof value === 'string') out[key] = dimmed(value, move.dim);
+    // `land` is a map of ground class to colour, and every one of them is
+    // ground — so the whole object moves together or the sheet comes apart.
+    else if (value && typeof value === 'object' && key === 'land') {
+      out.land = Object.fromEntries(
+        Object.entries(value).map(([k, v]) => [k, dimmed(v, move.dim)]),
+      );
+    }
+  }
+  // The city, the other way. Only the colours: `roadsBrightness` is a number
+  // Standard multiplies by and lifting it toward white means nothing.
+  if (colors.basemapConfig) {
+    out.basemapConfig = Object.fromEntries(
+      Object.entries(colors.basemapConfig).map(([k, v]) => [
+        k, typeof v === 'string' ? lifted(v, move.lift) : v,
+      ]),
+    );
+  }
+  return out;
+}
