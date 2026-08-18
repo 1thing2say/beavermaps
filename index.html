@@ -68,13 +68,18 @@
          throws before the map exists shows a page rather than a logo forever. -->
     <div id="boot" class="g-boot">
         <div id="boot-logo" class="g-boot-mark" role="img" aria-label="beavermaps"></div>
-        <!-- CSS, not spin.js, and that is the whole point of it. spin.js lives
-             in the bundle, so a ring it draws cannot appear until the bundle
-             has — which on a throttled load is seconds after the mark, leaving
-             the splash sitting there looking stuck at exactly the moment it is
-             meant to say "working". This one turns at first paint. It is the
-             same drawing: twelve fading spokes is spin.js's shape, and a
-             conic-gradient ring reads as the same object. -->
+        <!-- spin.js's spinner goes here — main.js starts one in this box the
+             moment the bundle is up, which is nearly the whole of the wait.
+             What is drawn in CSS is only what covers the milliseconds BEFORE
+             that: spin.js lives in the bundle, so a ring it draws cannot appear
+             until the bundle has, and on a throttled load that is seconds after
+             the mark with the splash sitting there looking stuck at exactly the
+             moment it is meant to say "working".
+
+             The two are the same drawing on purpose — twelve fading spokes is
+             spin.js's shape and a conic-gradient ring reads as the same object
+             — so the handover is not something you can see. See .g-boot-spin
+             and .is-live in src/input.css. -->
         <div class="g-boot-spin" aria-hidden="true"></div>
     </div>
 

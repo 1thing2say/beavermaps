@@ -328,10 +328,36 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    */
   const boot = document.getElementById('boot');
   if (boot) {
+    // THE HANDOVER. The mark and a turning ring are on screen from first paint
+    // because both are CSS — that is what the ring in index.html is for, and on
+    // a cold load it is the only thing that can be, since spin.js is inside the
+    // bundle that has not arrived yet.
+    //
+    // But this line IS the bundle arriving. So the placeholder is spent now and
+    // the real spinner takes over for the rest of the wait, which is nearly all
+    // of it: the map's style, sprite, glyphs and eight overlay requests all
+    // happen after this point. What was a stand-in for seconds is now a stand-in
+    // for the handful of milliseconds before this statement runs.
+    //
+    // Same object either way — twelve fading spokes is spin.js's shape and the
+    // conic ring was drawn to read as it — so the swap is not something you can
+    // see happen. It is the difference between a ring that only looks like the
+    // app's spinner and the app's spinner.
+    const bootRing = boot.querySelector('.g-boot-spin');
+    let stopBootSpin = null;
+    if (bootRing) {
+      bootRing.classList.add('is-live');
+      stopBootSpin = spin(bootRing, { size: 'md' });
+    }
+
     let gone = false;
     const dismissBoot = () => {
       if (gone) return;
       gone = true;
+      // Before the fade rather than after the removal: twelve animating divs
+      // left running behind a display:none splash are twelve animations nobody
+      // is looking at.
+      stopBootSpin?.();
       boot.classList.add('g-boot--gone');
       // After the fade, not with it: removing the node immediately would cut
       // the transition off at its first frame.

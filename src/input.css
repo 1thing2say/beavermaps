@@ -3306,6 +3306,29 @@ body.no-routing #side-panel {
     .g-boot-spin { animation: none; }
 }
 
+/* ...and once the bundle is up, this box stops being a ring and becomes the
+   frame around the real one. See the handover in main.js.
+   ---------------------------------------------------------------------------
+   Everything the placeholder drew has to go, not just the animation: a conic
+   gradient still under spin.js's twelve spokes is two spinners at slightly
+   different speeds. `position: relative` is what the ring is swapped in FOR —
+   spin.js places its lines at top/left 50% absolutely and needs a containing
+   block, and giving it one here rather than inline keeps the geometry in the
+   stylesheet with the rest of the splash.
+
+   38px is the `md` spinner's drawn diameter — radius 9, lines reaching 7 past
+   it, 3 wide — so the box is the size of what is in it and the splash's 28px
+   flex gap measures from the right place. */
+.g-boot-spin.is-live {
+    width: 38px;
+    height: 38px;
+    position: relative;
+    background: none;
+    -webkit-mask: none;
+    mask: none;
+    animation: none;
+}
+
 /* --- touch targets ---------------------------------------------------------
 
    THE ONE THING THE PHONE LAYOUT ACTUALLY GOT WRONG. Audited at 320, 360, 390
