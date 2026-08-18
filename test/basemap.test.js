@@ -310,3 +310,54 @@ test('the campus and the city agree about the time of day', () => {
   // ...and the dark theme's own night is the authored one, not a doubling.
   assert.equal(underPreset(THEMES.dark, 'day'), THEMES.dark);
 });
+
+test('the sun is where the sun is, and it sets in the west', () => {
+  // The directional light's direction is derived from this, and a light that
+  // points the wrong way is a campus whose shadows fall east in the morning.
+  // Checked against the four positions anybody can verify from a window.
+  const LON = -121.347025;
+  const LAT = 38.649511;
+
+  // Local solar noon on the December solstice: due south, and low.
+  const noon = sunAt(new Date('2026-12-21T20:00:00Z'), LON, LAT);
+  assert.ok(Math.abs(noon.azimuth - 180) < 3,
+    `midwinter noon put the sun at ${noon.azimuth.toFixed(1)} deg, not due south`);
+  // 90 - latitude - obliquity, which is the whole of why winter is dark here.
+  assert.ok(Math.abs(noon.elevation - (90 - LAT - 23.44)) < 1,
+    `midwinter noon elevation ${noon.elevation.toFixed(1)} is not 90 - lat - obliquity`);
+
+  // Midsummer sunrise is NORTH of due east and sunset north of due west — the
+  // thing a fixed light direction can never express, and the reason the shadows
+  // swing across a year as well as across a day.
+  const dawn = sunAt(new Date('2026-06-21T13:00:00Z'), LON, LAT);
+  assert.ok(dawn.azimuth > 45 && dawn.azimuth < 90,
+    `midsummer sunrise came out at ${dawn.azimuth.toFixed(1)} deg, not north of east`);
+  assert.ok(dawn.rising, 'the morning sun is not rising');
+
+  const dusk = sunAt(new Date('2026-06-22T02:30:00Z'), LON, LAT);
+  assert.ok(dusk.azimuth > 270 && dusk.azimuth < 330,
+    `midsummer sunset came out at ${dusk.azimuth.toFixed(1)} deg, not north of west`);
+  assert.ok(!dusk.rising, 'the evening sun is not setting');
+
+  // Morning and afternoon are not mirror images. acos alone cannot tell them
+  // apart — the sun is at the same elevation either side of noon — so this is
+  // the assertion that catches the hour-angle flip going missing.
+  // Solar noon is found rather than assumed: it is a quarter-hour from clock
+  // noon at this longitude and wanders across the year with the equation of
+  // time, so a hard-coded pair of timestamps would be testing the calendar.
+  let noonAt = null;
+  for (let m = 0; m < 1440; m += 1) {
+    const when = new Date(Date.UTC(2026, 2, 20, 0, m));
+    const { hourAngle } = sunAt(when, LON, LAT);
+    if (Math.abs(hourAngle) < 0.13) { noonAt = when; break; }  // 0.13 deg ~ 30 s
+  }
+  assert.ok(noonAt, 'no solar noon found in the day');
+  const before = sunAt(new Date(noonAt.getTime() - 2 * 3600_000), LON, LAT);
+  const after = sunAt(new Date(noonAt.getTime() + 2 * 3600_000), LON, LAT);
+  assert.ok(Math.abs(before.elevation - after.elevation) < 1,
+    `two hours either side of solar noon gave elevations `
+    + `${before.elevation.toFixed(2)} and ${after.elevation.toFixed(2)}`);
+  assert.ok(before.azimuth < 180 && after.azimuth > 180,
+    `two hours either side of noon gave ${before.azimuth.toFixed(0)} and `
+    + `${after.azimuth.toFixed(0)} — the afternoon is a mirror of the morning`);
+});

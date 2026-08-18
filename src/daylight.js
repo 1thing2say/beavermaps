@@ -101,7 +101,21 @@ export function sunAt(date, lon, lat) {
     + Math.cos(lat * rad) * Math.cos(declination * rad) * Math.cos(hourAngle * rad),
   ) * deg;
 
-  return { elevation, rising: hourAngle < 0, declination, hourAngle };
+  // WHICH WAY the sun is, not just how high — the half of the answer that was
+  // not needed while the only consumer was a four-word preset, and the whole of
+  // it now that something casts a shadow. Measured clockwise from due north, so
+  // 90 is due east and 180 is due south.
+  //
+  // The `hourAngle > 0` flip is what stops the afternoon being a mirror of the
+  // morning: acos cannot tell them apart, because the sun is at the same
+  // ELEVATION either side of noon and only the side it is on differs. Same
+  // argument as `rising` above, and the same quantity settles it.
+  const cosAz = (Math.sin(declination * rad) - Math.sin(elevation * rad) * Math.sin(lat * rad))
+    / (Math.cos(elevation * rad) * Math.cos(lat * rad));
+  let azimuth = Math.acos(Math.min(1, Math.max(-1, cosAz))) * deg;
+  if (hourAngle > 0) azimuth = 360 - azimuth;
+
+  return { elevation, azimuth, rising: hourAngle < 0, declination, hourAngle };
 }
 
 /**

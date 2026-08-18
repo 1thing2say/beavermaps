@@ -49,11 +49,11 @@ import { ringOf, centreOf, trimToCampus } from './campus-clip.js';
 import { bayRake } from './bay-rake.js';
 import { createGeolocation } from './geolocation.js';
 import { createDebugMenu } from './debug.js';
-import { lightPresetAt, nextCheckMs } from './daylight.js';
+import { lightPresetAt, nextCheckMs, sunAt, HORIZON_DEG } from './daylight.js';
 import { createLightingControl } from './lighting.js';
 import roomsData from './rooms.json';
 import { buildRoomIndex, lookupRoom } from './rooms.js';
-import { FONTS, SATELLITE, palette, styleKey, underPreset } from './palette.js';
+import { FONTS, SATELLITE, palette, styleKey, underPreset, toward } from './palette.js';
 
 import {
   buildAreas,
@@ -842,7 +842,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         'fill-extrusion-color': colors.building,
         'fill-extrusion-height': ['get', 'height'],
         'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0],
-        'fill-extrusion-opacity': 0.85,
+        // SOLID, where it was 0.85. A translucent building is a building you
+        // can see the pavement through, which was survivable while these were
+        // unlit slabs and is not now: the shadow one casts lands on ground that
+        // is also showing through the thing casting it.
+        'fill-extrusion-opacity': 1,
+        // The point of the whole exercise, stated rather than left to the
+        // default so that turning it off is a deliberate act. See sunLights.
+        'fill-extrusion-cast-shadows': true,
+        // ...and the contact shadow, which is what stops a building looking
+        // like it is hovering a foot above its own footprint. Cheap, local, and
+        // the one lighting cue that survives an overcast sky with no sun to
+        // cast anything.
+        'fill-extrusion-ambient-occlusion-intensity': 0.35,
+        'fill-extrusion-ambient-occlusion-radius': 3,
         // The same opt-out every other layer here carries, and this was the one
         // that missed it. Standard lights extrusions through its own model, and
         // under the night preset that drove an authored #2f3336 to roughly
@@ -875,8 +888,81 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    *
    * One number with one explanation, in the paint spec above where the
    * explanation belongs, read from two places rather than written in two.
+   *
+   * 0.75 was the number while NOTHING LIT THE SCENE — see sunLights below for
+   * what that turned out to mean. With a real ambient and a real sun on the
+   * map, three quarters self-lit is the setting that throws the sun away: a
+   * face that is 75% emissive barely darkens when it turns away from the light,
+   * so the walls stay the colour of the roof and the shadow the building casts
+   * lands next to a building that does not look lit. 0.2 keeps enough self-light
+   * that a building is still legible against a dark ground and lets the other
+   * 80% be shading.
    */
-  const BUILDING_EMISSIVE = 0.75;
+  const BUILDING_EMISSIVE = 0.2;
+
+  /**
+   * The sun over my campus right now, as Mapbox states a light.
+   *
+   * WHY THIS HAD TO EXIST. "Stand the buildings up" extruded the footprints and
+   * produced flat slabs with no shadows, and the reason turned out to be that
+   * there was no light in the scene at all: `map.getLights()` answered
+   * `[{ id: 'flat', type: 'flat' }]`. Google is the default provider, its style
+   * is BLANK_STYLE, and a blank style has no lighting model — so the campus was
+   * being asked to cast shadows in a world with no sun. Under Mapbox Standard
+   * there IS a sun, but the extrusions were opted three quarters out of it.
+   *
+   * So the app brings its own, and it points where the real one does. The
+   * azimuth and elevation come from the same NOAA solve that already decides
+   * whether it is dawn or dusk — see src/daylight.js — which means the shadows
+   * on the campus fall the way the shadows on the campus fall, and swing round
+   * over the course of a day rather than sitting at a fixed art-directed angle.
+   *
+   * BELOW THE HORIZON THERE IS NO SUN, and this refuses to invent one. `up`
+   * fades the directional light out over the last twelve degrees of the sky and
+   * reaches zero at sunset, because a directional light with the sun underneath
+   * the ground is a light shining upwards and every shadow in the scene points
+   * at the sky. What is left at night is ambient alone, lifted by the floor
+   * below so the buildings stay solid rather than becoming silhouettes.
+   */
+  const AMBIENT_FLOOR = 0.45;
+  const AMBIENT_SUN = 0.35;
+  const SUN_INTENSITY = 0.9;
+  /** How far above the horizon the sun has to climb to be at full strength. */
+  const SUN_RAMP_DEG = 12;
+
+  function sunLights() {
+    const { elevation, azimuth } = sunAt(new Date(), CAMPUS_CENTRE[0], CAMPUS_CENTRE[1]);
+    const up = Math.max(0, Math.min(1, (elevation - HORIZON_DEG) / SUN_RAMP_DEG));
+    // Warm at the horizon and white overhead, which is the one piece of this
+    // that is a colour decision rather than an astronomical one — but it is the
+    // decision every photograph of a low sun makes, and without it a dawn with
+    // long shadows is lit like noon.
+    const warm = toward('#ffffff', '#ffd2a0', 1 - up);
+    return [
+      {
+        id: 'ambient',
+        type: 'ambient',
+        // The sky rather than the sun: cool, because it is scattered light, and
+        // it never goes out.
+        properties: { color: toward('#ffffff', '#cdd9ee', 1 - up), intensity: AMBIENT_FLOOR + AMBIENT_SUN * up },
+      },
+      {
+        id: 'directional',
+        type: 'directional',
+        properties: {
+          color: warm,
+          intensity: SUN_INTENSITY * up,
+          // [azimuthal, polar], both degrees, describing where the light SOURCE
+          // is: clockwise from due north, and away from straight up. So a sun
+          // 70 degrees high is a polar angle of 20 and short shadows; a sun 5
+          // degrees up is 85, and the shadows run right across the campus.
+          direction: [azimuth, Math.max(1, 90 - elevation)],
+          'cast-shadows': true,
+          'shadow-intensity': up,
+        },
+      },
+    ];
+  }
 
   /**
    * Push the lighting bench onto the map, or take it back off.
@@ -949,7 +1035,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       syncBasemapStyle();
     }
 
-    if (colors.lightPreset === null) return;
+    // NOT A RETURN, and it used to be one — `if (colors.lightPreset === null)
+    // return;` stood here, and it is the whole reason "Stand the buildings up"
+    // produced flat slabs with no shadows.
+    //
+    // The reasoning was sound for the two setConfig calls it guards: Google's
+    // ground is a raster under BLANK_STYLE, there is no `basemap` import to
+    // name, and a bench pointed at a style with no config should be quiet
+    // rather than noisy. But it returned from the WHOLE function, and the
+    // lights below are not config. `setLights` works on any style including a
+    // blank one, and a blank one is precisely the case with no lighting of its
+    // own to fall back on — so under the default provider the scene was lit by
+    // nothing at all. `getLights()` answered `[{ id: 'flat', type: 'flat' }]`,
+    // and every extrusion was a correctly-rendered unlit box.
+    if (colors.lightPreset !== null) {
 
     // THE SKY, NOT THE INTERFACE. `colors.lightPreset` is the theme's opinion —
     // light means day, dark means night — which is a statement about the chrome
@@ -966,16 +1065,28 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // app never sets this key, so `auto` means putting it back rather than
     // leaving it alone.
     setConfig('theme', bench && bench.theme !== 'auto' ? bench.theme : 'default');
+    }
 
-    if (!benchLights) return;
+    // WHICH LIGHTS, and there are two answers now.
+    //
+    // With the buildings standing the app supplies its own sun — see sunLights
+    // — because that is the only case where the lighting has to do work rather
+    // than just look right, and because under the default provider there is
+    // otherwise no light in the scene whatsoever. Flat on the ground, the
+    // captured style lighting is put back and left alone.
+    //
+    // A clone every time, not the captured array: setLights takes ownership of
+    // what it is handed, and giving away the only copy of the style's own
+    // lighting means the next revert has nothing to revert to.
+    const standing = Boolean(map.getLayer('campus-buildings'));
+    let lights = standing
+      ? sunLights()
+      : (benchLights ? assist(structuredClone(benchLights), wanted) : null);
+    if (!lights) return;
     if (!bench?.lights) {
-      // A clone every time, not the captured array: setLights takes ownership
-      // of what it is handed, and giving away the only copy of Standard's own
-      // lighting means the next revert has nothing to revert to.
-      map.setLights(assist(structuredClone(benchLights), wanted));
+      map.setLights(lights);
       return;
     }
-    const lights = structuredClone(benchLights);
     for (const light of lights) {
       // Standard writes both intensities as expressions over `lightPreset` and
       // `theme` — that is the whole reason this override exists, since a preset
