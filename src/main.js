@@ -752,6 +752,47 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     setNavButtonsEnabled(false);
   }
 
+  /**
+   * Show or hide the top bar, moving the search field between the two homes.
+   *
+   * MOVED, not duplicated. There is one field, one set of handlers, one index
+   * and one results list behind it; a second copy in the header would be a
+   * second thing to keep in step with the first and it would drift the first
+   * time either was touched. `append` and `prepend` move a node that is already
+   * in the document, so this is a relocation rather than a rebuild — the value
+   * being typed, the open suggestion list and the focus all survive it.
+   *
+   * The map is told afterwards. Its canvas is sized to a container that just
+   * changed height, and Mapbox does not notice on its own.
+   */
+  const navbarEl = document.getElementById('navbar');
+  const navbarSlot = document.getElementById('navbar-search');
+  const navbarLegend = document.getElementById('navbar-legend');
+  const searchHome = document.querySelector('.g-search');
+  const topLeft = document.getElementById('top-left');
+  let navbarShown = false;
+
+  function showNavbar(on) {
+    if (on === navbarShown) return;
+    navbarShown = on;
+    navbarEl.hidden = !on;
+    document.body.classList.toggle('has-navbar', on);
+    if (on) navbarSlot.append(searchHome);
+    else topLeft.prepend(searchHome);
+    // The column reserves room for itself against the camera, and the bar has
+    // just changed how much room there is. Same call every panel toggle makes.
+    map.resize();
+    map.easeTo({ padding: campusPadding(), duration: 300 });
+  }
+
+  navbarLegend.addEventListener('click', () => {
+    // The same handler the layers menu's row uses, so there is one piece of
+    // state and three surfaces reading it rather than three opinions.
+    onLegendPressed();
+    navbarLegend.setAttribute('aria-expanded',
+      String(!legendPanel.classList.contains('hidden')));
+  });
+
   clearBtn.addEventListener('click', resetMap);
   // Clears AND closes, which is what makes it a replacement for Clear rather
   // than a second way to do what the directions button already does. A panel
@@ -4701,7 +4742,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     geolocateControl.trigger();
   }
 
-  function applyDebug({ open, routing, gps, fps, twopoint }) {
+  function applyDebug({ open, routing, gps, fps, twopoint, navbar }) {
     // Read by the next card rather than applied to the open one: the readout is
     // built with the flyover, and there is no sensible thing to do to a viewport
     // that is already orbiting.
@@ -4725,6 +4766,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // the point of moving them. The stylesheet does the hiding, so a card built
     // while the switch was on does not have to be rebuilt when it goes off.
     document.body.classList.toggle('no-twopoint', !(open && twopoint));
+
+    // NOT gated on the menu being open, and it is the only flag here that is
+    // not. The rule the back room is built on is that a LIE cannot follow you
+    // out of it — a routing GUI switched off, a GPS fix that is not yours —
+    // because those change what the app tells a visitor about the world. This
+    // one changes where the search field is. It is a layout, like the skin and
+    // the map type, and those persist too; a header that vanished the moment
+    // you closed the menu you turned it on in would just look broken.
+    showNavbar(navbar);
 
     const fixture = open && gps;
 
@@ -4766,6 +4816,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       gps: document.getElementById('debug-gps'),
       fps: document.getElementById('debug-fps'),
       twopoint: document.getElementById('debug-twopoint'),
+      navbar: document.getElementById('debug-navbar'),
     },
     onChange: applyDebug,
   });

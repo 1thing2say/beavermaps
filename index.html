@@ -83,6 +83,36 @@
         <div class="g-boot-spin" aria-hidden="true"></div>
     </div>
 
+    <!-- The top bar, which is off unless the debug menu asks for it.
+         ======================================================================
+         A different shape of chrome from the one this app ships: a white strip
+         across the top with the mark and the name at one end, the search field
+         in the middle and the legend at the other — a web app's header, rather
+         than Apple's floating sidebar over a full-bleed map.
+
+         It is a SETTING rather than a replacement because the two arrangements
+         disagree about what the map is. The sidebar treats the map as the page
+         and everything else as something floating over it; a header treats the
+         map as one pane of a page that has a title. Both are defensible and
+         only one can be on screen, so it is behind a switch until somebody
+         decides.
+
+         The search field is not duplicated here — there is one field with one
+         set of handlers and one index behind it, and main.js MOVES it into the
+         slot below and puts it back when the switch goes off. Two fields would
+         be two things to keep in step, and they would drift. -->
+    <header id="navbar" class="g-navbar app-chrome" hidden>
+        <div class="g-navbar-brand">
+            <span class="g-navbar-mark" role="img" aria-label="beavermaps"></span>
+            <span class="g-navbar-word">beavermaps</span>
+        </div>
+        <div id="navbar-search" class="g-navbar-search"></div>
+        <button id="navbar-legend" type="button" class="g-navbar-legend" aria-expanded="false">
+            <span class="g-icon" data-icon="legend"></span>
+            <span>Legend</span>
+        </button>
+    </header>
+
     <div class="app-shell">
         <div id="map"></div>
 
@@ -637,6 +667,15 @@
                         panel</span>
                 </span>
                 <input id="debug-twopoint" type="checkbox" class="g-switch">
+            </label>
+
+            <label class="g-debug-row" for="debug-navbar">
+                <span class="g-debug-text">
+                    <span class="g-debug-name">Top navigation bar</span>
+                    <span class="g-debug-hint">A white header with the mark, the search field and the
+                        legend, instead of the floating column</span>
+                </span>
+                <input id="debug-navbar" type="checkbox" class="g-switch">
             </label>
 
             <!-- Not a lie: it changes nothing and only draws what is already

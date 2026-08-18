@@ -3532,3 +3532,191 @@ body.no-twopoint .g-route-actions {
 .g-flyover-fps.is-slow {
     color: #fdd663;
 }
+
+
+/* ===========================================================================
+   The top navigation bar
+   ===========================================================================
+   Off unless the debug menu asks for it — see #debug-navbar. A different idea
+   about what this page is: the shipped chrome treats the map as the page and
+   floats everything over it, and this treats the map as one pane of a page that
+   has a title on it.
+
+   ALL WHITE, in both themes and both looks, which is the one rule stated rather
+   than derived. It is not `var(--g-surface)`: a header that went dark with the
+   theme would be the floating column again with square corners, and what is
+   being tried here is specifically the white strip. So the colours inside it
+   are stated too, because a bar that ignores the theme cannot let its contents
+   follow one — white text on white is how that mistake shows up.
+   =========================================================================== */
+
+.g-navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: var(--g-navbar-h);
+    padding: 0 16px;
+    background: #ffffff;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.g-navbar[hidden] {
+    display: none;
+}
+
+:root {
+    --g-navbar-h: 60px;
+}
+
+/* The mark and the name, as one unit that never wraps. */
+.g-navbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+}
+
+/* 28px is a whole multiple of the 32px source only if it is 32 — so it is 32.
+   The mark is a pixel drawing and the boot splash draws it at 128 for the same
+   reason: any size that is not a whole multiple puts a row and a half of source
+   pixels into one row of screen and the hard edges go soft. See .g-boot-mark. */
+.g-navbar-mark {
+    width: 32px;
+    height: 32px;
+    flex: none;
+    background-image: url('/src/logo.png');
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+}
+
+/* Lowercase as a value, not as a transform: it is spelt that way in the markup
+   and the CSS only holds it there. `text-transform` would leave a screen reader
+   saying whatever the markup said and would be a second place for the name to
+   live. */
+.g-navbar-word {
+    font-size: 19px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: #111111;
+}
+
+/* The field's home while the bar is up. It gives up the floating pill and
+   becomes the middle of a header: one row, bounded so it does not run the whole
+   width of a desktop window. */
+.g-navbar-search {
+    flex: 1;
+    min-width: 0;
+    max-width: 560px;
+    position: relative;
+}
+
+/* The shell gives up being a surface; the FIELD becomes one.
+   Painting the grey on .g-search put it behind the directions button too, which
+   photographed as a blue disc sitting on top of the input rather than beside
+   it. The button is a control next to a field, not a control inside one. */
+.has-navbar .g-navbar-search > .g-search {
+    background: transparent;
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 0;
+}
+
+.has-navbar .g-navbar-search .g-search-field {
+    background: #f1f3f4;
+    border: 0;
+    border-radius: 10px;
+}
+
+.has-navbar .g-navbar-search .g-search-input,
+.has-navbar .g-navbar-search .g-search-icon,
+.has-navbar .g-navbar-search .g-search-clear {
+    color: #202124;
+}
+
+.has-navbar .g-navbar-search .g-search-input::placeholder {
+    color: #5f6368;
+}
+
+.g-navbar-legend {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    height: 40px;
+    padding: 0 14px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    background: #ffffff;
+    color: #202124;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.g-navbar-legend:hover {
+    background: #f1f3f4;
+}
+
+.g-navbar-legend[aria-expanded="true"] {
+    background: #e8f0fe;
+    border-color: #c6dafc;
+    color: #1a73e8;
+}
+
+/* Everything else moves down by the height of the bar. The map included — a
+   canvas under a solid header is a strip of campus nobody can see, and the
+   attribution in the corner below is not the thing to push off screen. */
+/* The shell only, NOT the shell and the map. #map is inset:0 inside .app-shell,
+   so offsetting both pushed the canvas down twice — measured at 120px under a
+   60px bar, which is a strip of campus hidden behind nothing. */
+.has-navbar .app-shell {
+    top: var(--g-navbar-h);
+}
+
+.has-navbar .g-topleft {
+    top: calc(var(--g-navbar-h) + var(--g-gap));
+    max-height: calc(100dvh - var(--g-navbar-h) - var(--g-gap) * 3 - var(--g-credit-h));
+}
+
+/* On a phone the column is a bottom sheet and the field was pinned to the top
+   of the screen to stay away from it — which is exactly the slot the bar now
+   occupies, so the field goes back into the flow of the header and the sheet is
+   left alone. */
+@media (max-width: 640px) {
+    .has-navbar .g-search {
+        position: static;
+        width: auto;
+    }
+
+    .g-navbar {
+        gap: 10px;
+        padding: 0 10px;
+    }
+
+    /* The word goes and the mark stays. 320px has to hold a mark, a field and a
+       legend button, and the field is the one of the three that has to be
+       usable rather than merely present. */
+    .g-navbar-word {
+        display: none;
+    }
+
+    .g-navbar-legend span:not(.g-icon) {
+        display: none;
+    }
+
+    .g-navbar-legend {
+        padding: 0 10px;
+        min-width: 44px;
+    }
+}
