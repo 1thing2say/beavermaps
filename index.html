@@ -179,6 +179,14 @@
                  that actually sets an endpoint — see showRoutePanel in main.js. -->
             <div id="side-panel" class="g-card g-panel hidden">
                 <div class="g-route-head">
+                    <!-- The way out, and the reason Clear could go to the back
+                         room. It clears the route as well as closing the panel:
+                         a panel that hid itself and left the ribbon across the
+                         campus would be the half of Clear nobody wanted. -->
+                    <button id="route-close" type="button" class="g-icon-btn g-route-close"
+                        aria-label="Clear the route">
+                        <span class="g-icon" data-icon="close"></span>
+                    </button>
                     <div class="g-route-endpoints">
                         <div class="g-endpoint">
                             <span class="g-dot g-dot--start" aria-hidden="true"></span>
@@ -581,6 +589,28 @@
                     <span class="g-debug-hint">A fixed GPS fix at the centre of the campus</span>
                 </span>
                 <input id="debug-gps" type="checkbox" class="g-switch">
+            </label>
+
+            <!-- The three controls that were on the visitor's screen and are
+                 not a visitor's business.
+                 =============================================================
+                 "Start here" on a place card, and Simulate and Clear on the
+                 route panel. All three exist to compose a route between two
+                 arbitrary points and to walk it without walking, which is a
+                 thing you do while BUILDING this map — a visitor has one start
+                 point, the one they are standing on, and the button for that is
+                 Directions.
+
+                 Clear is the one that needed replacing rather than removing: a
+                 route has to be dismissable. The route panel has a close on it
+                 now, the way every other card here does. -->
+            <label class="g-debug-row" for="debug-twopoint">
+                <span class="g-debug-text">
+                    <span class="g-debug-name">Two-point routing</span>
+                    <span class="g-debug-hint">Start here on a card, and Simulate and Clear on the route
+                        panel</span>
+                </span>
+                <input id="debug-twopoint" type="checkbox" class="g-switch">
             </label>
 
             <!-- Not a lie: it changes nothing and only draws what is already

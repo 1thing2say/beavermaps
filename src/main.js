@@ -753,6 +753,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   clearBtn.addEventListener('click', resetMap);
+  // Clears AND closes, which is what makes it a replacement for Clear rather
+  // than a second way to do what the directions button already does. A panel
+  // that hid itself and left the ribbon lying across the campus would be the
+  // half of Clear nobody was asking for.
+  document.getElementById('route-close').addEventListener('click', () => {
+    resetMap();
+    toggleRoutePanel(false);
+  });
   startNavBtn.addEventListener('click', () => startNavigation());
   simulateBtn.addEventListener('click', () => startNavigation({ simulate: true }));
 
@@ -4693,7 +4701,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     geolocateControl.trigger();
   }
 
-  function applyDebug({ open, routing, gps, fps }) {
+  function applyDebug({ open, routing, gps, fps, twopoint }) {
     // Read by the next card rather than applied to the open one: the readout is
     // built with the flyover, and there is no sensible thing to do to a viewport
     // that is already orbiting.
@@ -4710,6 +4718,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     routingEnabled = !open || routing;
     document.body.classList.toggle('no-routing', !routingEnabled);
     if (!routingEnabled) toggleRoutePanel(false);
+
+    // The three developer controls: "Start here" on a place card, and Simulate
+    // and Clear on the route panel. Same `open &&` guarantee as the switch
+    // above — with the menu shut these are simply not on the screen, which is
+    // the point of moving them. The stylesheet does the hiding, so a card built
+    // while the switch was on does not have to be rebuilt when it goes off.
+    document.body.classList.toggle('no-twopoint', !(open && twopoint));
 
     const fixture = open && gps;
 
@@ -4750,6 +4765,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       routing: document.getElementById('debug-routing'),
       gps: document.getElementById('debug-gps'),
       fps: document.getElementById('debug-fps'),
+      twopoint: document.getElementById('debug-twopoint'),
     },
     onChange: applyDebug,
   });

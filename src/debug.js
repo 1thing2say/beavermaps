@@ -42,7 +42,7 @@ const STORAGE_KEY = 'mapper-debug';
  * because it is a switch and this is where the switches live, but it belongs
  * under its own heading in the markup rather than under "Pretend".
  */
-export const DEBUG_FLAGS = ['routing', 'gps', 'fps'];
+export const DEBUG_FLAGS = ['routing', 'gps', 'fps', 'twopoint'];
 
 const CLOSED = {
   open: false,

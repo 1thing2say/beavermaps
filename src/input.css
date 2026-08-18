@@ -3053,6 +3053,37 @@ body.no-routing #side-panel {
     display: none;
 }
 
+/* The three controls that belong to whoever is building this map rather than to
+   whoever is reading it. Hidden here rather than left out of the markup so that
+   flipping the switch does not have to rebuild a card that is already open.
+
+   Directions is left alone, and with the second tile gone it takes the whole
+   width — which is right: it was never one of two equal choices. */
+body.no-twopoint .g-place-action--start,
+body.no-twopoint #simulate-btn,
+body.no-twopoint #clear-btn {
+    display: none;
+}
+
+/* ...and with both gone the row has nothing left in it. */
+body.no-twopoint .g-route-actions {
+    display: none;
+}
+
+/* The route panel's close, top-right of its head, where every other card on
+   this map keeps one. Absolute so it does not shorten the endpoint rows it
+   sits beside — they are a fixed two-line stack and a flex sibling would
+   squeeze the destination name rather than overlap the space above it. */
+.g-route-head {
+    position: relative;
+}
+
+.g-route-close {
+    position: absolute;
+    top: 0;
+    right: 0;
+}
+
 /* --- narrow screens -------------------------------------------------------- */
 /*
    One column holds the left edge down to 640px, and below that it becomes a

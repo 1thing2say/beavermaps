@@ -120,10 +120,16 @@ function actions(coords, name, { onStart, onEnd }) {
     return button;
   }
 
-  row.append(
-    tile('directions', 'Directions', true, onEnd),
-    tile('walk', 'Start here', false, onStart),
-  );
+  row.append(tile('directions', 'Directions', true, onEnd));
+  // "Start here" is the other end of a two-point walk, and a two-point walk is
+  // something you compose while building this map rather than while using it: a
+  // visitor has one start point and it is the one they are standing on. Behind
+  // the debug menu's switch now, hidden by the stylesheet rather than left out
+  // of the DOM so a card built with the switch on survives it going off. See
+  // body.no-twopoint.
+  const start = tile('walk', 'Start here', false, onStart);
+  start.classList.add('g-place-action--start');
+  row.append(start);
   return row;
 }
 
