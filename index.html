@@ -187,20 +187,46 @@
                         aria-label="Clear the route">
                         <span class="g-icon" data-icon="close"></span>
                     </button>
+                    <!-- Both ends are FIELDS, not readouts.
+                         =================================================
+                         They were two spans that reported what the map had
+                         already been told, which made the panel the only place
+                         in the app you could read a route without being able to
+                         change one: to swap the destination you had to go back
+                         out to the map and tap something else. Typing is the
+                         obvious thing to try on a line that says "Not set", and
+                         it did nothing.
+
+                         They suggest over the same index the search field uses
+                         — my campus's own 120 places, plus rooms and course codes —
+                         so there is one answer to "what can I type here"
+                         wherever you type it. The start offers "Your location"
+                         at the top, because that is the answer most of the time
+                         and it is not a place you can spell. -->
                     <div class="g-route-endpoints">
                         <div class="g-endpoint">
                             <span class="g-dot g-dot--start" aria-hidden="true"></span>
                             <div class="g-endpoint-text">
-                                <span class="g-endpoint-label">Starting point</span>
-                                <span id="start-coord" class="g-endpoint-value">Not set</span>
+                                <label class="g-endpoint-label" for="start-coord">Starting point</label>
+                                <input id="start-coord" class="g-endpoint-value g-endpoint-input"
+                                    type="text" role="combobox" autocomplete="off" aria-expanded="false"
+                                    aria-controls="start-results" aria-autocomplete="list"
+                                    placeholder="Not set">
+                                <ul id="start-results" role="listbox" aria-label="Starting points"
+                                    class="g-results g-endpoint-results hidden"></ul>
                             </div>
                         </div>
                         <span class="g-endpoint-rule" aria-hidden="true"></span>
                         <div class="g-endpoint">
                             <span class="g-dot g-dot--end" aria-hidden="true"></span>
                             <div class="g-endpoint-text">
-                                <span class="g-endpoint-label">Destination</span>
-                                <span id="end-coord" class="g-endpoint-value">Not set</span>
+                                <label class="g-endpoint-label" for="end-coord">Destination</label>
+                                <input id="end-coord" class="g-endpoint-value g-endpoint-input"
+                                    type="text" role="combobox" autocomplete="off" aria-expanded="false"
+                                    aria-controls="end-results" aria-autocomplete="list"
+                                    placeholder="Not set">
+                                <ul id="end-results" role="listbox" aria-label="Destinations"
+                                    class="g-results g-endpoint-results hidden"></ul>
                             </div>
                         </div>
                     </div>

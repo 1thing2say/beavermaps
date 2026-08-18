@@ -1580,8 +1580,19 @@ body.navigating .app-chrome {
 
 .g-endpoint {
     display: flex;
-    align-items: center;
+    /* Top, not centre. The row was two lines of fixed height and centring the
+       dot against them was the same thing; it is not, now that a suggestion
+       list can open inside the row and make it twenty times taller — the dot
+       drifted down the list and ended up labelling whichever row happened to be
+       in the middle. It marks the FIELD, so it lines up with the field. */
+    align-items: flex-start;
     gap: 12px;
+}
+
+/* ...and down to the value's own line, rather than sitting against the small
+   grey caption above it. 26px is the caption's line plus half the value's. */
+.g-endpoint > .g-dot {
+    margin-top: 21px;
 }
 
 .g-endpoint-text {
@@ -3082,6 +3093,82 @@ body.no-twopoint .g-route-actions {
     position: absolute;
     top: 0;
     right: 0;
+}
+
+/* --- the endpoint fields ---------------------------------------------------
+   They read as the lines they replaced until you put a caret in one. That is
+   the whole intent: the panel should not gain two boxes and a pair of borders
+   for the sake of announcing that it is editable, because the row already looks
+   like something with a value in it and the dot beside it already says which
+   end it is. What it gains is a focus ring, which is the moment the affordance
+   is actually needed. */
+.g-endpoint-input {
+    width: 100%;
+    padding: 1px 4px;
+    margin-left: -4px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    color: var(--g-text);
+}
+
+.g-endpoint-input::placeholder {
+    color: var(--g-text-dim);
+}
+
+.g-endpoint-input:hover {
+    background: var(--g-hover);
+}
+
+.g-endpoint-input:focus {
+    outline: 2px solid var(--g-blue);
+    outline-offset: -1px;
+    background: var(--g-surface-2);
+}
+
+/* IN FLOW, and this was the second attempt.
+   --------------------------------------------------------------------------
+   The first hung the list off the field absolutely, on the reasoning that a
+   list which reflows the panel moves GO out from under the thumb about to press
+   it. That reasoning is right and it does not matter, because the panel lives
+   inside a scroll container — the bottom sheet on a phone, the merged sidebar
+   under the Apple skin — and an absolutely positioned child of a scrolling box
+   is clipped by it. Photographed at 430x932: typing "library" into the
+   destination produced a list cut off two rows in, at the bottom edge of the
+   sheet, with nothing to scroll to reach the rest.
+
+   So it pushes, the way the search field's own list above it already does.
+   Same markup, same class, same behaviour, and one fewer thing that can be
+   clipped by a container it does not know about. */
+.g-endpoint-text {
+    min-width: 0;
+}
+
+.g-endpoint-results {
+    /* Overriding `.g-results`, which is absolute — that class is shared with
+       the search field's list, which floats over the map because it has room
+       to. This one does not, and inheriting the float is what put it outside
+       the sheet entirely on the first attempt. */
+    position: static;
+    z-index: auto;
+    margin-top: 4px;
+    padding: 4px 0;
+    max-height: 34dvh;
+    overscroll-behavior: contain;
+    /* An inset group inside the panel rather than a floating surface over it:
+       no blur, no shadow, no second pane of glass. It is IN the card. */
+    background: var(--g-surface-2);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+    border-radius: 10px;
+}
+
+/* Tighter than the search field's rows, which have the whole width of a
+   floating card. These sit in a 2-line stack beside a coloured dot. */
+.g-endpoint-results li {
+    padding: 7px 12px;
 }
 
 /* --- narrow screens -------------------------------------------------------- */

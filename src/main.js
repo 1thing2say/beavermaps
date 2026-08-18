@@ -746,8 +746,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       closeResults();
     }
     setStatus(idleHint());
-    startCoordText.textContent = "Not set";
-    endCoordText.textContent = "Not set";
+    startCoordText.value = '';
+    endCoordText.value = '';
     setRouteSummary(null);
     setNavButtonsEnabled(false);
   }
@@ -5331,7 +5331,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // is what says where you are, and a marker on top of it is the second pin.
     startMarker?.remove();
     startMarker = null;
-    startCoordText.textContent = 'Your location';
+    startCoordText.value = 'Your location';
     return true;
   }
 
@@ -5350,7 +5350,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     })
       .setLngLat(coords)
       .addTo(map);
-    startCoordText.textContent = label ?? coordLabel(coords);
+    startCoordText.value = label ?? coordLabel(coords);
   }
 
   async function placeEnd(coords, label) {
@@ -5365,7 +5365,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     })
       .setLngLat(coords)
       .addTo(map);
-    endCoordText.textContent = label ?? coordLabel(coords);
+    endCoordText.value = label ?? coordLabel(coords);
     setStatus('Calculating route…');
 
     // Guard against a stale response landing after the user has moved on.
@@ -5466,7 +5466,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       offset: liftedOffset(ROUTE_PIN_W),
     })
       .setLngLat(coords).addTo(map);
-    endCoordText.textContent = name ?? coordLabel(coords);
+    endCoordText.value = name ?? coordLabel(coords);
   }
 
   /**
@@ -5968,6 +5968,161 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     searchClear.classList.toggle('hidden', !searchInput.value);
     renderResults(runSearch(searchInput.value));
   });
+
+  // -------------------------------------------------------------------------
+  // The two endpoint fields
+  //
+  // Same index, same scoring, same shape of list as the search box above —
+  // deliberately, because "what can I type here" should have one answer
+  // wherever it is asked. What differs is only what a pick MEANS: in the search
+  // box it is always a destination, and here it is whichever end of the route
+  // you are typing into.
+  //
+  // The start also offers "Your location", which is the answer most of the time
+  // and is the one thing in the list that is not a place and cannot be spelt.
+  // It is offered on an empty field rather than only on a matching query, since
+  // an empty field is exactly the state somebody is in when they have not
+  // decided what to type yet.
+  // -------------------------------------------------------------------------
+
+  const HERE = { here: true, name: 'Your location' };
+
+  /** Whatever `runSearch` would say, with Your location in front where it fits. */
+  function endpointSuggestions(query, offerHere) {
+    const hits = runSearch(query);
+    if (!offerHere) return hits;
+    const q = normalise(query);
+    const wantsHere = !q || 'your location here me current'.includes(q) || q.startsWith('you');
+    return wantsHere ? [HERE, ...hits].slice(0, MAX_RESULTS) : hits;
+  }
+
+  /**
+   * Give a field a listbox over the campus index.
+   *
+   * Rendered with the same `.g-results` markup the search box uses so the two
+   * lists cannot drift apart visually, and closed on `blur` through a timeout
+   * rather than immediately — a click on a row IS a blur on the field, and
+   * closing first would remove the row before its own handler ran. `mousedown`
+   * with preventDefault is the other half of that, and is what the search box
+   * already does for the same reason.
+   */
+  function wireEndpointField({ input, list, offerHere, onPick }) {
+    let hits = [];
+    let active = -1;
+
+    const close = () => {
+      list.classList.add('hidden');
+      list.replaceChildren();
+      input.setAttribute('aria-expanded', 'false');
+      hits = [];
+      active = -1;
+    };
+
+    const mark = (index) => {
+      active = index;
+      [...list.children].forEach((li, i) => li.setAttribute('aria-selected', String(i === index)));
+    };
+
+    const render = (found) => {
+      hits = found;
+      if (!found.length) { close(); return; }
+      list.replaceChildren(...found.map((entry, i) => {
+        const li = document.createElement('li');
+        li.setAttribute('role', 'option');
+        const name = document.createElement('div');
+        name.className = 'g-result-name';
+        name.textContent = entry.name;
+        li.append(name);
+        const hint = entry.here ? 'Where your phone says you are'
+          : (entry.points?.length > 1 ? `${entry.points.length} locations` : entry.description);
+        if (hint) {
+          const sub = document.createElement('div');
+          sub.className = 'g-result-sub';
+          sub.textContent = hint;
+          li.append(sub);
+        }
+        li.addEventListener('mousedown', (event) => {
+          event.preventDefault();
+          pick(i);
+        });
+        return li;
+      }));
+      list.classList.remove('hidden');
+      input.setAttribute('aria-expanded', 'true');
+      mark(0);
+    };
+
+    async function pick(index) {
+      const entry = hits[index];
+      if (!entry) return;
+      close();
+      input.blur();
+      if (entry.here) { input.value = 'Your location'; await onPick(null, null, true); return; }
+      // A row with nowhere to go — a class at the Natomas centre, outdoor PE.
+      // The search box says so rather than dropping a pin somewhere
+      // defensible-looking, and so does this.
+      if (!entry.points?.length) {
+        setStatus(entry.spread
+          ? `${entry.name} is ${entry.spread} — no single place to route to.`
+          : `${entry.name} is at ${entry.place}, which is not on this campus.`, true);
+        return;
+      }
+      input.value = entry.name;
+      await onPick(nearestInstance(entry), entry.name, false);
+    }
+
+    input.addEventListener('input', () => render(endpointSuggestions(input.value, offerHere)));
+    input.addEventListener('focus', () => render(endpointSuggestions(input.value, offerHere)));
+    input.addEventListener('blur', () => setTimeout(close, 120));
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { close(); return; }
+      if (!hits.length) return;
+      if (event.key === 'ArrowDown') { event.preventDefault(); mark((active + 1) % hits.length); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); mark((active - 1 + hits.length) % hits.length); }
+      else if (event.key === 'Enter') { event.preventDefault(); pick(active < 0 ? 0 : active); }
+    });
+  }
+
+  /**
+   * Draw the walk again after one of its ends was retyped.
+   *
+   * The destination is read back off the map rather than remembered separately,
+   * because `endPoint` is where the route actually goes and a second copy of it
+   * is a second thing that can be wrong.
+   */
+  async function rerouteFromStart() {
+    if (!startPoint) return;
+    if (endPoint) {
+      await resetMap0(endPoint.geometry.coordinates, endCoordText.value || null);
+    } else if (pendingEnd) {
+      const { coords, name } = pendingEnd;
+      pendingEnd = null;
+      await placeEnd(coords, name);
+    }
+  }
+
+  wireEndpointField({
+    input: startCoordText,
+    list: document.getElementById('start-results'),
+    offerHere: true,
+    onPick: async (coords, name, here) => {
+      if (!routingEnabled) return;
+      if (here) {
+        if (await locateStart()) await rerouteFromStart();
+        return;
+      }
+      placeStart(coords, name);
+      await rerouteFromStart();
+    },
+  });
+
+  wireEndpointField({
+    input: endCoordText,
+    list: document.getElementById('end-results'),
+    offerHere: false,
+    onPick: async (coords, name) => { await setDestination(coords, name); },
+  });
+
 
   searchInput.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { closeResults(); return; }
