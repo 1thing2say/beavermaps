@@ -193,29 +193,60 @@
                     </div>
                 </div>
 
+                <!-- The answer, in the order it is wanted: how long, then when
+                     you arrive and how far, then GO.
+                     ==========================================================
+                     This row used to lead with the distance — "1,250 ft" set
+                     large in blue — and distance is the one number of the three
+                     nobody asked for. The question a person puts to a map is
+                     how long it takes; the feet are what the route is made of.
+                     So the time leads and the distance joins the arrival time
+                     on the line underneath, which is Apple's arrangement and
+                     Google's, for this reason rather than for resemblance.
+
+                     GO is IN this row rather than in the button row below it,
+                     and that is what makes it read as the end of the sentence:
+                     it takes twelve minutes, you get there at 8:24, go. Down in
+                     the actions it was one of three identical pills and read as
+                     a third option rather than as the point. -->
                 <div class="g-route-summary">
                     <div class="g-route-figure">
                         <span class="g-icon g-route-mode" data-icon="walk" aria-hidden="true"></span>
-                        <div>
-                            <div id="distance-text" class="g-route-distance">0 <span class="g-route-unit">ft</span>
-                            </div>
-                            <!-- The message is a child rather than the paragraph's own text so a
-                                 spinner can sit beside it: setStatus writes textContent, which
-                                 would wipe any sibling element out of the paragraph itself. The
-                                 `is-error` class stays on the paragraph, where .g-route-hint is. -->
-                            <p id="instruction-text" class="g-route-hint"><span id="instruction-busy"
-                                    class="g-spin-inline hidden" aria-hidden="true"></span><span
-                                    id="instruction-message">Press and hold on the map to set a start
-                                    point.</span></p>
+                        <div class="g-route-numbers">
+                            <div id="route-time" class="g-route-time">Directions</div>
+                            <div id="route-detail" class="g-route-detail hidden"></div>
                         </div>
+                        <!-- Green, and the only green control in the app. Apple's
+                             GO is green because it is the one button on the
+                             screen that starts something happening in the world
+                             rather than changing what is on screen, and a colour
+                             used once carries that on its own. -->
+                        <button id="start-nav-btn" disabled class="g-go"
+                            aria-label="Start walking directions">GO</button>
                     </div>
+
+                    <!-- Under the whole row rather than inside the numbers
+                         column beside GO, which is where it was first put and
+                         which measured badly on a 320px phone: the sentence had
+                         about 150px to work in and "Route calculated — 6 turns."
+                         came out over two ragged lines. It is not a caption on
+                         the time — it is the panel's whole voice, and the
+                         longest thing it ever says is a refusal that has to
+                         explain both what went wrong and what to do instead.
+                         Those need the width.
+
+                         The message is a child rather than the paragraph's own
+                         text so a spinner can sit beside it: setStatus writes
+                         textContent, which would wipe any sibling element out of
+                         the paragraph itself. The `is-error` class stays on the
+                         paragraph, where .g-route-hint is. -->
+                    <p id="instruction-text" class="g-route-hint"><span id="instruction-busy"
+                            class="g-spin-inline hidden" aria-hidden="true"></span><span
+                            id="instruction-message">Tap a building, or press and hold
+                            anywhere, then press Directions.</span></p>
                 </div>
 
                 <div class="g-route-actions">
-                    <button id="start-nav-btn" disabled class="g-btn g-btn--primary">
-                        <span class="g-icon" data-icon="navigate"></span>
-                        Start
-                    </button>
                     <button id="simulate-btn" disabled class="g-btn g-btn--ghost">Simulate</button>
                     <button id="clear-btn" class="g-btn g-btn--ghost">Clear</button>
                 </div>

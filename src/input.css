@@ -55,6 +55,17 @@
     --g-text-dim: #5f6368;
     --g-line: #dadce0;
     --g-blue: #1a73e8;
+    /* GO's fill, and the one green in the app.
+       ---------------------------------------------------------------------
+       NOT Apple's systemGreen, and that is a legibility call rather than a
+       taste one. Their GO is #34c759 with a white label, which measures 2.2:1
+       — under the 3:1 floor for large text and well under the 4.5:1 for
+       ordinary text. This is the one control in the app pressed outdoors while
+       walking, which is the worst lighting any of it sees, so it takes the
+       darker green: white on this is 4.4:1, and at 19px/700 the label is large
+       text and clears its bar with room. Same hue family, one step down in
+       lightness. */
+    --g-go: #248a3d;
     --g-on-blue: #ffffff;
     /* A switch that is on. Google's is the primary colour — a Material switch
        is the same accent as every other control it sits beside — where Apple's
@@ -172,6 +183,7 @@
     --g-text-dim: #9aa0a6;
     --g-line: #3c4043;
     --g-blue: #8ab4f8;
+    --g-go: #248a3d;
     --g-on-blue: #202124;
     --g-highlight: #c58af9;
     --g-highlight-soft: rgba(197, 138, 249, 0.16);
@@ -255,6 +267,7 @@
     --g-line: rgba(60, 60, 67, 0.29);
 
     --g-blue: #007aff;
+    --g-go: #248a3d;
     --g-on-blue: #ffffff;
     /* systemGreen, light. */
     --g-switch-on: #34c759;
@@ -305,6 +318,7 @@
 
     --g-blue: #0a84ff;
     --g-on-blue: #ffffff;
+    --g-go: #248a3d;
     /* systemGreen, dark — Apple lifts it rather than reusing the light value,
        the same way every other system colour moves between the two. */
     --g-switch-on: #30d158;
@@ -1634,11 +1648,32 @@ body.navigating .app-chrome {
     color: var(--g-blue);
 }
 
-.g-route-distance {
+/* The three numbers, and the button that acts on them. `min-width: 0` because
+   this is a flex child holding text that must be allowed to wrap: without it a
+   long status sentence sets the column's minimum and pushes GO off the panel. */
+.g-route-numbers {
+    flex: 1;
+    min-width: 0;
+}
+
+.g-route-time {
     font-size: 22px;
-    font-weight: 500;
-    color: var(--g-blue);
-    line-height: 1.1;
+    font-weight: 600;
+    color: var(--g-text);
+    line-height: 1.15;
+}
+
+/* Ink rather than blue, which is the change worth explaining. The distance was
+   blue when it was the headline, on the reasoning that the one number the panel
+   exists for should be the one coloured thing in it. But blue in this app means
+   "you can press this" everywhere else — the Directions tile, the ghost
+   buttons, the mode glyph — and a large blue number that does nothing when
+   tapped spends that meaning on a readout. The time is the biggest thing in the
+   panel; it does not also need to be the only coloured thing. */
+.g-route-detail {
+    margin-top: 2px;
+    font-size: 13px;
+    color: var(--g-text-dim);
 }
 
 .g-route-unit {
@@ -1647,8 +1682,47 @@ body.navigating .app-chrome {
     color: var(--g-text-dim);
 }
 
+/* --- GO --------------------------------------------------------------------
+   Square-ish and filled, sitting at the end of the summary row rather than in
+   the button strip below it. 56x44 is not a shape chosen to look like Apple's:
+   44 is the short side because that is the floor for a control a thumb has to
+   hit while walking, and this is the one button in the app that is genuinely
+   pressed in motion. */
+.g-go {
+    flex: none;
+    align-self: center;
+    min-width: 56px;
+    height: 44px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--g-go);
+    color: #fff;
+    /* 19px/700 is WCAG "large text" (>=18.66px bold), which is the size the
+       contrast note on --g-go is written against. Shrinking this without
+       revisiting that token moves the label under its bar. */
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: filter 120ms ease, opacity 120ms ease;
+}
+
+.g-go:hover:not(:disabled) {
+    filter: brightness(1.06);
+}
+
+.g-go:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+/* Full width of the panel, under the summary row — see the note in index.html.
+   The left inset lines it up with the time above rather than with the walking
+   glyph, so the panel reads as one column of text with an icon beside it. */
 .g-route-hint {
-    margin: 2px 0 0;
+    margin: 6px 0 0;
+    padding-left: 36px;
     font-size: 13px;
     color: var(--g-text-dim);
 }
@@ -3015,7 +3089,54 @@ body.no-routing #side-panel {
         width: auto;
         max-width: none;
         max-height: 62dvh;
-        justify-content: flex-end;
+        /* NOT `justify-content: flex-end`, which is what this was and is
+           incompatible with the scrolling below. A flex container that packs to
+           the end and then overflows puts the overflow past its START edge,
+           where no scroll position can reach it — the first card would be
+           permanently above the top of the sheet. It is not needed anyway: the
+           box is bottom-anchored and content-sized (`top: auto`, no height), so
+           it is never taller than what is in it and there is nothing for the
+           packing to decide. */
+        justify-content: flex-start;
+        /* AND IT HAS TO SCROLL, or the max-height above is decorative.
+           ------------------------------------------------------------------
+           Measured, on a 320x568 phone with the Welcome and Support Center
+           open: the column's cap came out at 352px, the card wanted 585px, the
+           column's overflow was `visible` and the card's own was `hidden`. So
+           the card overflowed its cap upwards — the sheet is bottom-aligned —
+           and its title sat at y = -49. The name of the place you had just
+           tapped was off the top of the screen, thirteen destinations were
+           unreachable below the fold, and nothing scrolled in either
+           direction.
+
+           `contain` rather than `auto` so a flick that reaches the end of this
+           list stops there instead of continuing into the map behind it. */
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* ...and one scroller, not two nested ones.
+       ------------------------------------------------------------------
+       The card body caps itself at 38dvh and scrolls inside the card, which is
+       right on the desktop: the column is a sidebar there with a legend and a
+       route panel under the card, and they have to stay reachable however long
+       a directory runs. On a phone the column IS the card, so that cap builds a
+       short scroller inside a short scroller — and the one on the outside can
+       never be reached while a finger is on the one inside. The head is what
+       goes missing, which is the name of the place you just tapped.
+
+       So on a phone the body is its natural height and the sheet does the
+       scrolling. */
+    .g-place-body {
+        max-height: none;
+        overflow-y: visible;
+    }
+
+    /* Every panel keeps its own height rather than being squeezed by the
+       column's cap — the cap is what the scrollbar is for now. */
+    .g-topleft > .g-panel {
+        flex: none;
     }
 
     /* The field leaves the sheet and holds the top of the screen on its own.
@@ -3228,6 +3349,14 @@ body.no-routing #side-panel {
         width: 44px !important;
         height: 44px !important;
         background-position: center;
+        /* GROWING UPWARDS, not downwards. Mapbox pins this absolutely at
+           `top: 0` inside a 24px box that is itself hard against the bottom of
+           the window, so taking it to 44 hung 10px of it off the bottom edge —
+           measured at 320x568: the button ran to y=578 in a 568px viewport.
+           Anchoring the other end puts the extra height over the map, which is
+           where there is room for it and where it is invisible anyway. */
+        top: auto !important;
+        bottom: 0 !important;
     }
 
     /* Ours. `min-` rather than `width`, so anything already larger is left

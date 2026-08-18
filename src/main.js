@@ -20,6 +20,7 @@ import {
   FEET_PER_KM,
 } from './maneuvers.js';
 import { maneuverIcon } from './nav-icons.js';
+import { routeSummary, reachProblem, locationProblem } from './directions.js';
 import {
   loadAmenityIcons, routePin, liftedOffset, ROUTE_PIN_W, PIN_BASE_W, AMENITY_KINDS, pinInk,
   pinColour,
@@ -365,9 +366,39 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // State variables
   let startMarker = null;
   let endMarker = null;
+  /**
+   * The pin a press-and-hold puts down, while its card is open.
+   *
+   * Held separately from the two route markers because it is not one of them
+   * yet: it is a place you pointed at, and it becomes a start or a destination
+   * only when a button on its card says so. At that moment it is removed and
+   * the route marker takes its position, so the two never stand on the same
+   * spot.
+   */
+  let droppedMarker = null;
   let startPoint = null;
   let endPoint = null;
   let requestSeq = 0;
+  /**
+   * Whether `startPoint` is where the phone says you are, or somewhere chosen.
+   *
+   * The one bit that decides what "Directions" does on a card. A start somebody
+   * put down on purpose — "Start here" on a building, a pin they dropped — is an
+   * answer to a question the app did not ask, and overwriting it with a GPS fix
+   * would throw it away silently. A start this app adopted from the GPS is not
+   * a choice and can be replaced by a better fix without asking.
+   */
+  let startIsMine = false;
+  /**
+   * The last position the locate control reported, and when.
+   *
+   * Not a cache for its own sake: `getCurrentPosition` on a cold radio can take
+   * several seconds, and pressing Directions on a second building right after
+   * the first should not spend them again. `maximumAge` on the request itself
+   * covers the same ground inside the browser, so this is only what lets the
+   * FIXTURE and the real API be asked the same question — see currentPosition.
+   */
+  let lastFix = null;
 
   // Navigation state
   let routeCoords = null;      // the raw LineString coordinates
@@ -419,7 +450,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const instructionBusy = document.getElementById('instruction-busy');
   const startCoordText = document.getElementById('start-coord');
   const endCoordText = document.getElementById('end-coord');
-  const distanceText = document.getElementById('distance-text');
+  const routeTimeText = document.getElementById('route-time');
+  const routeDetailText = document.getElementById('route-detail');
   const clearBtn = document.getElementById('clear-btn');
   const startNavBtn = document.getElementById('start-nav-btn');
   const simulateBtn = document.getElementById('simulate-btn');
@@ -556,9 +588,25 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const geolocation = createGeolocation();
   let geolocateControl = null;
 
-  function setDistanceFeet(feet) {
-    distanceText.innerHTML =
-      `${Math.round(feet).toLocaleString()} <span class="g-route-unit">ft</span>`;
+  /**
+   * Write the three numbers, or clear them back to the panel's resting head.
+   *
+   * `null` is a real argument rather than an absence — it is what the panel says
+   * when it has no route, and "0 ft / arriving now" is a worse answer to that
+   * than a heading. All three values come from one call so they cannot end up
+   * describing different routes; see src/directions.js.
+   */
+  function setRouteSummary(feet) {
+    if (feet === null) {
+      routeTimeText.textContent = 'Directions';
+      routeDetailText.textContent = '';
+      routeDetailText.classList.add('hidden');
+      return;
+    }
+    const { time, arrival, distance: far } = routeSummary(feet);
+    routeTimeText.textContent = time;
+    routeDetailText.textContent = `${arrival} · ${far}`;
+    routeDetailText.classList.remove('hidden');
   }
 
   function setNavButtonsEnabled(enabled) {
@@ -618,21 +666,26 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /**
    * What the map is waiting for when it is waiting for nothing.
    *
-   * A function rather than a constant because the virtual location changes the
-   * answer: with a fix on the campus there is nowhere to set a start FROM, so
-   * the press is a destination, and saying otherwise sends people looking for a
-   * step that is not there.
+   * One sentence now rather than two. It used to branch on the virtual location
+   * — with a fix on the campus a hold meant "destination", without one it meant
+   * "start" — and that branch is gone because the gesture no longer means
+   * either: a hold drops a pin, and the pin's card is where you say what you
+   * wanted. Which is also why this can finally name the button. The old hint
+   * described a two-step positional flow and never mentioned the word
+   * "Directions" at all.
    *
-   * "Press and hold" rather than "click", and this line is now carrying the
+   * "Press and hold" rather than "click", and this line is still carrying the
    * whole discoverability of that gesture — see LONG_PRESS_MS. A hold is not a
    * thing anybody tries unprompted on a map they have not used before. Shared
    * with the end of the cold load, which is the other place this has to be
    * said: the hint is wrong until the network has landed, so it is written
    * again once it has.
+   *
+   * A function rather than a constant because both callers expect to call it,
+   * and because the day this needs to know something about the app's state
+   * again it should not also need its call sites rewritten.
    */
-  const idleHint = () => (geolocation.fixture
-    ? 'Press and hold on the map to set a destination.'
-    : 'Press and hold on the map to set a start point.');
+  const idleHint = () => 'Tap a building or press and hold anywhere, then press Directions.';
 
   function resetMap() {
     endNavigation();
@@ -641,6 +694,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (endMarker) endMarker.remove();
     startPoint = null;
     endPoint = null;
+    startIsMine = false;
     startMarker = null;
     endMarker = null;
 
@@ -668,7 +722,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     setStatus(idleHint());
     startCoordText.textContent = "Not set";
     endCoordText.textContent = "Not set";
-    setDistanceFeet(0);
+    setRouteSummary(null);
     setNavButtonsEnabled(false);
   }
 
@@ -2969,6 +3023,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function clearSelection() {
     deselectPin();
     closeBuildingCard();
+    // The third thing the map can be pointing at. A tap on bare ground, a
+    // reset, and both of the dropped pin's own buttons all come through here,
+    // so none of them has to remember it separately.
+    droppedMarker?.remove();
+    droppedMarker = null;
   }
 
   /** The building under a click, or null. */
@@ -3092,20 +3151,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         placeStart(coords, name);
         setStatus(`Start set at ${name}. Now pick a destination.`);
       },
-      onEnd: async (coords, name) => {
-        clearSelection();
-        // Same as the search box: with the virtual location on, "Directions"
-        // from a building's card is a whole question and gets a whole answer.
-        if (!startPoint) haveStart();
-        if (!startPoint) {
-          pendingEnd = { coords, name };
-          showRoutePanel();
-          setStatus(`${name} set as the destination. Press and hold the map to set a start point.`);
-          return;
-        }
-        if (endPoint) resetMap0(coords, name);
-        else await placeEnd(coords, name);
-      },
+      // Directions from a building's card is the same question the search box
+      // and the category rows ask, so it goes through the same door — which is
+      // where the GPS is asked. This used to carry its own copy of the logic,
+      // and that copy only ever consulted the debug fixture: on a real phone
+      // the one button this card exists for answered "now press and hold the
+      // map to set a start point".
+      onEnd: (coords, name) => { clearSelection(); setDestination(coords, name); },
       onClose: clearSelection,
     }), flyover);
     highlightBuilding(props.officialName);
@@ -4811,6 +4863,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       getDefaultPosition: () => 'bottom-right',
     }, 'bottom-right');
     geolocate.on('geolocate', (e) => {
+      // Kept for the next Directions press, so it can answer from what the
+      // control already knows instead of waking the radio again. See
+      // currentPosition, which is the only reader.
+      lastFix = { at: [e.coords.longitude, e.coords.latitude], when: Date.now() };
       // A simulated walk pushes a new fix every SIM_TICK_MS, so the camera ease
       // has to finish inside one tick. At a second apiece every fix would
       // interrupt the last and the dot would slide along a route the camera
@@ -5005,43 +5061,134 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // A tap still lifts a pin, opens a building and clears a category with the
   // GUI off, because none of those are about going anywhere.
 
+  // `adoptFixtureStart` and `haveStart` stood here, and both are gone.
+  //
+  // They were the app's whole answer to "where am I": the fixture's coordinates
+  // if the debug menu had put one on the campus, and otherwise nothing. Their
+  // ONE PIN, NOT TWO argument was right and is kept below in locateStart — with
+  // a position on the map there is already a blue dot saying where you are, and
+  // a green Start pin beside it is the second pin. What was wrong was the
+  // premise that only a fixture could supply one.
+
+  /** How long to wait for a fix before saying so. */
+  const FIX_TIMEOUT_MS = 9000;
+  /** A fix this fresh is worth reusing rather than waking the radio for. */
+  const FIX_FRESH_MS = 30_000;
+
   /**
-   * Take the virtual location as the start, without drawing a start pin.
+   * Where the phone says it is, as a promise.
    *
-   * ONE PIN, NOT TWO, and that is the whole point of it. With the fixture on
-   * there is already a blue dot on the campus saying where you are, and the old
-   * flow ignored it: the first click dropped a green Start marker somewhere else
-   * and the second dropped the red one, so a map that knew your position still
-   * made you tell it twice and then drew the answer in two places.
+   * THROUGH THE LOCATE CONTROL, not through a second geolocation request of our
+   * own, and that is the whole shape of this function. The obvious version asks
+   * `getCurrentPosition` directly; it was written that way first and it was
+   * wrong twice over.
    *
-   * Snapped to the network, because a fix lands wherever it lands and the router
-   * walks between vertices. The blue dot stays where the GPS put it — moving it
-   * onto the path would be the fixture lying about the position rather than the
-   * router being honest about the graph.
+   * The first is visible: the control is what draws the blue dot, and a
+   * position obtained behind its back leaves "from your location" as a claim
+   * with nothing on the map behind it. Triggering it as well means TWO watches
+   * on one radio — which is also what caught this. In headless Chrome the
+   * second consumer simply never receives a fix, so the dot sat spinning at
+   * "waiting" forever while the route drew perfectly. That specific behaviour
+   * is an emulator artifact and a real phone would have served both; running
+   * two watches to answer one question is a waste on any of them.
    *
-   * Returns whether it took. Nothing to adopt is a normal answer, not a failure:
-   * the fixture is off, or the network has not landed yet.
+   * The second is that the control is ALREADY watching whenever the dot is up,
+   * so most of the time the answer is in hand and no radio needs waking at all.
+   *
+   * The fixture reaches this the same way — it delivers through the control's
+   * watch like a real fix does, so nothing here needs to know which it has.
    */
-  function adoptFixtureStart() {
-    const at = geolocation.fixture;
-    if (!at || !networkPoints || !routingEnabled) return false;
+  function currentPosition() {
+    const fresh = lastFix && Date.now() - lastFix.when < FIX_FRESH_MS;
+    if (fresh) return Promise.resolve(lastFix.at);
+
+    return new Promise((resolve, reject) => {
+      if (!geolocateControl) { reject({ code: 2 }); return; }
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        geolocateControl.off('geolocate', onFix);
+        geolocateControl.off('error', onFail);
+        fn(value);
+      };
+      const onFix = (e) => finish(resolve, [e.coords.longitude, e.coords.latitude]);
+      const onFail = (error) => finish(reject, error);
+      const timer = setTimeout(() => {
+        // A STALE FIX BEATS A REFUSAL. A watch that has locked on and gone
+        // quiet is what a stationary phone looks like — some browsers report
+        // once and then say nothing until you move — and the last thing it said
+        // is still where you are standing. Refusing to route somebody who has
+        // not moved, because they have not moved, is the worst reading of this.
+        if (lastFix) finish(resolve, lastFix.at);
+        else finish(reject, { code: 3 });
+      }, FIX_TIMEOUT_MS);
+      geolocateControl.on('geolocate', onFix);
+      geolocateControl.on('error', onFail);
+      // No-op if it is already locked on, in which case the next fix its watch
+      // delivers is the one resolved above.
+      startLocating();
+    });
+  }
+
+  /**
+   * Make where you are the start of the route. The whole of "from my location".
+   *
+   * THIS IS WHAT DIRECTIONS WAS MISSING. The button has been on both cards from
+   * the beginning, and pressing it on a phone produced "…now press and hold the
+   * map to set a start point" — because the only position this app would ever
+   * adopt was the debug fixture. Everybody without the debug menu open was
+   * being asked to tell a map with a GPS in it where they were standing.
+   *
+   * Three ways to fail, and all three are said out loud rather than swallowed:
+   * the browser refuses or times out (see locationProblem), or the fix lands
+   * outside the routing graph (see reachProblem). The last is the quiet one —
+   * the router snaps a start to the nearest vertex with no notion of "too far",
+   * so opening this at home ten miles away would otherwise draw a confident
+   * eight-minute walk between two places neither of which is where you are.
+   *
+   * Returns whether there is now a start point to route from.
+   */
+  async function locateStart() {
+    if (!routingEnabled || !networkPoints) return false;
+
+    // The fixture answers on the next tick, so this spinner is a real wait only
+    // for a real GPS — which is exactly when it is worth showing.
+    setBusy(true);
+    setStatus('Finding your location…');
+    let at;
+    try {
+      at = await currentPosition();
+    } catch (error) {
+      setStatus(locationProblem(error), true);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+
+    const node = nearestPoint(point(at), networkPoints).geometry.coordinates;
+    const problem = reachProblem(distance(point(at), point(node)) * 1000);
+    if (problem) { setStatus(problem, true); return false; }
+
     showRoutePanel();
-    startPoint = point(nearestPoint(point(at), networkPoints).geometry.coordinates);
-    // No marker. The dot is the marker — see above — and a green pin standing on
-    // top of it would be the second pin this exists to remove.
+    startPoint = point(node);
+    startIsMine = true;
+    // No green pin, for the same reason the fixture plants none: the blue dot
+    // is what says where you are, and a marker on top of it is the second pin.
     startMarker?.remove();
     startMarker = null;
     startCoordText.textContent = 'Your location';
     return true;
   }
 
-  /** A start exists, adopting the virtual location if that is what is standing in. */
-  const haveStart = () => Boolean(startPoint) || adoptFixtureStart();
-
   function placeStart(coords, label) {
     if (!routingEnabled) return;
     showRoutePanel();
     startPoint = point(coords);
+    // Somebody chose this, so Directions on the next card routes FROM it rather
+    // than replacing it with a GPS fix. See startIsMine.
+    startIsMine = false;
     startMarker?.remove();
     startMarker = new mapboxgl.Marker({
       element: routePin(GOOGLE_GREEN, { title: 'Start' }),
@@ -5091,7 +5238,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     if (!result) {
       setStatus('No path found between those two points.', true);
-      distanceText.innerHTML = 'N/A';
+      setRouteSummary(null);
       endPoint = null;
       endMarker.remove();
       endMarker = null;
@@ -5110,7 +5257,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     });
     paintLegs();
 
-    setDistanceFeet(result.distanceFeet);
+    setRouteSummary(result.distanceFeet);
     const turns = maneuvers.length - 2;
     setStatus(`Route calculated — ${turns} turn${turns === 1 ? '' : 's'}.`);
     setNavButtonsEnabled(true);
@@ -5130,6 +5277,59 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * label go down now, and the route is calculated the moment the next map
    * click supplies somewhere to walk from.
    */
+  /**
+   * Put the red pin down and hold the destination, without routing to it.
+   *
+   * What is left when there is a place but no start: the pin, the label and the
+   * camera. `pendingEnd` is what makes it not a dead end — the next thing that
+   * supplies a start point picks this up and routes it.
+   *
+   * Writes no status of its own. It is only ever reached after something else
+   * has explained why there is no route yet, and that sentence is better than
+   * anything this could say over the top of it.
+   */
+  function parkDestination(coords, name) {
+    // The destination is the only thing worth looking at. With a start already
+    // down the camera belongs to the route instead, and placeEnd frames it —
+    // flying here first would land on the destination at z17, then test the
+    // route against the view it had *before* the flight, decide it was already
+    // visible, and leave half the walk off the top of the screen. Which is
+    // exactly what it did.
+    //
+    // Padding stated rather than inherited: showRoutePanel started a 300 ms
+    // padding ease, and a flight that did not carry its own would interrupt
+    // that ease and keep whatever partial value it had reached.
+    map.flyTo({
+      center: coords,
+      zoom: Math.max(map.getZoom(), 17),
+      padding: campusPadding(),
+      duration: 900,
+    });
+    pendingEnd = { coords, name };
+    endMarker?.remove();
+    endMarker = new mapboxgl.Marker({
+      element: routePin(GOOGLE_RED, { title: 'Destination' }),
+      anchor: 'bottom',
+      offset: liftedOffset(ROUTE_PIN_W),
+    })
+      .setLngLat(coords).addTo(map);
+    endCoordText.textContent = name ?? coordLabel(coords);
+  }
+
+  /**
+   * "Take me there." Every Directions button on this map ends up here.
+   *
+   * ONE PATH, and that is the point of it. A building's card, a pin's card, a
+   * dropped pin, a search result and a category row were four callers with
+   * three different ideas about what happens when there is no start point —
+   * park it, ask for a hold, or quietly do nothing — and none of them asked the
+   * GPS. They ask one function now, and it asks the GPS.
+   *
+   * The rule about an existing start is the only subtle thing here: a start
+   * somebody CHOSE outranks the phone, because they chose it. A start this app
+   * adopted from a previous fix does not, because it was never a choice and a
+   * newer fix is strictly better. See startIsMine.
+   */
   async function setDestination(coords, name) {
     // With the route GUI off, a search result and a category row still mean
     // something — "show me where that is" — so this degrades to the camera
@@ -5140,46 +5340,25 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       return;
     }
 
-    // Both ends already set: start over rather than accumulating markers.
+    // Both ends already set: start over rather than accumulating markers. The
+    // start survives it — see below — so this is only clearing the old walk.
+    const keep = startPoint && !startIsMine ? startPoint : null;
     if (startPoint && endPoint) resetMap();
+    if (keep) { startPoint = keep; startIsMine = false; }
     // Before the flyTo below, so the camera is framing the space the panel has
     // already taken rather than the space it is about to.
     showRoutePanel();
 
-    // Searching for somewhere while the virtual location is on is a complete
-    // question — from here, to that — so it routes rather than parking the
-    // destination in `pendingEnd` and asking for a start that already exists.
-    if (!startPoint) haveStart();
-
-    if (!startPoint) {
-      // Nothing to route yet, so the destination is the only thing worth
-      // looking at. With a start point already down the camera belongs to the
-      // route instead, and placeEnd frames it — flying here first would land on
-      // the destination at z17, then test the route against the view it had
-      // *before* the flight, decide it was already visible, and leave half the
-      // walk off the top of the screen. Which is exactly what it did.
-      // Padding stated rather than inherited: showRoutePanel above started a
-      // 300 ms padding ease, and a flight that did not carry its own would
-      // interrupt that ease and keep whatever partial value it had reached.
-      map.flyTo({
-        center: coords,
-        zoom: Math.max(map.getZoom(), 17),
-        padding: campusPadding(),
-        duration: 900,
-      });
-      pendingEnd = { coords, name };
-      endMarker?.remove();
-      endMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Destination' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-        .setLngLat(coords).addTo(map);
-      endCoordText.textContent = name;
-      setStatus(`${name} — now click the map to set where you are starting from.`);
+    if (!(startPoint && !startIsMine) && !(await locateStart())) {
+      // No fix, and locateStart has already said why. The destination still
+      // goes down, so that sentence is read next to a map showing where you
+      // asked to go rather than next to nothing.
+      parkDestination(coords, name);
       return;
     }
-    await placeEnd(coords, name);
+
+    if (endPoint) await resetMap0(coords, name);
+    else await placeEnd(coords, name);
   }
 
   // The cursor says what a click will do. Over a pin or a building that is
@@ -5331,45 +5510,58 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   /**
-   * What a completed hold does, which is what a tap used to do.
+   * What a completed hold does: it drops a pin, and a pin is a PLACE.
    *
-   * Lifted out of the click handler unchanged — the ordering here is load
-   * bearing and was worked out over several rounds of the routing UI, so it is
-   * moved rather than rewritten.
+   * It used to set a route endpoint directly — the first hold a start, the
+   * second an end — and that made the gesture a commitment. You could not point
+   * at a spot on this map without also declaring what you meant to do about it,
+   * and the two holds had to be done in the right order to mean anything.
+   *
+   * A dropped pin is now the same kind of thing as a building or a defibrillator
+   * — something you tapped, with a card saying what it is and what you can do
+   * about it — which is what makes "Directions" mean one thing everywhere. The
+   * two-point walk survives whole and is now explicit rather than positional:
+   * "Start here" on one pin, "Directions" on the next.
    */
-  async function dropRoutePoint(lngLat) {
+  function dropPin(lngLat) {
     const clicked = point([lngLat.lng, lngLat.lat]);
     // Snapping the click locally keeps the marker instant; the server snaps
     // again on its own side, and lands on the same vertex.
     const snapped = nearestPoint(clicked, networkPoints).geometry.coordinates;
 
-    // Both ends already set: start over rather than accumulating markers.
-    if (startPoint && endPoint) resetMap();
+    // Takes the previous dropped pin with it — see clearSelection.
+    clearSelection();
 
-    // With the virtual location on, every press is a destination — you are
-    // already standing somewhere and the dot says where. Asked here rather than
-    // baked into placeStart so an explicit "Start here" on a building's card
-    // still overrides it: that is somebody saying they want to leave from
-    // somewhere other than where they are, which is a real thing to want.
-    if (!startPoint && haveStart()) {
-      await placeEnd(snapped);
-      return;
-    }
+    droppedMarker = new mapboxgl.Marker({
+      element: routePin(GOOGLE_RED, { title: 'Dropped pin' }),
+      anchor: 'bottom',
+      offset: liftedOffset(ROUTE_PIN_W),
+    })
+      .setLngLat(snapped)
+      .addTo(map);
 
-    if (!startPoint) {
-      placeStart(snapped);
-      // A destination picked before a start has been waiting for exactly this.
-      if (pendingEnd) {
-        const { coords, name } = pendingEnd;
-        pendingEnd = null;
-        await placeEnd(coords, name);
-      } else {
-        setStatus('Great! Now press and hold to set an end point.');
-      }
-      return;
-    }
-
-    await placeEnd(snapped);
+    showPlaceCard(pinCard(
+      // The coordinates are the subtitle because they are the only true thing
+      // there is to say about a point somebody chose off the map. Apple prints
+      // them on its dropped pin for the same reason.
+      { coords: snapped, kind: 'dropped', name: 'Dropped pin', sub: coordLabel(snapped) },
+      {
+        onStart: (coords) => {
+          clearSelection();
+          placeStart(coords, 'Dropped pin');
+          // A destination chosen before a start has been waiting for this.
+          if (pendingEnd) {
+            const { coords: to, name } = pendingEnd;
+            pendingEnd = null;
+            placeEnd(to, name);
+          } else {
+            setStatus('Starting from the dropped pin. Now pick where you are going.');
+          }
+        },
+        onEnd: (coords) => { clearSelection(); setDestination(coords, 'Dropped pin'); },
+        onClose: clearSelection,
+      },
+    ));
   }
 
   function beginPress(e) {
@@ -5406,7 +5598,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       swallowClick = true;
       // A hold does not clear a category or open a building the way a tap does
       // — it is a different gesture and means only one thing.
-      dropRoutePoint(e.lngLat);
+      dropPin(e.lngLat);
     }, LONG_PRESS_MS);
   }
 

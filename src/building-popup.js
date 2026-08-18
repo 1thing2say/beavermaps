@@ -164,19 +164,25 @@ export const KIND_NAMES = {
  * no floor area and no departments — it is a thing at a place, and the honest
  * card for it is its name, what it is, and the two things you can do about it.
  *
- * @param {object} hit        `{ coords, kind, name }` from the tapped feature
+ * @param {object} hit        `{ coords, kind, name, sub }` from the tapped feature
  * @param {object} handlers   { onStart, onEnd, onClose }
+ * @param {string} [hit.sub]  the grey line, when the caller knows better than
+ *                            KIND_NAMES does — a dropped pin has no kind to
+ *                            name and its coordinates are the only thing there
+ *                            is to say about it.
  */
-export function pinCard({ coords, kind, name }, { onStart, onEnd, onClose }) {
+export function pinCard({ coords, kind, name, sub }, { onStart, onEnd, onClose }) {
   const card = el('div', 'g-place');
 
   // The kind is the fallback title, not a subtitle under it: "Bike Rack /
   // bike rack" is the same word printed twice at two sizes.
   const { row, text } = head(name ?? KIND_NAMES[kind] ?? 'Marker', onClose);
-  if (name && KIND_NAMES[kind] && KIND_NAMES[kind] !== name) {
+  const under = sub
+    ?? (name && KIND_NAMES[kind] && KIND_NAMES[kind] !== name ? KIND_NAMES[kind] : null);
+  if (under) {
     // The same grey line the building card runs, for the same reason: it is
     // what this thing IS, under what it is called.
-    text.append(el('p', 'g-place-cat', KIND_NAMES[kind]));
+    text.append(el('p', 'g-place-cat', under));
   }
   card.append(row);
 
