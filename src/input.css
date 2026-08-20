@@ -3076,8 +3076,37 @@ body.no-twopoint #clear-btn {
     display: none;
 }
 
+/* ...and alone across the full width it stops being a tile.
+   ---------------------------------------------------------------------------
+   Two tiles side by side want their labels UNDER their glyphs: that is what
+   makes a pair of narrow squares readable, and it is Apple's place card. One
+   button 338 px wide is not a square and does not read as one — stacked, it
+   spent 61 px of a phone's card height saying a single word under a single
+   arrow, with the glyph floating in the middle of an empty blue field. Set as
+   a row it is a normal control at a normal height and the facts underneath
+   move up by the difference. Measured on a 390x660 phone: 61 px -> 44 px. */
+body.no-twopoint .g-place-action--primary {
+    flex-direction: row;
+    gap: 8px;
+    padding: 11px 12px;
+}
+
+/* Big enough to be the label of a control rather than the caption of a tile —
+   12 px reads as a caption only because it sits under the thing it names. */
+body.no-twopoint .g-place-action--primary .g-place-action-label {
+    font-size: 15px;
+    font-weight: 600;
+}
+
 /* ...and with both gone the row has nothing left in it. */
 body.no-twopoint .g-route-actions {
+    display: none;
+}
+
+/* The directions button beside the search field, gone unless the debug menu
+   asks for it. The field is the whole of the search row without it, which is
+   also what lets the row breathe on a 320px phone. */
+body.no-dirbutton .g-directions {
     display: none;
 }
 

@@ -4742,7 +4742,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     geolocateControl.trigger();
   }
 
-  function applyDebug({ open, routing, gps, fps, twopoint, navbar }) {
+  function applyDebug({ open, routing, gps, fps, twopoint, navbar, dirbutton }) {
     // Read by the next card rather than applied to the open one: the readout is
     // built with the flyover, and there is no sensible thing to do to a viewport
     // that is already orbiting.
@@ -4775,6 +4775,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // the map type, and those persist too; a header that vanished the moment
     // you closed the menu you turned it on in would just look broken.
     showNavbar(navbar);
+
+    // The blue circle beside the search field, and off unless asked for.
+    //
+    // NOT gated on the menu being open, for the same reason the header above is
+    // not: it is a piece of layout rather than a lie, and it can be left on.
+    // What it opened was an empty two-ended route form — the shape you want
+    // when you are building a map and have two arbitrary points in mind, and
+    // not the shape of the question a visitor has. Theirs is "where is X", and
+    // the answer to that is a place card with Directions on it, which sets the
+    // destination and reads the start off the GPS without ever showing an empty
+    // form. So the form is the special case now, and the button that opens it
+    // moved in here with the rest of the map-building furniture.
+    document.body.classList.toggle('no-dirbutton', !dirbutton);
+    if (!dirbutton) directionsBtn?.setAttribute('aria-expanded', 'false');
 
     const fixture = open && gps;
 
