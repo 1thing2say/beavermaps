@@ -994,6 +994,50 @@ npm run build     # production build into dist/
 npm run preview   # serve the production build locally
 ```
 
+### 4. On a phone
+
+`npm run dev` prints a Network URL, and opening that bare LAN IP on a phone
+gives you a map with **no blue dot and no error to read** — browsers gate
+geolocation behind a secure context, and `localhost` is the one plain-HTTP
+origin exempt from the rule. Every route in this app starts from where you are
+standing, so that is most of the app.
+
+```bash
+npm run dev:https   # same site, TLS, reachable as https://<your-mac>.local:5173
+```
+
+Both devices on the same Wi-Fi, then open **`https://<your-mac>.local:5173`** on
+the phone — the name, not the IP. macOS publishes it over mDNS and iOS and
+Android speak that natively; an IP URL would need an IP entry in the
+certificate, which `@vitejs/plugin-basic-ssl` cannot issue. The certificate is
+self-signed, so the first load warns once per device: **Advanced → visit
+anyway**. Accept it before judging anything else, because a rejected
+certificate also blocks the `/api` route calls behind it.
+
+**Both keys are restricted by origin, and this is a new origin.** Whichever one
+you forget, the app now says which and what to do about it, in the status strip
+under the route panel — but it is quicker to add them first:
+
+- **Google**, in the [Cloud console](https://console.cloud.google.com/): add
+  `https://<your-mac>.local:5173/*` to the key's HTTP-referrer allowlist. Left
+  out, `createSession` returns 403 *"Requests from referer … are blocked"*, and
+  **the fallback is sticky**: the refusal writes `mapbox` to `localStorage`, so
+  fixing the console afterwards does not bring Google back on that phone. Clear
+  the `mapper-provider` key, or press Google in the Layers switcher again.
+- **Mapbox**, under the token in your account: add the same origin to its URL
+  restrictions. A token without any will not notice. Note that the *style*
+  endpoint serves a restricted token happily and only `/v4/…vector.pbf` refuses
+  it, so "the style loaded" is not evidence the token is allowed here.
+
+**The port is part of both matches.** Vite hops to 5174 when 5173 is taken, and
+a stale dev server from yesterday is enough to make an allowlist entry miss.
+
+`npm run tunnel` (needs [`cloudflared`](https://developers.cloudflare.com/cloudflare-tunnel/))
+is the other way in: a real certificate, no warning to click past, and it works
+off your network. It costs a fresh random `*.trycloudflare.com` hostname every
+run, which `allowedHosts` already covers as a wildcard but a Google referrer
+rule has to as well.
+
 ## Project structure
 
 ```

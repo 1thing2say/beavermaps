@@ -9,10 +9,20 @@
 // Everything drawn *on* the ground — the network, the campus sheet, the labels,
 // the route, the pins — is ours in both cases, and does not change.
 //
-// Google is the default. Mapbox is still the fallback, and has to be: Google's
-// half can fail in a way Mapbox's cannot — a missing key, a disabled Map Tiles
-// API, a referrer the key does not allow — and none of those can be detected
-// until a session is actually requested. See `revert` below.
+// Google is the default, and Mapbox is the fallback, because only one of them
+// can be checked before it is needed: Google's ground cannot be requested at
+// all until a session has been minted, so a missing key, a disabled Map Tiles
+// API or a referrer the key does not allow all surface as one rejected promise
+// with a reason in it. See `revert` below.
+//
+// That is a difference in HOW the two fail, not in WHETHER. This comment used
+// to say Mapbox's half could not fail this way, and a phone on the LAN proved
+// otherwise inside a minute — a Mapbox token carries URL restrictions of its
+// own, and refuses a new origin exactly as Google's key does. What Mapbox has
+// no way to do is say so once: the refusal arrives per tile, forever. See
+// src/basemap-problem.js. Falling back to a provider that is refusing tiles
+// would be a switch to nothing, so `revert` is still worth having and is still
+// only reachable from Google's side.
 
 import { spin } from './spinner.js';
 

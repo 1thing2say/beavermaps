@@ -28,8 +28,15 @@ const useHttps = process.env.HTTPS === '1';
  *
  * Lower-cased because Vite compares Host headers to allowedHosts as exact
  * strings, and browsers send the header lower-cased.
+ *
+ * The suffix is stripped before it is re-added because os.hostname() does not
+ * promise a short name: on a Mac whose Sharing name has been set it answers
+ * "MacBook-Pro.local" already, and appending blindly asks avahi for
+ * macbook-pro.local.local — a name nothing resolves, so the certificate is
+ * issued for it, allowedHosts lists it, and the real https://<host>.local URL
+ * is refused with "Blocked request" by the very config meant to allow it.
  */
-const LAN_HOST = `${hostname()}.local`.toLowerCase();
+const LAN_HOST = `${hostname().replace(/\.local$/i, '')}.local`.toLowerCase();
 
 export default defineConfig({
   plugins: [
@@ -37,7 +44,18 @@ export default defineConfig({
     // Spread rather than a falsy entry: Vite accepts `false` in the array, but
     // an unconditional basicSsl() would flip HTTPS on for plain `npm run dev`
     // too, since the plugin sets server.https from configResolved.
-    ...(useHttps ? [basicSsl({ domains: [LAN_HOST] })] : []),
+    //
+    // certDir is keyed on the name because the plugin's cache is only
+    // invalidated by expiry — it reads node_modules/.vite/basic-ssl/_cert.pem
+    // and hands it back without ever comparing the domains it was asked for.
+    // So the certificate outlives the name it was issued for: rename the Mac,
+    // fix this config, and the phone still gets last month's SAN and a warning
+    // that cannot be clicked past on iOS. A per-host directory makes a changed
+    // name a cache miss, which is what the plugin should have done itself.
+    ...(useHttps ? [basicSsl({
+      domains: [LAN_HOST],
+      certDir: `node_modules/.vite/basic-ssl-${LAN_HOST}`,
+    })] : []),
   ],
   server: {
     // Bind 0.0.0.0 so a tunnel (or another device on the LAN) can reach us.
