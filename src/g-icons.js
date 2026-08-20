@@ -20,7 +20,11 @@ const PATHS = {
   // gone stale.
   close:
     '<path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3 10.6 10.6 16.9 4.3z"'
-    + ' transform="translate(2.4 0)"/>',
+    // The path's own extent is x 2.9..18.3, so its centre sits at 10.6 — 1.4
+    // short of the 24-unit box's middle. This nudge is that 1.4 and no more. It
+    // was 2.4, which carried the mark a whole unit PAST centre and left the x
+    // visibly right of the middle of every disc it is drawn in.
+    + ' transform="translate(1.4 0)"/>',
   search:
     '<path d="M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.7 4.8-1.4 1.4-4.8-4.7A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/>',
   directions:
