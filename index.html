@@ -20,17 +20,32 @@
          Duplicated here rather than imported, deliberately, because anything
          importable arrives too late by definition — this has to run before the
          body renders. `mapper-theme` and the three modes are theme.js's
-         contract; the only thing restated is which of them means "ask the
-         device". -->
+         contract; what is restated is its `resolveTheme`, which is four lines.
+
+         AND RESOLVING IS THE POINT. This used to write the stored MODE, "auto"
+         included — and `data-theme="auto"` is a value no selector in the
+         stylesheet matches, so every token fell back to the light palette until
+         the bundle landed. The splash was worse off than if this script had
+         never run: .g-boot-mark picks its variant from `prefers-color-scheme`
+         and had already switched to the white-bodied dark mark, so a dark-mode
+         phone got that mark on a white ground and the logo simply vanished for
+         the length of the load, with the spinner beside it grey-on-grey.
+
+         theme.js stores the mode and applies the THEME — see applyThemeAttribute
+         — so "auto" was never a value this attribute should hold. -->
     <script>
         (function () {
+            var theme = 'light';
             try {
-                var chosen = localStorage.getItem('mapper-theme');
-                if (chosen !== 'light' && chosen !== 'dark' && chosen !== 'auto') chosen = 'auto';
-                document.documentElement.dataset.theme = chosen;
+                var mode = localStorage.getItem('mapper-theme');
+                if (mode !== 'light' && mode !== 'dark') mode = 'auto';
+                var dark = mode === 'dark'
+                    || (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                theme = dark ? 'dark' : 'light';
             } catch (e) {
-                document.documentElement.dataset.theme = 'auto';
+                /* Private mode can throw on localStorage; light is the default. */
             }
+            document.documentElement.dataset.theme = theme;
         }());
     </script>
 </head>
