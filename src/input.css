@@ -80,6 +80,12 @@
     --g-highlight: #a142f4;
     --g-highlight-soft: rgba(161, 66, 244, 0.12);
     --g-hover: rgba(60, 64, 67, 0.08);
+    /* What a row looks like under a FINGER, as against under a pointer.
+       A touch screen never fires :hover, so without this the only feedback a
+       tapped legend row gave was the map changing a moment later. Roughly twice
+       the hover, which is what it takes to read through a fingertip resting on
+       the row — and it is only ever on screen while the finger is down. */
+    --g-active: rgba(60, 64, 67, 0.16);
     --g-shadow: 0 1px 2px rgba(60, 64, 67, 0.3), 0 2px 6px 2px rgba(60, 64, 67, 0.15);
     --g-shadow-sm: 0 1px 2px rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
 
@@ -188,6 +194,7 @@
     --g-highlight: #c58af9;
     --g-highlight-soft: rgba(197, 138, 249, 0.16);
     --g-hover: rgba(232, 234, 237, 0.1);
+    --g-active: rgba(232, 234, 237, 0.2);
     --g-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 6px 2px rgba(0, 0, 0, 0.35);
     --g-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6), 0 1px 3px 1px rgba(0, 0, 0, 0.35);
 }
@@ -199,6 +206,92 @@
    Apple's halo is a warm white their cards are not. */
 :root {
     --g-label-halo: var(--g-surface);
+
+    /* The layers control's geometry, at :root because two rules a thousand
+       lines apart read it: the button draws itself at this size, and the menu
+       caps its own height by measuring down from under it. A skin that resizes
+       the button therefore moves the cap with it — see the Apple block below,
+       which is why this is a token and not the 64 it used to be in both places.
+       --g-layers-drop is the gap between the button and the menu it opens. */
+    --g-layers-btn: 64px;
+    --g-layers-drop: 8px;
+
+    /* Where the layers button is pinned on a phone, measured from the top of
+       the screen. Read four times — to place the button, to place locate under
+       it, to cap the menu that hangs off it, and by the control stack in the
+       opposite corner working out how far it may rise.
+
+       IT USED TO BE 158px, and every one of those terms is now gone: it was
+       clearing a search field one gap down and 48 tall, plus a gap and a 32px
+       chip strip beside it. The chip strip became the legend and the field went
+       to the foot of the sheet, so the top-right corner is empty and the button
+       may simply sit in it. Worth more than the tidiness: the menu is measured
+       DOWN from here, so it is 110px of height handed back to a control that
+       was photographed running off the bottom of a 320x500 screen. */
+    --g-layers-top: var(--g-gap);
+
+    /* THE MOTION VOCABULARY, so that everything that moves moves the same way.
+       ------------------------------------------------------------------
+       Two curves and three durations, and the reason there are only two curves
+       is that this app only has two kinds of movement in it.
+
+       --g-ease-sheet is Apple's sheet curve, and it was already here four times
+       over as a literal — on the place card's entrance, the switch's thumb, the
+       credit line following the sheet up. Almost all of its travel is spent in
+       the first third of its time, which is what makes a short distance still
+       read as something being PUT somewhere rather than sliding there. It is
+       for anything that changes position.
+
+       --g-ease-out is for the things that only change in opacity or size, where
+       the sheet curve's long tail reads as a lag. It decelerates without the
+       overshoot.
+
+       The durations are named for what they are for rather than by size, because
+       the useful question at a call site is "is this a press or a panel". A
+       press has to feel like it happened under the finger, so it is shorter than
+       the eye's own latency; a panel is the one thing here that is allowed to be
+       seen travelling. */
+    --g-ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+    --g-ease-out: cubic-bezier(0.16, 0.84, 0.32, 1);
+
+    /* Where a surface comes from when it has nothing particular to say about
+       it: nowhere. Each dismissible thing overrides this with its own direction
+       — see the Motion section — and `none` is the honest default, a plain
+       fade. Stated at :root rather than only on the components that set it,
+       because an undefined custom property does not fall back to a property's
+       initial value, it invalidates the whole declaration — so a surface added
+       to that list without a direction would lose its fade along with its
+       travel. */
+    --g-enter-from: none;
+    --g-t-press: 90ms;
+    --g-t-state: 140ms;
+    --g-t-panel: 240ms;
+
+    /* How much of the viewport the on-screen keyboard is currently covering.
+       ------------------------------------------------------------------
+       Written by main.js off `window.visualViewport`, because nothing in CSS
+       can see it. iOS raises the keyboard OVER the page rather than resizing
+       the layout viewport, so a sheet anchored to the bottom of the document is
+       underneath it — and the sheet's last row is now the field you are typing
+       into, which makes that the difference between a search box and a search
+       box you cannot see. 0 whenever there is no keyboard, which is every
+       pointer device and every resting phone. */
+    --g-kb-h: 0px;
+
+    /* How tall the bottom sheet currently is, written by a ResizeObserver in
+       main.js. Nothing in CSS can measure a sibling, and the credit line has to
+       ride directly above the sheet however tall the sheet happens to be — see
+       the phone block. 0 when nothing is open, which is the resting state and
+       therefore the right default if the observer never runs. */
+    --g-sheet-h: 0px;
+
+    /* And how tall Mapbox's control stack is, from the same observer. The stack
+       rides above the sheet and has to stop before it reaches the layers button
+       pinned at the top of the screen — which it can only work out if it knows
+       its own height. 0 is a safe default: the clamp then simply resolves to a
+       slightly lower ceiling than it should, never a higher one. */
+    --g-ctrl-stack-h: 0px;
+
 }
 
 /* ===========================================================================
@@ -234,6 +327,12 @@
    difference along one eighth of each corner.
    =========================================================================== */
 :root[data-skin="apple"] {
+    /* 44 rather than the classic thumbnail's 64 — the touch floor, and the size
+       every other floating control on this skin is. Stated as the token so the
+       menu's height cap moves with the button rather than against a 64 that is
+       no longer there. */
+    --g-layers-btn: 44px;
+
     --g-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
         Inter, "Helvetica Neue", system-ui, sans-serif;
 
@@ -274,6 +373,7 @@
     --g-highlight: #af52de;
     --g-highlight-soft: rgba(175, 82, 222, 0.14);
     --g-hover: rgba(120, 120, 128, 0.12);
+    --g-active: rgba(120, 120, 128, 0.24);
 
     /* A hairline ring plus one wide, soft drop. Google stacks two tight dark
        shadows to lift a card off white; Apple's cards are over a photograph or
@@ -325,6 +425,7 @@
     --g-highlight: #bf5af2;
     --g-highlight-soft: rgba(191, 90, 242, 0.18);
     --g-hover: rgba(120, 120, 128, 0.24);
+    --g-active: rgba(120, 120, 128, 0.42);
 
     --g-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 8px 28px rgba(0, 0, 0, 0.5);
     --g-shadow-sm: 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 2px 10px rgba(0, 0, 0, 0.4);
@@ -707,12 +808,22 @@ body.navigating .app-chrome {
     display: none;
 }
 
-/* State beats layout, said once, at 0-2-0 so it wins without !important. */
+/* State beats layout, said once, at 0-2-0 so it wins without !important.
+
+   `.g-spin-inline` belongs here for a reason worth writing down: it declares
+   `display: inline-block` down in the unlayered half of this file, so it beat
+   Tailwind's layered `.hidden` outright and the status line's spinner slot was
+   never hidden at all. Nothing SPUN — spin() only injects its ring when it is
+   started — but the empty 14px box held its width permanently, and the message
+   beside it sat 14px right of where the paragraph puts it. Exactly the jump the
+   markup comment says this arrangement exists to prevent, in the other
+   direction and all the time. */
 .g-panel.hidden,
 .g-legend.hidden,
 .g-layers-menu.hidden,
 .g-debug.hidden,
 .g-search-clear.hidden,
+.g-spin-inline.hidden,
 .g-results.hidden {
     display: none;
 }
@@ -761,7 +872,8 @@ body.navigating .app-chrome {
     background: transparent;
     border: 0;
     cursor: pointer;
-    transition: background-color 120ms ease, color 120ms ease;
+    transition: background-color var(--g-t-state) ease, color var(--g-t-state) ease,
+        transform var(--g-t-press) var(--g-ease-out);
 }
 
 .g-icon-btn:hover {
@@ -855,6 +967,39 @@ body.navigating .app-chrome {
     height: 100%;
 }
 
+/* AND THE FIELD SAYS WHEN IT HAS FOCUS, which it did not.
+   ---------------------------------------------------------------------------
+   .g-search-input carries `outline: 0` — correct, because a browser's own ring
+   around a bare input inside a rounded pill is a rectangle floating in a
+   capsule — and nothing was ever put back in its place. So tabbing to the one
+   control this app is mostly operated through moved the caret and changed
+   nothing on screen. Every other control here answers a keyboard; this is the
+   only one that did not, and it is the first one you reach.
+
+   ON THE PILL, not on the input, because the pill is the shape a person sees as
+   "the search box" — the input is a transparent strip in the middle of it with
+   a magnifier and a rule beside it. `:focus-within` is what lets the outer box
+   answer for the inner one.
+
+   An OUTLINE rather than a box-shadow: .g-search is a .g-card and carries the
+   card shadow, and a second box-shadow would replace it rather than join it.
+   Offset INWARD, which is not a taste — the sheet is full-bleed on a phone and
+   sits in a scroll container, so a ring drawn outside the pill's right edge is
+   a ring clipped by the column. Inside, it cannot be.
+
+   Declared at rest as transparent rather than absent, so there is a width to
+   animate FROM: `outline-color` interpolates and `outline-width` from nothing
+   does not. */
+.g-search {
+    outline: 2px solid transparent;
+    outline-offset: -2px;
+    transition: outline-color var(--g-t-state) ease;
+}
+
+.g-search:focus-within {
+    outline-color: var(--g-blue);
+}
+
 .g-search-input {
     flex: 1;
     min-width: 0;
@@ -932,7 +1077,7 @@ body.navigating .app-chrome {
     background: var(--g-blue);
     color: var(--g-on-blue);
     cursor: pointer;
-    transition: filter 120ms ease;
+    transition: filter var(--g-t-state) ease, transform var(--g-t-press) var(--g-ease-out);
 }
 
 .g-directions:hover {
@@ -1105,6 +1250,51 @@ body.navigating .app-chrome {
     flex-direction: column;
     min-height: 0;
     overflow: hidden;
+}
+
+/* HOW THE CARD ARRIVES.
+   ---------------------------------------------------------------------------
+   It used to not. `.hidden` is `display: none`, so a tapped building went from
+   nothing to a sheet covering three fifths of a phone screen between one frame
+   and the next, and on a screen that size the eye reads that as the map having
+   been replaced rather than as something having been opened.
+   
+   On the panel and not on the card, because .g-panel clips to its own box: a
+   card translated inside a content-sized panel would have its bottom cut off
+   and show a strip of empty surface at the top instead of moving.
+
+   The travel is deliberately short. The column is `overflow-y: auto` on a
+   phone, and a child translated downwards adds to its scrollable height for as
+   long as the transform lasts — 40 px of that for 260 ms is nothing, and the
+   full sheet-height slide this wants to be would briefly make the sheet
+   scrollable by its own height. Apple's own sheet curve, which is most of what
+   makes a short distance still read as a sheet: almost all of the travel is
+   spent in the first third of the time. */
+@keyframes g-place-in {
+    from {
+        opacity: 0;
+        transform: var(--g-enter-from, translateY(10px));
+    }
+}
+
+/* The one entrance that does not need @starting-style, kept for the one surface
+   that most deserves to work everywhere. It reads the same token the shared
+   motion system uses, so the two cannot drift apart: an engine with
+   @starting-style plays both, they agree, and nothing looks doubled. */
+#place-panel.is-entering {
+    animation: g-place-in var(--g-t-panel) var(--g-ease-sheet);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #place-panel.is-entering {
+        animation: none;
+    }
+
+    /* The control stack follows the sheet up; with the sheet not moving there
+       is nothing for it to follow. */
+    .mapboxgl-control-container .mapboxgl-ctrl-bottom-right {
+        transition: none;
+    }
 }
 
 /* The head's own text, which the close button sits beside. Needed because the
@@ -1380,12 +1570,25 @@ body.navigating .app-chrome {
     bottom: 0;
     left: 0;
     padding: 10px 8px 4px;
-    font-size: 10px;
-    line-height: 1.2;
+    /* Google's credit for this imagery is not a line, it is a paragraph —
+       "Google, Data SIO, NOAA, U.S. Navy, NGA, GEBCO, Landsat / Copernicus,
+       Data LDEO-Columbia, NSF, NOAA, IBCAO" — and across a phone-width box it
+       wrapped to three lines and covered the bottom third of the photograph.
+       Smaller and tighter rather than truncated: it is required text, and it is
+       still perfectly legible at this size against its scrim. */
+    font-size: 9px;
+    line-height: 1.15;
     text-align: right;
-    color: rgba(255, 255, 255, 0.86);
-    text-shadow: 0 0 3px rgba(0, 0, 0, 0.55);
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.28), transparent);
+    color: #fff;
+    /* Legible over ANYTHING, which for once is not a figure of speech: this is
+       white text laid over whatever photograph Google returns, and the box
+       before the photograph arrives is the placeholder grid — which is nearly
+       white in the light theme. At the old 0.28 scrim the credit was grey on
+       pale grey and effectively unreadable for the first second of every card,
+       and it is required text. The gradient carries the contrast and the shadow
+       catches the gap between it and a bright roof. */
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.12) 70%, transparent);
     pointer-events: none;
 }
 
@@ -1716,7 +1919,8 @@ body.navigating .app-chrome {
     font-weight: 700;
     letter-spacing: 0.02em;
     cursor: pointer;
-    transition: filter 120ms ease, opacity 120ms ease;
+    transition: filter var(--g-t-state) ease, opacity var(--g-t-state) ease,
+        transform var(--g-t-press) var(--g-ease-out);
 }
 
 .g-go:hover:not(:disabled) {
@@ -1767,7 +1971,8 @@ body.navigating .app-chrome {
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: background-color 120ms ease, filter 120ms ease;
+    transition: background-color var(--g-t-state) ease, filter var(--g-t-state) ease,
+        transform var(--g-t-press) var(--g-ease-out);
 }
 
 .g-btn .g-icon {
@@ -1831,6 +2036,17 @@ body.navigating .app-chrome {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
+    /* Above its own siblings, which are Mapbox's: main.js hands this element to
+       map.addControl, so it is a child of .mapboxgl-ctrl-bottom-right alongside
+       the zoom group, the scale bar and the attribution — and that corner sets
+       z-index on itself, so it is a stacking context and the order inside it is
+       DOM order among equals. The menu opens over that corner on a phone, where
+       it is pinned top-right and drops downward, and every control it crossed
+       was painted over it: measured at 390x660, the zoom group overlapped it
+       44x88 and won, the scale bar 67x22 and won. Nothing here needs to beat
+       the chrome outside this corner, so 1 rather than a number picked from the
+       app's scale. */
+    z-index: 1;
 }
 
 /* To the LEFT of the button and level with its bottom, because the button is
@@ -1843,10 +2059,11 @@ body.navigating .app-chrome {
     width: 260px;
 }
 
+
 .g-layers-btn {
     position: relative;
-    width: 64px;
-    height: 64px;
+    width: var(--g-layers-btn);
+    height: var(--g-layers-btn);
     padding: 0;
     border: 2px solid var(--g-surface);
     border-radius: var(--g-radius);
@@ -1892,6 +2109,23 @@ body.navigating .app-chrome {
 
 .g-layers-menu {
     padding: 12px;
+    /* Never taller than the window it opens in.
+       ------------------------------------------------------------------
+       Here the menu grows UPWARDS — it is pinned to the bottom of a button that
+       sits at the bottom of the control stack — so a short viewport pushes it
+       off the TOP, where there is no edge to notice and nothing to scroll. A
+       phone in landscape is the case that found this: 844 px wide is past the
+       640 px breakpoint, so it gets this layout, and 390 px of height against a
+       465 px menu put Map type and Appearance at y = -255. Not clipped — gone,
+       and the two settings the menu exists for were the two that went.
+
+       The phone layout below sets its own cap because the menu hangs downward
+       there and is measured from a known top. This one is the general case:
+       whatever is left of the window once the gaps and the credit strip have
+       taken theirs. */
+    max-height: calc(100dvh - var(--g-gap) * 2 - var(--g-credit-h));
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .g-layers-heading {
@@ -1909,17 +2143,23 @@ body.navigating .app-chrome {
     border-top: 1px solid var(--g-line);
 }
 
+/* The options in a section, sharing the width between them.
+   ---------------------------------------------------------------------------
+   `flex: 1` rather than the fixed 76px the buttons used to carry. Two options
+   in a 236px row left 152px of empty card to the right of them, so "Map type"
+   sat as a pair of narrow tiles hugging the left edge while "Appearance"
+   underneath — three of the same tiles — filled the row exactly. It read as a
+   misalignment because it was one: the same row, ragged or flush depending on
+   how many things happened to be in it. */
 .g-layers-row {
     display: flex;
     gap: 8px;
 }
 
-.g-layer-btn--wide {
-    width: auto;
+.g-layers-row > .g-layer-btn {
     flex: 1;
-    flex-direction: row;
-    justify-content: center;
-    gap: 8px;
+    width: auto;
+    min-width: 0;
 }
 
 .g-layer-btn {
@@ -1935,6 +2175,28 @@ body.navigating .app-chrome {
     color: var(--g-text);
     font-size: 12px;
     cursor: pointer;
+}
+
+/* One option filling the row — "Classic", "Map legend" — set as a row rather
+   than a tile: a glyph stacked over a word is what makes a NARROW option
+   readable, and there is nothing narrow about a button the whole width of the
+   card. Same call as the lone Directions button on a place card.
+
+   DECLARED AFTER .g-layer-btn, and that is the whole of why it works now. It
+   sat above it before, at the same 0-1-0, so `flex-direction: column` from the
+   base rule won every tie and this class's `row` never once applied — both
+   full-width options have been drawing as tall stacked tiles since the day it
+   was written, which is most of why the menu ran to 70% of a phone screen. */
+.g-layer-btn--wide {
+    width: auto;
+    flex: 1;
+    flex-direction: row;
+    justify-content: center;
+    gap: 8px;
+    /* Laid out as a row it came out 38px tall, which is a finger target below
+       the floor. The stacked tiles beside it are 62 by virtue of their two
+       lines; this one has to ask. */
+    min-height: 44px;
 }
 
 .g-layer-btn:hover {
@@ -2124,10 +2386,32 @@ body.navigating .app-chrome {
     margin: 0;
 }
 
-.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group,
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-scale {
     background: var(--g-surface);
     border-radius: var(--g-radius-sm);
     box-shadow: var(--g-shadow-sm);
+}
+
+/* THE SCALE BAR IS ONE OF THESE CONTROLS, and it was the only one that did not
+   look like it.
+   ---------------------------------------------------------------------------
+   Mapbox draws it as a ruler: three borders — left, right and bottom — around a
+   box whose WIDTH is the measurement, with square corners and a flat fill of
+   its own. Standing in a column of soft-cornered material chips it read as a
+   different kind of object that happened to be parked there, which is what it
+   is, and at 82% surface against their 68.6% it was not even the same colour.
+
+   The borders go and the box stays. Nothing is lost by that: the span being
+   claimed is the element's width, which Mapbox sets to the measured distance —
+   the end ticks only ever restated where the box already ended. What is gained
+   is that the corner now holds four things in one language rather than three
+   and a ruler. */
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-scale {
+    border: 0 !important;
+    padding: 2px 8px;
+    line-height: 1.5;
+    text-align: center;
 }
 
 .mapboxgl-ctrl-group button + button {
@@ -2167,9 +2451,38 @@ body.navigating .app-chrome {
     display: none;
 }
 
-.mapboxgl-ctrl-attrib,
-.mapboxgl-ctrl-scale {
+/* The scale bar's fill is set with the rest of the stack above, not here — this
+   rule's `!important` background would otherwise beat it, which is how it came
+   to be the one control in the corner wearing a different colour. What is left
+   here is the credit's own ink and size. */
+/* THE CREDIT LINE, which is text now rather than an "i" — see the
+   AttributionControl in main.js for why it may not simply be removed.
+   ---------------------------------------------------------------------------
+   Spelled out, it is as long as its longest provider: "© Mapbox ©
+   OpenStreetMap Improve this map" measures 252px. It shares the bottom-left
+   corner with the Mapbox wordmark, and the corner is what bounds it — see the
+   phone block, where that corner is held clear of the control stack in the
+   opposite one. Wraps rather than truncates: an ellipsis would be the obvious
+   fix and is the wrong one, because a notice that has been cut off is a notice
+   that has not been given. */
+.mapboxgl-ctrl-attrib {
     background: color-mix(in srgb, var(--g-surface) 82%, transparent) !important;
+    color: var(--g-text-dim) !important;
+    font-size: 11px;
+    max-width: 100%;
+    white-space: normal;
+}
+
+/* The wordmark leads. `addControl` prepends for a bottom corner, so adding the
+   notice put it in front of a logo that was already there — the credit read
+   "© Mapbox © OpenStreetMap Improve this map [mapbox]", with the mark it is
+   crediting trailing its own notice. Ordered rather than reordered in the DOM,
+   which is Mapbox's to arrange. */
+.mapboxgl-ctrl-bottom-left .mapboxgl-ctrl-logo {
+    order: -1;
+}
+
+.mapboxgl-ctrl-scale {
     color: var(--g-text-dim) !important;
     font-size: 11px;
 }
@@ -2178,9 +2491,7 @@ body.navigating .app-chrome {
     color: var(--g-text-dim) !important;
 }
 
-.mapboxgl-ctrl-scale {
-    border-color: var(--g-text-dim) !important;
-}
+
 
 /* Turn-by-turn keeps the locate button and drops the rest: zoom and a scale bar
    are map-reading tools, and while walking they only collide with the remaining
@@ -2451,10 +2762,34 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
 
 /* The field you type into, which is a control ON the panel rather than one of
    its own — so it gets the edge without the shadow, the way a well pressed into
-   glass would. */
-[data-skin="apple"] .g-search-field {
-    background-image: var(--g-sheen);
-    box-shadow: var(--g-rim);
+   glass would.
+   ---------------------------------------------------------------------------
+   SIDEBAR WIDTHS ONLY. Below 641px there is no panel for it to be a control on:
+   the search is a standalone pill, .g-search IS the glass, and .g-search-field
+   is just the row inside it — inset by the pill's own 16px and 8px of padding.
+   Giving that row a sheen and a rim drew a second, smaller lit edge floating
+   inside the first, which is the lighter band that stops short of the capsule's
+   ends. One piece of glass, one edge. */
+@media (min-width: 641px) {
+    [data-skin="apple"] .g-search-field {
+        background-image: var(--g-sheen);
+        box-shadow: var(--g-rim);
+        /* The focus ring moves in with the shape it belongs to. Here the filled
+           capsule IS the field and .g-search is the whole head of the sidebar,
+           so a ring around the outer box would circle the panel's title area
+           rather than the thing you are typing in. */
+        outline: 2px solid transparent;
+        outline-offset: -2px;
+        transition: outline-color var(--g-t-state) ease;
+    }
+
+    [data-skin="apple"] .g-search:focus-within {
+        outline-color: transparent;
+    }
+
+    [data-skin="apple"] .g-search:focus-within .g-search-field {
+        outline-color: var(--g-blue);
+    }
 }
 
 /* The blue circle at the end of the field. */
@@ -2538,8 +2873,6 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
    — a bare text node, hence the font-size rather than a display — stops
    printing the word under it. */
 [data-skin="apple"] .g-layers-btn {
-    width: 44px;
-    height: 44px;
     border: 0;
     background-color: var(--g-card-bg);
     background-image: var(--g-sheen);
@@ -2553,10 +2886,21 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     display: none;
 }
 
+/* The caption becomes the whole button here: no thumbnail behind it, the word
+   set to nothing, just the glyph in the middle of the material.
+   ---------------------------------------------------------------------------
+   `gap: 0` is the load-bearing line. The base rule spaces the glyph from the
+   word "Layers" by 4px, and `font-size: 0` shrinks the word to nothing without
+   removing it — a bare text node in a flex container is still an anonymous flex
+   item, so the gap after the glyph survived the word it was separating from.
+   The glyph was therefore centred as "22px + 4px + 0px", which put it 2px left
+   of the middle of a 44px button. Measured before: 9px of padding on the left
+   and 13px on the right. */
 [data-skin="apple"] .g-layers-caption {
     position: absolute;
     inset: 0;
     padding: 0;
+    gap: 0;
     font-size: 0;
     color: inherit;
     background: transparent;
@@ -2608,8 +2952,22 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     box-shadow: var(--g-shadow);
 }
 
+/* The ruling stays, quietly.
+   ---------------------------------------------------------------------------
+   This was `display: none`: the Apple sign was a plain black slab and the grid
+   belonged to the classic skin, with one exception — a simulated walk turned it
+   back on, because a simulation is watched rather than walked and can afford
+   the depth. The result was that the drifting grid existed and essentially
+   nobody ever saw it, since Apple is the default skin and a real walk is the
+   normal case.
+
+   Shown at the same third-strength the simulation uses, and the reasoning there
+   applies here unchanged: at full strength the lattice is the first thing the
+   sign says, with the distance and the turn behind it; at a third it is a
+   texture you notice second, which is the right order for the one card somebody
+   reads while walking. */
 [data-skin="apple"] .nav-sign::before {
-    display: none;
+    opacity: 0.32;
 }
 
 /* --- the simulated walk ----------------------------------------------------
@@ -3033,7 +3391,7 @@ body.simulating .nav-sign::after {
     box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
     /* The knob TRAVELS. A switch whose knob teleports while its track fades is
        two animations that disagree about whether anything moved. */
-    transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform 200ms var(--g-ease-sheet);
 }
 
 .g-switch:checked {
@@ -3118,10 +3476,19 @@ body.no-dirbutton .g-directions {
     position: relative;
 }
 
+/* Inset, not flush. `right: 0` on an absolutely positioned child resolves to
+   the containing block's PADDING box — which is the head's outer edge, not the
+   inside of its 16px of padding — so this sat exactly on the panel's border.
+   That was invisible while the sheet was inset from the screen by a gap on
+   every side, and stopped being invisible the moment the sheet went full width:
+   the × ended up hard against the right edge of the phone with a right-hand gap
+   of 0, reading as a control that had been clipped. Matched to .g-panel-head's
+   own 8px right padding, which is where every other close button in this app
+   sits. */
 .g-route-close {
     position: absolute;
-    top: 0;
-    right: 0;
+    top: 10px;
+    right: 8px;
 }
 
 /* --- the endpoint fields ---------------------------------------------------
@@ -3146,13 +3513,19 @@ body.no-dirbutton .g-directions {
     color: var(--g-text-dim);
 }
 
+.g-endpoint-input {
+    transition: background-color var(--g-t-state) ease, outline-color var(--g-t-state) ease;
+    /* Same reason as the search pill above: a width to animate from. */
+    outline: 2px solid transparent;
+    outline-offset: -1px;
+}
+
 .g-endpoint-input:hover {
     background: var(--g-hover);
 }
 
 .g-endpoint-input:focus {
-    outline: 2px solid var(--g-blue);
-    outline-offset: -1px;
+    outline-color: var(--g-blue);
     background: var(--g-surface-2);
 }
 
@@ -3227,12 +3600,43 @@ body.no-dirbutton .g-directions {
 @media (max-width: 640px) {
     .g-topleft {
         top: auto;
-        /* Clear of the credit strip. The sheet spans the full width here and was
-           sitting on top of both the Mapbox wordmark and Google's copyright
-           line; attribution is a licence term for each of them, so the sheet
-           stops short of the bottom edge rather than covering them. */
-        bottom: calc(var(--g-gap) + var(--g-credit-h));
-        right: var(--g-gap);
+        /* A SHEET, not a card parked near the bottom.
+           ------------------------------------------------------------------
+           It used to stop a credit-strip's height short of the bottom edge, to
+           keep off the Mapbox wordmark and the copyright line — both licence
+           terms, neither of them ours to cover. What that produced was a box
+           floating above a band of map, with its content sheared off mid-row:
+           the last thing you could read was half a table row, and under it the
+           map showed through with the credits lying on it.
+
+           It reaches the edge now. The credits are still visible and still
+           uncovered, by being moved rather than avoided — both are in the
+           bottom-LEFT corner now (see main.js) which is raised over the sheet
+           below, and the last card carries a band of its own surface behind
+           them so nothing is printed on top of anything.
+
+           Full width for the same reason: a card flush with the bottom edge but
+           inset from the sides reads as one that has been cut off, not one that
+           has been placed. This is the shape every phone map uses. */
+        /* A PIXEL PAST THE EDGE, and the padding gives it straight back.
+           ------------------------------------------------------------------
+           `bottom: 0` is exact in CSS and not always exact in device pixels: a
+           card whose height lands on a fraction, on a screen at 2x or 3x, can
+           round to a hairline of map showing beneath it. Overshooting by 1px
+           puts the card's own surface across that seam, and 1px of padding
+           inside means the CONTENT still stops exactly at the bottom of the
+           screen — nothing is pushed off, only the paint is extended.
+
+           This is on the column rather than on any one panel deliberately: it
+           is every panel that rises from the bottom here, and a rule per panel
+           would be one to forget next time one is added. */
+        /* ...and lifted clear of the keyboard when there is one. See --g-kb-h:
+           the overshoot is still a pixel, it is just a pixel below wherever the
+           visible bottom of the screen currently is. */
+        bottom: calc(var(--g-kb-h) - 1px);
+        padding-bottom: 1px;
+        left: 0;
+        right: 0;
         width: auto;
         max-width: none;
         max-height: 62dvh;
@@ -3280,29 +3684,280 @@ body.no-dirbutton .g-directions {
         overflow-y: visible;
     }
 
+    /* Further, because here it IS a sheet coming off the bottom edge rather
+       than a card appearing in a sidebar, and the gesture that opened it was a
+       finger on the map rather than a pointer already looking at the column. */
+    @keyframes g-place-in {
+        from {
+            opacity: 0;
+            transform: translateY(40px);
+        }
+    }
+
+    /* A SHORTER WINDOW, because on a phone this box is competing with the card
+       rather than sitting above it.
+       ------------------------------------------------------------------
+       16:10 is Apple's proportion for a place's photograph and it is right on a
+       260 px column. Full-bleed across 390 px it came out 211 px tall — more
+       than a third of the sheet's whole allowance, spent on one picture, which
+       pushed the floor area and the list of what is inside the building below
+       the fold on every building that has them. Measured with the head and the
+       buttons: 587 px of card in a 409 px sheet.
+
+       2:1 rather than a smaller 16:10, because the thing to cut is height and
+       not width — the shot is a camera circling a building, and it is the sky
+       and the car park at the top and bottom of the frame that this gives up.
+       The dvh cap is what keeps it honest on a short viewport, where a
+       proportion alone would still be measuring against 390 px of width.
+
+       WRITTEN AS A HEIGHT AND NOT AS A RATIO WITH A CAP, which is not a
+       preference — the pair `aspect-ratio: 2/1` with `max-height` is what kept
+       this box off the right-hand edge on the actual phone. A max size in one
+       axis TRANSFERS through an aspect ratio into the other, so 22dvh of height
+       became a 44dvh max-WIDTH: 290 px of a 390 px sheet, with the picture
+       hard against the left margin and a hundred pixels of card beside it.
+       Chrome does not do this to a stretched flex item and Safari does, which
+       is why it photographed correctly in every headless sweep and wrongly on
+       the device. With no ratio there is nothing for the cap to transfer
+       through, and `50vw` says the same thing the ratio did — never taller
+       than half the sheet is wide — in the axis that is actually constrained.
+
+       Safe for the camera: flyover-view.js computes its zoom from the box's
+       measured WIDTH, which now really is the sheet's. */
+    .g-flyover {
+        aspect-ratio: auto;
+        height: min(22dvh, 50vw);
+        /* Edge to edge. The 16px either side is right in a 260px sidebar, where
+           the picture is an inset thumbnail in a column of inset things — and
+           wrong in a full-width sheet, where it leaves the one photographic
+           element on the card floating in a margin nothing else respects. The
+           radius goes with the margin: a full-bleed image has no corners to
+           round. */
+        margin-left: 0;
+        margin-right: 0;
+        border-radius: 0;
+    }
+
+    /* A view that would not load is a band of text, not a photograph, and it
+       has its own shorter shape. It has to be restored here because the rule
+       above cleared the ratio for every .g-flyover — and it is safe to state as
+       a ratio, because this one has no max-height for the ratio to carry. */
+    .g-flyover--failed {
+        aspect-ratio: 16 / 5;
+        height: auto;
+    }
+
     /* Every panel keeps its own height rather than being squeezed by the
        column's cap — the cap is what the scrollbar is for now. */
     .g-topleft > .g-panel {
         flex: none;
     }
 
-    /* The field leaves the sheet and holds the top of the screen on its own.
-       It is the column's first row everywhere else, and that is what makes the
-       Apple sidebar one panel — but the column is at the BOTTOM here, and a
-       search box you have to scroll a sheet to reach is not one. Taken out of
-       flow rather than moved in the DOM, so there is one piece of markup and
-       the sheet below simply stacks without it.
+    /* THE CONTROL STACK RIDES ABOVE THE SHEET, like the credit line does.
+       ------------------------------------------------------------------
+       Measured across every state a phone has: with the place card open, the
+       locate button was covered by a Directions tile and the zoom pair by a
+       table row; with the legend open, all three by a legend count; with the
+       route panel open, by its own head. The sheet owns the bottom of the
+       screen, and these sat under it in every state except the empty map.
 
-       `fixed` is safe here specifically because the sidebar block above stops
-       at 640px: a backdrop-filter makes its element the containing block for
-       fixed descendants, so under the merged column this would be positioned
-       against the sheet and clipped to it rather than against the window. */
-    .g-search {
-        position: fixed;
-        top: var(--g-gap);
+       This is the same problem the layers button was moved to the top-right
+       corner to escape, and the note there says so in as many words — "the
+       sheet covers the bottom of the screen, so a layers button that stayed in
+       it would be behind the sheet at exactly the widths where the sheet is
+       biggest". Mapbox's own controls were left in it anyway. Locate is the one
+       control on a campus map that a visitor actually needs, and tapping any
+       building killed it.
+
+       Lifted rather than moved: bottom-right is where a thumb expects them, and
+       --g-sheet-h is already being measured for the credit. The transition is
+       the sheet's own curve and duration, so the two move as one thing. */
+    .mapboxgl-control-container .mapboxgl-ctrl-bottom-right {
+        /* ...but not past the layers button at the top of the screen. A tall
+           sheet on a short phone lifts this further than there is room for:
+           measured at 320x500 with a place card open, the stack's top landed
+           45px ABOVE the layers button's bottom edge and the scale bar sat
+           across it. The ceiling is the screen less everything above the stack
+           — the button's own pinned position, its height, a gap — less the
+           stack's height, which is the number the observer supplies because
+           this is the one thing a CSS box cannot ask about itself. */
+        bottom: min(
+            var(--g-sheet-h),
+            calc(100dvh - var(--g-layers-top) - var(--g-layers-btn)
+                - var(--g-gap) - var(--g-ctrl-stack-h))
+        );
+        transition: bottom 240ms var(--g-ease-sheet);
+    }
+
+    /* With the header on, the sheet keeps its bottom edge and gives up height at
+       the top instead — the map above it is what the header is taking from. */
+    .has-navbar .g-topleft {
+        max-height: calc(62dvh - var(--g-navbar-h));
+    }
+
+    /* The card that meets the bottom edge gives up its bottom corners: there is
+       nothing under them any more to round against. No bottom padding for the
+       credits either — they are above the sheet now, not on it. */
+    .g-topleft > .g-panel:last-child {
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+
+    /* THE CREDITS GO OVER THE SHEET.
+       ------------------------------------------------------------------
+       Both of them are in this corner now and nothing else is, which is what
+       makes raising it safe: the zoom and locate buttons are in the opposite
+       corner and stay under the card where they belong. 21 rather than 20 —
+       just past the column, not up among the boot splash.
+
+       A row, because Mapbox floats these and two floated credits in a corner
+       that is now only one line tall would stack rather than sit side by side.
+
+       IT RIDES ABOVE THE SHEET RATHER THAN ON IT, and the difference is the
+       whole design. Laying it over the card was the first attempt and it fails
+       on a scroller: the card's rows pass behind the credit, and at 82% opacity
+       "Height / 30 ft" reads straight through the copyright line. An opaque
+       band would have stopped the bleed and left a chip of a slightly different
+       colour parked on the card.
+
+       So it sits directly above the sheet, on the map, and moves as the sheet
+       grows. Which is what every phone map does with this text, and not by
+       coincidence: the sheet is the document and the credit belongs to the map
+       behind it. --g-sheet-h is written by the observer in main.js and is 0
+       when nothing is open, so this one rule also parks it back in the corner.
+
+       LOWERED, not raised. An earlier pass put this corner at 21 to get it over
+       the sheet, which this arrangement no longer needs and which had a cost in
+       the other direction: the credit then painted over the layers menu, and
+       the menu cannot answer back — it lives in the opposite corner, sealed in
+       a stacking context of Mapbox's own, so nothing inside it can outrank
+       another corner. Leaving both at Mapbox's 2 does not help either. The
+       corners are written top, top-right, right, bottom-right, bottom,
+       bottom-LEFT, left, so at equal z-index the credit still wins on DOM
+       order. 1 puts it a level below its neighbours and still above the canvas,
+       which is the only thing it has to clear. Measured at 320, 375 and 390,
+       where the menu's left edge reaches into this corner. */
+    .mapboxgl-control-container .mapboxgl-ctrl-bottom-left {
+        z-index: 1;
+        /* A full gap, not half of one, so this lands level with the scale
+           bar riding above the sheet in the opposite corner — that corner's
+           own bottom padding is --g-gap, and half a gap here left the two
+           credits-and-readouts line staggered by 5px across the screen. */
+        bottom: calc(var(--g-sheet-h) + var(--g-gap));
+        /* Stopped short of the control stack in the other corner. 44px is what
+           every control in it is wide — the zoom pair, locate, the layers
+           button — so this is the whole of that column plus a gap either side.
+           Without it the wordmark ran under the zoom buttons: the two corners
+           are independently positioned and neither knows the other is there. */
         left: var(--g-gap);
-        right: var(--g-gap);
-        width: auto;
+        right: calc(var(--g-gap) * 2 + 44px);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+    }
+
+    /* THE FIELD IS THE FOOT OF THE SHEET.
+       ------------------------------------------------------------------
+       It held the top of the screen, taken out of flow with `position: fixed`,
+       on the reasoning that a search box you have to scroll a bottom sheet to
+       reach is not one. That solved the reachability of the field and created a
+       worse version of the same problem, because a phone is held at the bottom:
+       the one control that is always the answer to "now what" sat at the far
+       end of the screen from the thumb, and every other piece of chrome this
+       app has — the sheet, the credits, the scale bar — was down at the other.
+
+       So it comes back into the column and goes LAST. `order` rather than a
+       move in the DOM: the field is still the first thing markup, focus and a
+       screen reader meet, which is the order it should be read in, and only the
+       painting changes. And it is `sticky`, not just last — the column scrolls
+       when a card is open, and the last row of a scrolling box is off the
+       bottom of it. Sticky is the one position that is in flow at rest (so it
+       takes its own space, and the sheet is as tall as its contents) and pinned
+       once there is something to scroll.
+
+       `bottom: 0` sticks it to the scrollport's edge, which is the sheet's own
+       painted bottom — the same edge the 1px overshoot above is protecting. */
+    .g-search {
+        order: 1;
+        position: sticky;
+        bottom: 0;
+        /* Over the cards that scroll behind it. It already carries z-index 5 to
+           clear them; sticky needs it to still be true once they are moving. */
+        z-index: 6;
+        /* COLUMN-REVERSE, which is the whole of how the list knows to open
+           upwards. The suggestions are a DOM child of this box, so wherever
+           this box is, they are: hung below the field with `top: 100%` they
+           were off the bottom of the screen, and flipped to `bottom: 100%` they
+           were clipped by the column's own scroller — the same trap the
+           endpoint list fell into and is commented for above.
+
+           Reversing the flow answers both at once. The list is in flow, so
+           nothing can clip it and the sheet simply grows upwards to hold it,
+           which is what a bottom sheet does. */
+        flex-direction: column-reverse;
+        align-items: stretch;
+        height: auto;
+        padding: 0;
+        /* Clips the list to the corner radius, which it now shares. */
+        overflow: hidden;
+    }
+
+    /* The 48px pill is the ROW now rather than the box around it, because the
+       box has a list in it. Same height, same padding, same shape — it is the
+       part of .g-search that is still a search bar. */
+    .g-search-row {
+        flex: none;
+        height: 48px;
+        padding: 0 8px 0 16px;
+    }
+
+    /* One surface, not two.
+       ------------------------------------------------------------------
+       The list is inside the field's own box here rather than floating under
+       it, so it gives up being a card: its own blur over the field's blur is
+       two panes of glass with nothing between them, and its shadow would fall
+       inside the box that casts it. What it keeps is the hairline, which is now
+       doing real work — it is the line between the answers and the question,
+       and in a reversed column `border-bottom` is the edge facing the field. */
+    .g-results {
+        position: static;
+        z-index: auto;
+        max-height: 46dvh;
+        background: transparent;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
+        border-radius: 0;
+        border-bottom: 1px solid var(--g-line);
+    }
+
+    /* A capsule is the right shape for a bar and the wrong one for a bar with a
+       list on top of it — at the search radius the top two rows of suggestions
+       are sliced by the curve. It squares up to a card's radius exactly while
+       there is something above the field to hold. */
+    .g-search:has(#place-results:not(.hidden)) {
+        border-radius: var(--g-radius);
+    }
+
+    /* Locate steps back while the layers menu is over it.
+       ------------------------------------------------------------------
+       The menu drops out of the layers button and locate is pinned directly
+       under that button, so an open menu lands squarely on it: `elementFromPoint`
+       at locate's own centre returns a menu row, and the button cannot be
+       pressed anyway. What it can still do is show through — the menu is Apple
+       material, a blur and a tint rather than an opaque fill, and a hard-edged
+       dark square behind it reads as a smudge in the middle of the settings.
+       Hidden rather than moved, and by visibility so the control keeps its
+       place in the stack and comes back where it was.
+
+       THE SUGGESTION LIST USED TO BE HERE TOO, hiding both this and the layers
+       button, and it is no longer true of either: the field is the foot of the
+       sheet now and its list opens upward from the bottom of the screen, a
+       whole viewport away from the corner these two live in. Two controls that
+       were being blanked for a collision that cannot happen. */
+    body:has(#layers-menu:not(.hidden)) .mapboxgl-ctrl-group:has(.mapboxgl-ctrl-geolocate) {
+        visibility: hidden;
     }
 
     /* The legend used to be a second full-width sheet here, fighting the first
@@ -3323,16 +3978,39 @@ body.no-dirbutton .g-directions {
     .g-layers {
         position: fixed;
         right: var(--g-gap);
-        top: calc(var(--g-gap) * 3 + 48px + 32px);
+        top: var(--g-layers-top);
     }
 
     /* And the menu opens downward from it rather than to its left: there is
-       room under a top-right button and none beside it. */
+       room under a top-right button and none beside it.
+       ------------------------------------------------------------------
+       ...but not necessarily room for ALL of it. The menu is four sections and
+       runs 465 px tall, and it is pinned 162 px down the screen, so it needs a
+       viewport 627 px high before the last of it is on screen. Measured: fine
+       at 390x660 and 430x720, and cut off at 320x500 — the Legend section was
+       127 px below the bottom edge with no way to reach it, on a phone whose
+       whole screen is the argument for having a menu rather than a row of
+       buttons. Safari's visible viewport is a couple of hundred pixels shorter
+       than the device's, and it shrinks again when the URL bar is expanded, so
+       this is not only the small-phone case.
+
+       The cap is the screen minus everything above the menu and the credit
+       strip below it, which is why the button's height is a token — the drop
+       and the height are stated once, up where the button is drawn, and this
+       reads them rather than repeating two numbers that would drift.
+
+       `contain`, so a flick that reaches the end of the menu stops there
+       instead of scrolling the sheet behind it. */
     .g-layers-menu {
         right: 0;
         bottom: auto;
-        top: calc(100% + 8px);
+        top: calc(100% + var(--g-layers-drop));
         width: min(260px, calc(100vw - var(--g-gap) * 2));
+        max-height: calc(100dvh - var(--g-layers-top)
+            - var(--g-layers-btn) - var(--g-layers-drop)
+            - var(--g-gap) - var(--g-credit-h));
+        overflow-y: auto;
+        overscroll-behavior: contain;
     }
 
     .g-legend {
@@ -3357,6 +4035,36 @@ body.no-dirbutton .g-directions {
         width: auto;
         max-width: none;
         max-height: 70dvh;
+    }
+}
+
+/* A SHORT WINDOW, HOWEVER WIDE.
+   ---------------------------------------------------------------------------
+   A phone in landscape is 844x390: past the 640 px breakpoint, so it gets the
+   wide layout, in less height than the layout has ever been asked for. The
+   layers menu is anchored to the BOTTOM of its button and grows upward, and
+   that button sits 180 px up a stack of Mapbox's own controls, so there are
+   only about 200 px above it. Measured before this rule: the menu's top edge
+   was at y = -255 and Map type and Appearance — the two settings the menu
+   exists for — were off the top of the screen. Not clipped with a scrollbar to
+   find them by; simply gone, above an edge nothing scrolls past.
+
+   So on a short window it hangs from the top of the screen instead, beside the
+   button rather than above it. `fixed` and measured from the viewport's right
+   edge, which is where the control stack is: gap, then the button, then the
+   same drop the phone layout uses. Every one of those is a token, so a skin
+   that changes the button's size moves this with it.
+
+   Below 641 px the phone block has already dealt with this, hence the floor —
+   there the menu hangs downward from a button pinned to a known top, and
+   applying both would fight over the same element. */
+@media (min-width: 641px) and (max-height: 640px) {
+    .g-layers-menu {
+        position: fixed;
+        top: var(--g-gap);
+        bottom: auto;
+        right: calc(var(--g-gap) + var(--g-layers-btn) + var(--g-layers-drop));
+        max-height: calc(100dvh - var(--g-gap) * 2);
     }
 }
 
@@ -3492,7 +4200,28 @@ body.no-dirbutton .g-directions {
    Padding rather than a bigger drawing, everywhere it is possible. The icon
    stays the size it was designed at and the TARGET grows around it, so nothing
    here changes what the map looks like — only what it is like to hit. */
-@media (max-width: 640px) {
+/* KEYED ON THE POINTER, NOT ON THE WIDTH, and that distinction is the whole
+   point of the query. This block used to say `max-width: 640px`, which is a
+   question about how much room there is and not about what is doing the
+   pointing — so a phone held sideways, at 844x390, fell straight through it and
+   got the mouse-sized controls. Measured there: the zoom pair, locate, the
+   search button, the directions button and the legend's close were all 32px or
+   smaller, on a device with no pointer at all. The one case where aim is
+   hardest is the one the old query excluded.
+
+   `pointer: coarse` asks the right question and answers it for the landscape
+   phone, the tablet and the touchscreen laptop alike. A laptop with a touch
+   screen getting 44px controls is not a regression — it is the same correct
+   answer arriving somewhere it was not asked for before.
+
+   THE WIDTH TEST STAYS, joined by a comma, and not out of caution for its own
+   sake: `pointer` is a claim the environment has to make, and one that is
+   simply absent in more places than one would like — a headless browser driving
+   a phone-sized viewport reports no touch at all unless it is separately told
+   to. Dropping the old query cost every one of these targets at 390x660 the
+   moment it was tried. A union can only ever add a control to the set; it can
+   never take one away. */
+@media (pointer: coarse), (max-width: 640px) {
     /* Mapbox's own stack: the group holds the visual box, so the buttons are
        grown and the group is left to follow them. */
     /* `!important`, and this is the case the keyword exists for rather than a
@@ -3512,29 +4241,62 @@ body.no-dirbutton .g-directions {
         background-position: center;
     }
 
-    /* The attribution "i". It cannot be 44px square without becoming the most
-       prominent thing in the corner, so it gets the touch area without the
-       ink: a transparent box hung around a mark that stays 24px. */
-    .mapboxgl-ctrl-attrib-button {
-        width: 44px !important;
-        height: 44px !important;
-        background-position: center;
-        /* GROWING UPWARDS, not downwards. Mapbox pins this absolutely at
-           `top: 0` inside a 24px box that is itself hard against the bottom of
-           the window, so taking it to 44 hung 10px of it off the bottom edge —
-           measured at 320x568: the button ran to y=578 in a 568px viewport.
-           Anchoring the other end puts the extra height over the map, which is
-           where there is room for it and where it is invisible anyway. */
-        top: auto !important;
-        bottom: 0 !important;
-    }
-
     /* Ours. `min-` rather than `width`, so anything already larger is left
-       alone and this cannot shrink a control by accident. */
+       alone and this cannot shrink a control by accident. The close buttons are
+       in here because they are the control you reach for when a panel is
+       covering the map, which on a phone is most of the time. */
     #search-go,
-    #directions-btn {
+    #directions-btn,
+    #legend-close,
+    .g-place .g-icon-btn,
+    .g-route-close {
         min-width: 44px;
         min-height: 44px;
+    }
+
+    /* The field itself, which was 36px tall — under the floor, and it is the
+       first thing anyone touches. */
+    .g-search-field {
+        min-height: 44px;
+    }
+
+    /* LOCATE JOINS THE LAYERS BUTTON AT THE TOP OF THE SCREEN.
+       ------------------------------------------------------------------
+       Lifting the whole stack above the sheet works on a roomy phone and runs
+       out of room on a small one: at 320x500 a 310px sheet plus an 81px stack
+       plus the layers button pinned at 110 does not fit in 500, so the lift
+       gets clamped and the clamp puts the stack back underneath the sheet it
+       was trying to clear. There is no arrangement of the bottom-right corner
+       that survives a short screen.
+
+       So the one CONTROL in it moves out, exactly as the layers button did and
+       for the reason written there. What is left in the corner is the scale
+       bar, which is a readout rather than a control: it still rides above the
+       sheet, and at 19px tall it now always has room to.
+
+       Pinned one drop below the layers button, off the same three tokens, so
+       the two read as one column and neither has to know the other's size. */
+    .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group:has(.mapboxgl-ctrl-geolocate) {
+        position: fixed;
+        top: calc(var(--g-layers-top) + var(--g-layers-btn) + var(--g-layers-drop));
+        right: var(--g-gap);
+    }
+
+    /* AND THE ZOOM PAIR GOES.
+       ------------------------------------------------------------------
+       Not clutter-cutting for its own sake: it is what makes the lift above
+       fit. Scale, locate and zoom stack up to about 177px, and raised by a
+       310px sheet on a 500px-tall phone that column's top lands at y=13 —
+       through the search field. Without the pair it is 81px and clears it by
+       fifty.
+
+       Nothing is lost. Pinch and double-tap both zoom this map, every phone
+       user knows it, and neither Apple Maps nor Google Maps ships +/- buttons
+       on a phone for that reason. The same selector already exists a few rules
+       up, where navigation mode hides these and keeps locate — so this is the
+       app agreeing with a call it had already made once. */
+    .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
+        display: none;
     }
 }
 
@@ -3713,9 +4475,18 @@ body.no-dirbutton .g-directions {
     top: var(--g-navbar-h);
 }
 
-.has-navbar .g-topleft {
-    top: calc(var(--g-navbar-h) + var(--g-gap));
-    max-height: calc(100dvh - var(--g-navbar-h) - var(--g-gap) * 3 - var(--g-credit-h));
+/* Desktop only. On a phone the column is a bottom sheet — `top: auto`, anchored
+   to the bottom edge — and this rule is 0-2-0 against that rule's 0-1-0, so it
+   won inside the media query and gave the sheet BOTH a top and a bottom. It
+   stopped being content-sized and became a 530px slab from under the header to
+   the bottom of the screen, with the cap below overriding the 62dvh one as
+   well. The phone's own adjustment for the header is a shorter cap, in the
+   phone block. */
+@media (min-width: 641px) {
+    .has-navbar .g-topleft {
+        top: calc(var(--g-navbar-h) + var(--g-gap));
+        max-height: calc(100dvh - var(--g-navbar-h) - var(--g-gap) * 3 - var(--g-credit-h));
+    }
 }
 
 /* On a phone the column is a bottom sheet and the field was pinned to the top
@@ -3747,5 +4518,350 @@ body.no-dirbutton .g-directions {
     .g-navbar-legend {
         padding: 0 10px;
         min-width: 44px;
+    }
+}
+
+
+/* ===========================================================================
+   Motion
+   ===========================================================================
+   Almost everything in this app already knew how to look right and almost
+   nothing knew how to ARRIVE. A panel opened by being there; the layers menu
+   appeared under its own button between one frame and the next; a legend row
+   went from unpressed to pressed with no moment in between. Each of those is
+   individually survivable and together they are what makes a web app feel like
+   a document that has been re-rendered rather than an interface being operated.
+
+   THE HARD PART IS `display`, and it is why this could not simply be a pile of
+   `transition:` lines. Every dismissible thing here is shown and hidden with
+   one class — `.hidden`, which is `display: none` — and a box that is not being
+   rendered cannot animate. The old answer was a keyframe animation fired from
+   JavaScript on the one panel that mattered enough to bother with, which is why
+   the place card is the only thing on this map that has ever slid.
+
+   `transition-behavior: allow-discrete` is the answer to exactly this. `display`
+   becomes a transitionable property whose flip is SEQUENCED against the others:
+   on the way in it switches first and the opacity runs from there, on the way
+   out it waits until the opacity has finished. Paired with `@starting-style`,
+   which is what gives an element that has never been rendered a state to come
+   from, one rule gives every surface here an entrance AND an exit — and the
+   exit is the half no amount of JavaScript class-toggling had ever provided.
+
+   Where an engine has neither, nothing breaks and nothing moves: `.hidden` is
+   still `display: none` and everything shows and hides the way it always did.
+
+   WHAT DOES NOT MOVE, deliberately: nothing that would move the map, and
+   nothing sized by content. A sheet growing to fit a card is a height change,
+   and animating height means animating layout on every frame while a WebGL
+   canvas is trying to draw underneath it. The panels fade and travel a few
+   pixels; the box they are in is the right size immediately.
+   =========================================================================== */
+
+/* Where each surface comes from. One custom property per kind, because the
+   direction is the only thing they disagree about — a sheet rises off the
+   bottom edge, a menu drops out of the button that opened it, and a list that
+   hangs under a field comes down out of it. Read once, below, by the pair of
+   rules that actually apply it. */
+.g-panel {
+    /* The column is a bottom sheet on a phone and a sidebar above that, and 10px
+       upward reads as "from below" in the first and as "settling" in the second. */
+    --g-enter-from: translateY(10px);
+}
+
+.g-layers-menu {
+    --g-enter-from: translateY(-8px) scale(0.96);
+    /* Out of the button, not out of the middle of itself: the menu is pinned by
+       one corner to the control that opens it, and that corner is the one point
+       on it that should not move. Which corner depends on where the button is —
+       it is in the bottom-right control stack at sidebar widths and pinned to
+       the top-right corner on a phone, so the menu opens upward from one and
+       downward from the other. See the phone override further down. */
+    transform-origin: bottom right;
+}
+
+.g-results {
+    --g-enter-from: translateY(-6px);
+}
+
+.g-debug {
+    --g-enter-from: scale(0.97);
+}
+
+.g-search-clear {
+    /* It is a 20px glyph inside the field, so it has nowhere to travel from and
+       does not need one — it grows into place. */
+    --g-enter-from: scale(0.8);
+}
+
+.g-spin-inline {
+    /* The same, harder, because this one is round and 14px: at 0.8 the growth
+       reads as a wobble rather than an arrival. It also has a sibling — the Go
+       button's label swaps to it — so the two want to trade places, not queue. */
+    --g-enter-from: scale(0.7);
+}
+
+#nav-banner {
+    --g-enter-from: translateY(-12px);
+}
+
+#nav-footer {
+    --g-enter-from: translateY(12px);
+}
+
+/* Everything that comes and goes, and the one declaration that lets it.
+   `display` last in the list only for legibility; the order of a transition
+   list means nothing. */
+.g-panel,
+.g-layers-menu,
+.g-results,
+.g-debug,
+.g-search-clear,
+#route-detail,
+#nav-banner,
+#nav-footer {
+    transition:
+        opacity var(--g-t-panel) var(--g-ease-out),
+        transform var(--g-t-panel) var(--g-ease-sheet),
+        display var(--g-t-panel) allow-discrete;
+}
+
+/* The state to leave towards, and — through @starting-style — the one to arrive
+   from. Both are the same values, said twice, because they are the same idea
+   twice: the place a thing is when it is not here.
+
+   `var(--g-enter-from, none)` with the fallback spelt out rather than assumed.
+   An undefined custom property does not fall back to the property's initial
+   value, it makes the whole declaration invalid — so a surface added to this
+   list without a direction would silently lose its fade as well as its travel.
+   With `none` it just fades, which is the right degradation. */
+.g-panel.hidden,
+.g-layers-menu.hidden,
+.g-results.hidden,
+.g-debug.hidden,
+.g-search-clear.hidden,
+.g-spin-inline.hidden,
+#route-detail.hidden,
+#nav-banner.hidden,
+#nav-footer.hidden {
+    opacity: 0;
+    transform: var(--g-enter-from, none);
+}
+
+/* ...except this one, which is a 20px glyph inside a field rather than a
+   surface, and reads as sluggish at a panel's pace. Same treatment, a control's
+   duration. Stated after the rule above rather than pulled out of it, because
+   the shared list is the set of things that come and go and this is one of
+   them; only its timing differs. */
+.g-search-clear,
+.g-spin-inline {
+    transition:
+        opacity var(--g-t-state) var(--g-ease-out),
+        transform var(--g-t-state) var(--g-ease-out),
+        display var(--g-t-state) allow-discrete;
+}
+
+@starting-style {
+
+    .g-panel:not(.hidden),
+    .g-layers-menu:not(.hidden),
+    .g-results:not(.hidden),
+    .g-debug:not(.hidden),
+    .g-search-clear:not(.hidden),
+    .g-spin-inline:not(.hidden),
+    #route-detail:not(.hidden),
+    #nav-banner:not(.hidden),
+    #nav-footer:not(.hidden) {
+        opacity: 0;
+        transform: var(--g-enter-from, none);
+    }
+}
+
+/* --- pressing things ------------------------------------------------------- */
+
+/* THE ONE THING A TOUCH SCREEN CANNOT SAY WITH `:hover`.
+   ---------------------------------------------------------------------------
+   Every control in this app already answers a mouse — a hover fill, a tint, a
+   brightness step — and on a phone not one of those ever fires. Tapping a
+   layers tile or a legend row produced no acknowledgement at all until the
+   thing it did happened, which on a slow style swap is most of a second of
+   wondering whether the tap landed.
+
+   A scale is the right answer rather than a fill, for the reason Apple's own
+   controls use it: it is legible under the finger that is covering the control,
+   which a colour change directly beneath a fingertip is not.
+
+   The controls below fall into two lists only because four of them already
+   declare a `transition` of their own and `transition` is a shorthand — a
+   second declaration would replace the first rather than add to it, and those
+   four have had `transform` folded into their existing line instead. */
+.g-search-icon,
+.g-place-action,
+.g-layers-btn,
+.g-layer-btn,
+.g-seg,
+.g-swatch,
+.g-navbar-legend,
+.g-route-close,
+.mapboxgl-ctrl-group button {
+    transition:
+        background-color var(--g-t-state) ease,
+        border-color var(--g-t-state) ease,
+        color var(--g-t-state) ease,
+        transform var(--g-t-press) var(--g-ease-out);
+}
+
+/* How far each shrinks, which is a function of how big it is: the eye reads the
+   DISTANCE an edge moves, not the ratio, so one number across a 32px glyph
+   button and a full-width Go bar gives the bar a lurch and the glyph a twitch.
+   0.94 on the small round controls is about a pixel of travel; the wide ones
+   are held to a third of that. */
+.g-icon-btn:active,
+.g-search-icon:active,
+.g-directions:active,
+.g-layers-btn:active,
+.g-route-close:active,
+.mapboxgl-ctrl-group button:active {
+    transform: scale(0.94);
+}
+
+.g-btn:active:not(:disabled),
+.g-place-action:active,
+.g-layer-btn:active,
+.g-seg:active,
+.g-navbar-legend:active,
+.g-swatch:active {
+    transform: scale(0.97);
+}
+
+.g-go:active:not(:disabled) {
+    transform: scale(0.985);
+}
+
+/* --- rows -------------------------------------------------------------------
+   A row is the one control that must NOT scale: it is as wide as the panel, so
+   a scale detaches its ends from the edges they are aligned to and the whole
+   list appears to breathe. What a row has instead is its own full width of
+   background to flash, which is both the tap feedback and — on the desktop —
+   the hover it already had, now arriving rather than snapping. */
+.g-results li,
+.g-legend-row,
+.g-row,
+.g-endpoint-results li {
+    transition: background-color var(--g-t-state) ease, color var(--g-t-state) ease;
+}
+
+.g-results li:active,
+.g-legend-row:active:not(:disabled),
+.g-endpoint-results li:active {
+    background: var(--g-active);
+}
+
+/* --- the chrome that follows the sheet -------------------------------------
+   The credit line already eased its way up and down with the sheet — see the
+   phone block — and the control stack in the opposite corner did not, so the
+   two halves of the same movement disagreed by a whole animation. Both are
+   `bottom` against a measured custom property, and both now travel on the same
+   curve for the same length of time. */
+.mapboxgl-control-container .mapboxgl-ctrl-bottom-right {
+    transition: bottom var(--g-t-panel) var(--g-ease-sheet);
+}
+
+/* Locate is hidden rather than moved when the layers menu opens over it, and a
+   control that vanishes between two frames reads as one that broke. `visibility`
+   is in the list beside `opacity` on purpose: it is a discrete property, so it
+   holds `visible` for the whole duration and flips at the end, which is exactly
+   the sequencing the fade needs to be seen at all. */
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+    transition: opacity var(--g-t-state) var(--g-ease-out), visibility var(--g-t-state);
+}
+
+@media (max-width: 640px) {
+
+    /* Upward, because on a phone the list opens upward: the field is the foot
+       of the sheet and its suggestions stack on top of it, so "out of the
+       field" is the other direction here. Stated after the shared rule above
+       rather than in the phone block with the rest, because both are 0-1-0 and
+       the later one is the one that wins. */
+    .g-results {
+        --g-enter-from: translateY(6px);
+    }
+
+    /* The layers button is at the TOP of this screen, so its menu hangs down
+       from it and it is the top corner that stays put. */
+    .g-layers-menu {
+        transform-origin: top right;
+    }
+
+    /* The fade half of the `visibility: hidden` up in the phone block. Scoped
+       to match it — at sidebar widths locate is nowhere near the layers menu
+       and hiding it would be hiding a control for no reason. */
+    body:has(#layers-menu:not(.hidden)) .mapboxgl-ctrl-group:has(.mapboxgl-ctrl-geolocate) {
+        opacity: 0;
+    }
+}
+
+/* --- a sentence that changed ------------------------------------------------
+   The route panel's hint line is the app's whole voice: it is where "Routing
+   server unreachable" and "Tap a building to walk there" both land, written by
+   `setStatus`. A textContent swap is invisible as movement, so two consecutive
+   problems read as one problem that was always there. main.js retriggers this
+   by class whenever the words actually change. */
+@keyframes g-status-in {
+    from {
+        opacity: 0;
+        transform: translateY(3px);
+    }
+}
+
+.g-route-hint.is-fresh {
+    animation: g-status-in var(--g-t-panel) var(--g-ease-out);
+}
+
+/* --- and the whole of it is refusable --------------------------------------
+   `transition-duration` rather than `transition: none`, and that distinction is
+   load-bearing here: `display` is being carried BY these transitions now, so
+   removing them removes the sequencing that shows and hides the panel. 1ms is
+   below any perceptible threshold and still runs the machinery, which means
+   reduced motion takes the movement away without taking the interface with it.
+
+   The animations are stopped rather than shortened. Every one of them is a
+   thing arriving, and arriving instantly is the same picture as being there. */
+@media (prefers-reduced-motion: reduce) {
+
+    .g-panel,
+    .g-layers-menu,
+    .g-results,
+    .g-debug,
+    .g-search-clear,
+    .g-spin-inline,
+    .g-search,
+    .g-search-field,
+    .g-endpoint-input,
+    .g-icon-btn,
+    .g-search-icon,
+    .g-directions,
+    .g-btn,
+    .g-go,
+    .g-place-action,
+    .g-layers-btn,
+    .g-layer-btn,
+    .g-seg,
+    .g-swatch,
+    .g-navbar-legend,
+    .g-route-close,
+    .g-results li,
+    .g-legend-row,
+    .g-row,
+    .g-endpoint-results li,
+    .mapboxgl-ctrl-group button,
+    .mapboxgl-control-container .mapboxgl-ctrl-bottom-right,
+    #route-detail,
+    #nav-banner,
+    #nav-footer {
+        transition-duration: 1ms;
+    }
+
+    .g-route-hint.is-fresh {
+        animation: none;
     }
 }

@@ -21,6 +21,7 @@ import {
 } from './maneuvers.js';
 import { maneuverIcon } from './nav-icons.js';
 import { routeSummary, reachProblem, locationProblem } from './directions.js';
+import { mapboxRefusal, MAPBOX_HOST } from './basemap-problem.js';
 import {
   loadAmenityIcons, routePin, liftedOffset, ROUTE_PIN_W, PIN_BASE_W, AMENITY_KINDS, pinInk,
   pinColour,
@@ -53,6 +54,7 @@ import { lightPresetAt, nextCheckMs, sunAt, HORIZON_DEG } from './daylight.js';
 import { createLightingControl } from './lighting.js';
 import roomsData from './rooms.json';
 import { buildRoomIndex, lookupRoom } from './rooms.js';
+import { popularity, popularNames, recordVisit } from './popular.js';
 import { FONTS, SATELLITE, palette, styleKey, underPreset, toward } from './palette.js';
 
 import {
@@ -279,6 +281,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
   const map = new mapboxgl.Map({
     container: 'map',
+    // Not Mapbox's default "i", which is added here rather than by addControl
+    // and so cannot be reconfigured afterwards. See the AttributionControl added
+    // below for what replaces it and why there still has to be one.
+    attributionControl: false,
     style: litPalette().style,
     // Fitting the network's own bounds rather than a fixed centre/zoom means the
     // campus fills the frame on a phone and a desktop alike.
@@ -644,17 +650,89 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * Routing is a network call now, so "server is down" is a state the UI has to
    * show plainly — otherwise it looks like the buttons are simply broken.
    */
+  /**
+   * Whether the strip is currently holding something that went wrong.
+   *
+   * Read only by setIdleStatus below, and the reason it exists is a race that
+   * silently ate every boot-time error this app can raise. The overlays land
+   * about two seconds in and write the resting hint; a refused Mapbox token
+   * lands at about one, a refused Google key at about one and a half. Both were
+   * on screen, and both were painted over by "Tap a building or press and hold
+   * anywhere" before anyone could read them — which is how the README came to
+   * describe a Google error message that a visitor could not actually see.
+   *
+   * Cleared by any deliberate non-error status, not by a timer: once the app is
+   * telling you it is calculating a route, the earlier complaint has been
+   * superseded by something you are doing on purpose.
+   */
+  let problemStanding = false;
+
   function setStatus(message, isError = false) {
+    problemStanding = isError;
     // The panel starts closed, so an error written into it is an error nobody
     // sees. "Routing server unreachable" and "Google basemap unavailable" are
     // both states where the app looks merely broken until the sentence
     // explaining it is on screen.
     if (isError) showRoutePanel();
+    // A SENTENCE THAT CHANGED HAS TO BE SEEN TO HAVE CHANGED. This line is the
+    // app's whole voice — "Routing server unreachable", "Tap a building to walk
+    // there" — and swapping textContent is invisible as movement, so two
+    // problems in a row read as one problem that was there all along. The
+    // stylesheet has a three-pixel rise for it; this is what fires it, and only
+    // when the words actually differ, or every idle repaint would twitch.
+    //
+    // Remove, force a reflow, add: the standard restart for an animation that
+    // is already on the element, and the same three lines showPlaceCard uses.
+    if (instructionMessage.textContent !== message) {
+      instructionText.classList.remove('is-fresh');
+      void instructionText.offsetWidth;
+      instructionText.classList.add('is-fresh');
+    }
     instructionMessage.textContent = message;
     // One class rather than the five Tailwind toggles this used to need. The
     // hint's normal and error colours are both stated in the stylesheet, so
     // there is no specificity race between a muted class and a red one.
     instructionText.classList.toggle('is-error', isError);
+  }
+
+  /**
+   * A message about something the app is doing on its own, rather than about
+   * anything you asked it for.
+   *
+   * Yields to a standing problem, which is the difference between this and
+   * setStatus. "Loading the campus…" goes up during boot, in a race with every
+   * failure the app can report, and it was winning: measured against a refused
+   * token at the same origin three times, the refusal survived once and "Tap a
+   * building or press and hold anywhere" won twice, over a map with no ground
+   * on it. Holding the flag but writing the text anyway was worse still — the
+   * hint was then suppressed correctly and the strip sat on "Loading the
+   * campus…" for good, which is a third wrong answer rather than a fix.
+   *
+   * So: a problem outranks progress. Why the ground is missing is worth more of
+   * this one line than the fact that something is still arriving, and the
+   * spinner beside it is already saying that much.
+   *
+   * A route being calculated is NOT this and goes through setStatus: you asked
+   * for that one, and an answer to what you just did has earned the strip.
+   */
+  function setProgress(message) {
+    if (problemStanding) return;
+    setStatus(message);
+  }
+
+  /**
+   * The resting message — what the strip says when nothing is happening and
+   * nothing is wrong.
+   *
+   * The second half of that sentence is the whole point: this is written from
+   * two places that both mean "we are ready now", and neither of them has any
+   * way of knowing whether something has already failed in a way that being
+   * ready does not fix. A black basemap is still black after the campus data
+   * lands.
+   */
+  function setIdleStatus() {
+    if (problemStanding) return;
+    setStatus(idleHint());
   }
 
   /**
@@ -745,7 +823,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       searchClear.classList.add('hidden');
       closeResults();
     }
-    setStatus(idleHint());
+    setIdleStatus();
     startCoordText.value = '';
     endCoordText.value = '';
     setRouteSummary(null);
@@ -2257,7 +2335,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       const started = performance.now();
       const tick = (now) => {
         if (mine !== choreography) return;
-        const p = Math.min((now - started) / ms, 1);
+        // CLAMPED AT BOTH ENDS, and the lower one is not defensive — it is a
+        // bug that was firing on every chip press. requestAnimationFrame hands
+        // its callback the time the FRAME began, which is routinely a
+        // millisecond or two BEFORE the `performance.now()` read a moment ago
+        // in this function, so the first tick of every run arrived with a
+        // negative progress. Downstream that is `1 - p` greater than one, and
+        // Mapbox rejected the paint property outright:
+        // "icon-opacity: 1.0064705882352856 is greater than the maximum value
+        // 1", logged once per layer per press. The frame was simply dropped, so
+        // the fade started a frame late — invisible, and noisy in the console
+        // for anyone reading it for real errors.
+        const p = Math.min(Math.max((now - started) / ms, 0), 1);
         step(p);
         if (p < 1) requestAnimationFrame(tick);
         else resolve();
@@ -3166,6 +3255,101 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * @param {HTMLElement} card
    * @param {object} [flyover] the `{ el, destroy }` this card's media came from
    */
+  /**
+   * Publish two measured heights to the stylesheet.
+   *
+   * CSS cannot measure one element from another, and the phone layout needs
+   * exactly that twice over: the credit line and Mapbox's control stack both
+   * ride directly above the bottom sheet, and the stack additionally has to
+   * know how tall it is itself before it can work out how far it is allowed to
+   * rise. Those are the only two numbers in this layout that the stylesheet
+   * cannot state, so they are written in from here and everything downstream of
+   * them stays in CSS.
+   *
+   * An observer rather than a call at each open: the sheet changes height for
+   * reasons that are not panel changes at all — a flyover arriving is the
+   * obvious one — and a credit that only moved when a card opened would be left
+   * lying over the card it had already got out of the way of.
+   *
+   * No feedback loop: `bottom` is what reads these, and moving a box does not
+   * change how tall it is.
+   */
+  const measured = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      document.documentElement.style.setProperty(
+        entry.target.dataset.heightVar, `${Math.round(entry.contentRect.height)}px`,
+      );
+    }
+  });
+  for (const [el, prop] of [
+    [document.getElementById('top-left'), '--g-sheet-h'],
+    [document.querySelector('.mapboxgl-ctrl-bottom-right'), '--g-ctrl-stack-h'],
+  ]) {
+    if (!el) continue;
+    el.dataset.heightVar = prop;
+    measured.observe(el);
+  }
+
+  /**
+   * And one more the stylesheet cannot see: where the bottom of the screen
+   * actually is while a keyboard is up.
+   *
+   * iOS does not resize the layout viewport for the keyboard — it lays the
+   * keyboard OVER the page and leaves every `bottom` in the document pointing
+   * at the same place it always did. The bottom sheet's last row is the search
+   * field, so without this the act of tapping the field is what hides it.
+   *
+   * `window.innerHeight - height - offsetTop` rather than the height alone,
+   * because the visual viewport also moves: a pinch-zoomed or scrolled page
+   * offsets it, and only the difference between the two is the part that is
+   * covered. Clamped at zero so the pull-to-refresh rubber band, which briefly
+   * makes that difference negative, cannot push the sheet off the bottom.
+   *
+   * `scroll` as well as `resize`, because on iOS focusing a field scrolls the
+   * visual viewport without resizing it, and the sheet has to follow.
+   */
+  const viewport = window.visualViewport;
+  if (viewport) {
+    const publishKeyboard = () => {
+      const covered = window.innerHeight - viewport.height - viewport.offsetTop;
+      document.documentElement.style.setProperty(
+        '--g-kb-h', `${Math.max(0, Math.round(covered))}px`,
+      );
+    };
+    viewport.addEventListener('resize', publishKeyboard);
+    viewport.addEventListener('scroll', publishKeyboard);
+    publishKeyboard();
+  }
+
+  /**
+   * Empty a surface only once it has finished leaving.
+   *
+   * A panel now FADES OUT — `display` is carried by a transition, so `.hidden`
+   * no longer takes the box away on the same frame it is set. Tearing the
+   * content out synchronously, which is what every close path used to do, means
+   * the 240ms that follows is spent watching an empty pane of glass shrink: the
+   * card appears to be deleted and then dismissed, rather than dismissed.
+   *
+   * The duration is read off the element rather than off the token, so somebody
+   * who has asked for reduced motion — where the same transitions run at 1ms —
+   * gets their content back on the next tick instead of a quarter second later.
+   *
+   * Re-checked at the end because a close is cancellable: tapping the next
+   * building inside the fade re-shows the panel with new content, and emptying
+   * it then would clear the card that just arrived.
+   */
+  const exitTimers = new WeakMap();
+
+  function afterExit(el, empty) {
+    clearTimeout(exitTimers.get(el));
+    const ms = Math.max(0, ...getComputedStyle(el).transitionDuration
+      .split(',').map((d) => Number.parseFloat(d) * 1000)
+      .filter(Number.isFinite));
+    exitTimers.set(el, setTimeout(() => {
+      if (el.classList.contains('hidden')) empty();
+    }, ms + 20));
+  }
+
   function showPlaceCard(card, flyover = null) {
     // Swapped in one step, and in this order, because the incoming card may
     // already hold a live flyover of its own: tearing down after adopting would
@@ -3180,7 +3364,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Only when the column's width actually changed. Swapping one card for
     // another is a repaint, not a new obstruction, and a camera that eased on
     // every tap would drift across the campus a tap at a time.
-    if (!was) map.easeTo({ padding: campusPadding(), duration: 300 });
+    //
+    // The sheet's own arrival is on the same test and for the same reason: a
+    // card that re-slid every time you tapped the next building would read as a
+    // flinch rather than as something opening. See #place-panel.is-entering.
+    // Removed and re-added around a forced layout because the panel is one
+    // long-lived element — a class that is already there starts nothing, and
+    // relying on the close to have taken it off would make this depend on every
+    // path that hides the panel remembering to.
+    if (!was) {
+      placePanel.classList.remove('is-entering');
+      void placePanel.offsetHeight;
+      placePanel.classList.add('is-entering');
+      map.easeTo({ padding: campusPadding(), duration: 300 });
+    }
   }
 
   function closePlaceCard() {
@@ -3188,7 +3385,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     activeFlyover?.destroy();
     activeFlyover = null;
     placePanel.classList.add('hidden');
-    placePanel.replaceChildren();
+    placePanel.classList.remove('is-entering');
+    afterExit(placePanel, () => placePanel.replaceChildren());
     map.easeTo({ padding: campusPadding(), duration: 300 });
   }
 
@@ -3501,9 +3699,26 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       type: 'symbol',
       source: 'campus-labels',
       slot: 'middle',
-      // Below this the campus is a few hundred pixels wide and the labels are
-      // stacked on top of each other.
-      minzoom: 15,
+      /*
+       * 14, and it used to be 15 for a reason that turned out to be answered
+       * elsewhere: "below this the campus is a few hundred pixels wide and the
+       * labels are stacked on top of each other". They are not stacked — these
+       * are symbol layers without `icon-allow-overlap`, so Mapbox's collision
+       * index thins them, and `sortKey` above decides which survive: my campus's own
+       * type hierarchy, biggest names first. Zooming out drops the small fry
+       * and keeps the Library.
+       *
+       * What forced the change is where a phone actually lands. The map fits
+       * the campus bounds, and on a 390x660 screen that is z14.71 — under the
+       * old gate by a third of a level, so the app opened on a campus with
+       * nothing named on it at all. Not a blank map exactly: lamps, paths and
+       * building shapes, and not one word to say what any of them were.
+       *
+       * The amenities keep their own 16 and should: 72 markers is the case the
+       * old comment was really describing, and none of them is what you open a
+       * campus map to find.
+       */
+      minzoom: 14,
     };
     // Bigger type wins a collision, which is my campus's own hierarchy again.
     const sortKey = ['-', 0, ['get', 'pt']];
@@ -4302,6 +4517,36 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
   // -------------------------------------------------------------------------
 
+  /**
+   * When Mapbox itself refuses.
+   *
+   * Google's half of the switch has always said why it failed; this half drew a
+   * black rectangle. See src/basemap-problem.js for the asymmetry that made
+   * that seem reasonable, and for what the two statuses mean.
+   *
+   * SAID ONCE PER STATUS. There is one of these events per refused tile and the
+   * renderer keeps asking as the camera moves — 29 for two camera moves, on a
+   * phone-sized viewport — so an unguarded setStatus would rewrite the same
+   * sentence into the panel several times a second for as long as the map was
+   * touched. The set is never cleared: nothing a visitor can do from inside the
+   * page changes a token's URL restrictions, so a second telling would be a
+   * second telling of something they already know.
+   */
+  const refusals = new Set();
+  map.on('error', (e) => {
+    const status = e.error?.status;
+    // `url` rather than the event's sourceId: our own sources fetch from this
+    // origin and a 403 from one of those would be a different problem with a
+    // different fix, and would be a lie in this sentence.
+    let host = null;
+    try { host = new URL(e.error.url).host; } catch { /* not an AJAXError */ }
+    if (host !== MAPBOX_HOST || refusals.has(status)) return;
+    const problem = mapboxRefusal(status, window.location.origin);
+    if (!problem) return;
+    refusals.add(status);
+    setStatus(problem, true);
+  });
+
   // Mapbox Standard hides its layers behind a style package, so when something
   // looks wrong the only way to ask what the map actually built is from the
   // console. Dev builds only — Vite strips this branch from production.
@@ -4309,7 +4554,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     window.map = map;
     // Mapbox reports bad layer specs through this event rather than by throwing,
     // and the message is the only thing that says *which* property it rejected.
-    map.on('error', (e) => console.error('map error:', e.error?.message ?? e));
+    // Status and URL as well as the message, because the message is empty on
+    // exactly the errors that matter most — an AJAXError carries its cause in
+    // `status`, and a bare `console.error('map error:', '')` was how a wall of
+    // 403s managed to look like nothing at all.
+    map.on('error', (e) => console.error(
+      'map error:', e.error?.message || e.error?.status || e, e.error?.url ?? '',
+    ));
   }
 
   // Which provider the layers currently on the map were built for. Compared
@@ -5057,9 +5308,38 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // — so a bottom stack reads bottom-up in the order it was written. This
     // used to read geolocate, navigation, scale under a comment claiming that
     // put locate above the zoom pair "as it is on their map"; it put it below.
+    // THE OTHER CORNER, beside the wordmark rather than under the zoom buttons.
+    //
+    // Not a tidying: it is what lets the sheet reach the bottom of the screen.
+    // A phone's card is bottom-anchored and the credit has to stay visible over
+    // it — attribution is a licence term — but the corner containers carry
+    // Mapbox's own z-index and are therefore stacking contexts, so nothing
+    // inside one can be raised past the sheet on its own. Raising the whole
+    // bottom-RIGHT corner would float the zoom and locate buttons over the card
+    // as well. Bottom-left holds nothing but credits, so it can go over the
+    // sheet whole, and the two licence terms end up in one line instead of one
+    // in each corner with a card between them.
+    //
+    // Spelled out rather than folded behind an "i". That button was never a
+    // good citizen of this corner: Mapbox gives it a 24px container, and the
+    // 44px touch area this app grew around it therefore reached 20px past its
+    // own box to the right and 10px above its own bottom — a black disc sitting
+    // over the corner of the zoom control, outside the right edge everything
+    // else in the stack lines up on.
+    //
+    // NOT SIMPLY DELETED, THOUGH, and this is the part worth writing down:
+    // attribution is a licence term for both providers — Mapbox's terms require
+    // their notice, and Google's Map Tiles API requires the copyright string
+    // that src/google-tiles.js already fetches per viewport and hands to the
+    // source. An app that dropped the control would be quietly out of
+    // compliance with both. `compact: false` keeps the notice on screen as text
+    // and takes away only the toggle. The Map is built with
+    // `attributionControl: false` so that this one is the only one.
+    map.addControl(new mapboxgl.AttributionControl({ compact: false }), 'bottom-left');
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
     map.addControl(geolocate, 'bottom-right');
     map.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-right');
+
 
     // And the layers switcher on top of all of it, in the same corner.
     //
@@ -5113,7 +5393,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // holding on a map that has not finished arriving and concluding the app
     // is broken.
     setBusy(true);
-    setStatus('Loading the campus…');
+    setProgress('Loading the campus…');
     const [networkResult, vertexResult, buildings, basemap, amenities, places, labels, directory] =
       await Promise.allSettled([
         fetchNetwork(),
@@ -5182,6 +5462,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     if (directory.status === 'fulfilled') {
       campusDirectory = directory.value;
+      // The cold-start half of the suggestion order is read off this file, so
+      // the ranking is only complete once it is here.
+      refreshPopularity();
       addDirectoryLayers();
       // Built once, on arrival, rather than when the debug menu opens: it is
       // thirty rows off a file that is already in hand, and doing it now means
@@ -5244,7 +5527,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // The moment a press-and-hold starts meaning something, and therefore the
     // moment it is honest to advertise one. Everything above this line has been
     // showing "Loading the campus…" over a map that could not be routed on.
-    setStatus(idleHint());
+    setIdleStatus();
 
     // Drawn only as far as the fence. my campus's driveways are drawn running out to
     // the public road, and past the boundary that white ribbon lands on top of
@@ -5868,6 +6151,19 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // Built once from the committed artifact, which is static — unlike the place
   // index below, which waits on a fetch.
   const roomIndex = buildRoomIndex(roomsData);
+
+  /**
+   * How much each place is worth being offered first. See src/popular.js.
+   *
+   * Held rather than computed per query, because it reads localStorage and
+   * walks the directory and neither of those changes between the letters of one
+   * word. Rebuilt on exactly the two events that can move it: the directory
+   * landing, and somebody choosing somewhere.
+   */
+  let popularBonus = popularity();
+  function refreshPopularity() {
+    popularBonus = popularity({ directory: campusDirectory });
+  }
   let searchIndex = [];
   let searchHits = [];
   let activeHit = -1;
@@ -5935,16 +6231,48 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         if (!score) { total = 0; break; }
         total += score;
       }
-      // Shorter names break ties, so "Library" beats "Lockers for Library".
-      if (total) scored.push({ entry, score: total - entry.nameKey.length / 1000 });
+      // Then two tie-breaks, in the order they deserve. WHERE PEOPLE ACTUALLY
+      // GO first: one keystroke matches thirty rows at an identical lexical
+      // score, and spelling has nothing left to say about which of them you
+      // meant. Bounded well under the gap between two kinds of match, so it can
+      // only reorder within a band — see MAX_BONUS in src/popular.js.
+      //
+      // Shorter names settle what is left, so "Library" beats "Lockers for
+      // Library" among two places nobody has been to.
+      if (total) {
+        scored.push({
+          entry,
+          score: total + popularBonus(entry.name) - entry.nameKey.length / 1000,
+        });
+      }
     }
     const places = scored.sort((a, b) => b.score - a.score).map((s) => s.entry);
     return [...rooms, ...places].slice(0, MAX_RESULTS);
   }
 
+  /**
+   * The list an empty field shows: where you have been, then where there is
+   * most to do. See `popularNames`.
+   *
+   * An empty field is exactly the state somebody is in when they have not
+   * decided what to type yet, and on a phone it is now the state the app BOOTS
+   * in — the field holds the bottom of the screen under a thumb. Answering it
+   * with nothing is a keyboard and a blank rectangle.
+   *
+   * Filtered against the index rather than trusted: these names come from
+   * my campus's building directory and the index is built from its places file, and
+   * a building the two spell differently is a row that would go nowhere.
+   */
+  function popularHits() {
+    const byName = new Map(searchIndex.map((entry) => [entry.name, entry]));
+    return popularNames({ directory: campusDirectory, limit: MAX_RESULTS - 2 })
+      .map((name) => byName.get(name))
+      .filter(Boolean);
+  }
+
   function closeResults() {
     searchResults.classList.add('hidden');
-    searchResults.replaceChildren();
+    afterExit(searchResults, () => searchResults.replaceChildren());
     searchInput.setAttribute('aria-expanded', 'false');
     searchInput.removeAttribute('aria-activedescendant');
     searchHits = [];
@@ -6022,6 +6350,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       return;
     }
     const coords = nearestInstance(entry);
+    // Remembered here rather than in `setDestination`, which is also how a tap
+    // on the map arrives: this is the one path that means somebody LOOKED
+    // something up, which is the thing "most searched" is a claim about.
+    recordVisit(entry.name);
+    refreshPopularity();
     searchInput.value = entry.name;
     searchClear.classList.remove('hidden');
     closeResults();
@@ -6031,7 +6364,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
   searchInput.addEventListener('input', () => {
     searchClear.classList.toggle('hidden', !searchInput.value);
-    renderResults(runSearch(searchInput.value));
+    renderResults(searchInput.value ? runSearch(searchInput.value) : popularHits());
   });
 
   // -------------------------------------------------------------------------
@@ -6205,14 +6538,17 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   });
 
   searchInput.addEventListener('focus', () => {
-    if (searchInput.value) renderResults(runSearch(searchInput.value));
+    renderResults(searchInput.value ? runSearch(searchInput.value) : popularHits());
   });
   searchInput.addEventListener('blur', () => setTimeout(closeResults, 0));
 
   searchClear.addEventListener('click', () => {
     searchInput.value = '';
     searchClear.classList.add('hidden');
-    closeResults();
+    // Back to the empty-field list rather than to nothing. Clearing is a step
+    // towards typing something else, and the list you started from is the most
+    // useful thing to land on.
+    renderResults(popularHits());
     searchInput.focus();
   });
 }
