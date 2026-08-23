@@ -135,6 +135,25 @@
     --g-card-bg: var(--g-surface);
     --g-card-filter: none;
 
+    /* THE SAME MATERIAL, ONE LEVEL THICKER, for the surfaces that are large.
+       iOS has never had one glass — thin, regular and thick are different
+       recipes for different amounts of area, because a material is a ratio
+       between a tint and what is behind it and area changes what is behind it.
+       A 40px button crossing a map picks up a little of everything under it and
+       averages to nothing; a 300px sheet sits over one thing, and on this
+       campus that one thing is a large flat field of park green.
+
+       Which is what a phone showed: the suggestion sheet, blurred at 30px and
+       saturated to 220%, was a green wash with the tree canopy still legible as
+       a gradient across it, and the secondary text sitting in the middle of it.
+       Saturation is the part that does the damage — it is there to keep small
+       controls from going grey, and over a single hue it has nothing to average
+       against and simply amplifies that hue.
+
+       Classic has no material to thicken, so both of these are its card. */
+    --g-card-bg-thick: var(--g-card-bg);
+    --g-card-filter-thick: none;
+
     /* The fill behind a secondary action. Google outlines the button and leaves
        it transparent; Apple tints it with the accent at low alpha and drops the
        border. Both are expressible as one fill plus one border colour. */
@@ -349,6 +368,8 @@
     --g-surface-2: #f2f2f7;
     --g-card-bg: rgba(255, 255, 255, 0.68);
     --g-card-filter: saturate(220%) blur(30px);
+    --g-card-bg-thick: rgba(255, 255, 255, 0.88);
+    --g-card-filter-thick: saturate(130%) blur(30px);
 
     /* label / secondaryLabel. Apple's secondary text is *translucent* rather
        than a lighter grey, which is what keeps it correct over a material whose
@@ -411,6 +432,8 @@
     --g-surface-2: #2c2c2e;
     --g-card-bg: rgba(0, 0, 0, 0.685);
     --g-card-filter: saturate(167%) blur(30px);
+    --g-card-bg-thick: rgba(0, 0, 0, 0.86);
+    --g-card-filter-thick: saturate(120%) blur(30px);
 
     --g-text: #ffffff;
     --g-text-dim: rgba(235, 235, 245, 0.6);
@@ -1113,7 +1136,29 @@ body.navigating .app-chrome {
     font-size: 14px;
 }
 
-.g-results li:hover,
+/* A POINTER THAT EXISTS, and a cursor that has been moved.
+   ---------------------------------------------------------------------------
+   `:hover` on a touch screen is not a state, it is a residue: a tap leaves the
+   last row touched shaded until something else is touched, so the list came
+   back with a row already lit from the previous search. And `aria-selected` is
+   set on render — highlight(0) runs so that Enter has something to act on —
+   which on a phone shaded the first suggestion before a single key had been
+   pressed. Two different mechanisms, the same wrong picture: a list that opens
+   with a choice apparently already made in it.
+
+   Hover is gated on a device that has one. The render-time highlight is kept
+   HERE, because on a machine with a keyboard always attached it is telling the
+   truth — Enter takes the first row, and a row that says so is worth having —
+   and given up in the phone branch, where there is no key to press and the
+   only thing it can mean is a choice you did not make. main.js sets
+   .is-navigating on the first arrow press, so a phone with a keyboard plugged
+   into it gets the cursor back the moment there is one. */
+@media (hover: hover) {
+    .g-results li:hover {
+        background: var(--g-hover);
+    }
+}
+
 .g-results li[aria-selected="true"] {
     background: var(--g-hover);
 }
@@ -3912,6 +3957,66 @@ body.no-dirbutton .g-directions {
         padding: 0 8px 0 16px;
     }
 
+    /* A card in this column is a SHEET, and a sheet wears the thicker glass.
+       ------------------------------------------------------------------
+       See --g-card-bg-thick. Every card here is full-bleed and hundreds of
+       pixels tall, so each one covers a single region of the map rather than a
+       sample of it, and on this campus that region is usually one flat field of
+       park green. The regular material stopped reading as translucency and
+       started reading as a stain: the suggestion sheet was washed green with
+       the tree canopy legible as a gradient across it, and the place card had
+       the same wash behind its title.
+
+       Written against the column rather than against each card, because what
+       decides the level is being IN this column — full width, over the map,
+       tall — and the next panel added down here would want it for the same
+       reason and would not think to ask. */
+    .g-topleft > .g-card {
+        background: var(--g-card-bg-thick);
+        -webkit-backdrop-filter: var(--g-card-filter-thick);
+        backdrop-filter: var(--g-card-filter-thick);
+    }
+
+    /* AND THE FOCUS RING GOES WITH IT, for exactly the same reason.
+       ------------------------------------------------------------------
+       The ring is drawn on .g-search, which was the right box when .g-search
+       was a pill with a field in it. It is not the right box now: the list
+       lives inside it, so a focused field drew a 2px blue rectangle around the
+       search bar AND four suggestions AND the gap between them — a 352px box
+       on a 660px screen, which reads as the whole lower half of the app being
+       selected rather than as a text cursor being somewhere.
+
+       Around the bar, then. It is the thing you are typing in, it is what the
+       ring means, and it is what the sidebar's Apple branch already does with
+       .g-search-field one media query up. Offset inward for the reason stated
+       at the base rule: the sheet is full-bleed and clipped, so a ring outside
+       the right edge is a ring with a side missing. */
+    .g-search:focus-within {
+        /* Stated at the same 0-2-0 the base rule uses, not at 0-1-0 on the bare
+           class: a media query adds no specificity, so `.g-search { }` here
+           loses to `.g-search:focus-within { }` up there and both rings drew. */
+        outline-color: transparent;
+    }
+
+    .g-search-row {
+        outline: 2px solid transparent;
+        outline-offset: -2px;
+        /* Inherited while the row IS the box, which is the closed state. */
+        border-radius: inherit;
+        transition: outline-color var(--g-t-state) ease;
+    }
+
+    /* ...and squared off at the top once there is a list resting on it, so the
+       ring follows the corner the sheet actually has there rather than curving
+       away from it and cutting the bottom row of suggestions. */
+    .g-search:has(#place-results:not(.hidden)) .g-search-row {
+        border-radius: 0 0 var(--g-radius) var(--g-radius);
+    }
+
+    .g-search:focus-within .g-search-row {
+        outline-color: var(--g-blue);
+    }
+
     /* One surface, not two.
        ------------------------------------------------------------------
        The list is inside the field's own box here rather than floating under
@@ -3930,6 +4035,64 @@ body.no-dirbutton .g-directions {
         box-shadow: none;
         border-radius: 0;
         border-bottom: 1px solid var(--g-line);
+    }
+
+    /* BEST MATCH NEAREST THE FIELD, which means nearest the thumb.
+       ------------------------------------------------------------------
+       The list is ranked, and it was drawn top-down from a box whose bottom
+       edge is the search bar — so the answer most likely to be right was as far
+       from the typing hand as the layout could put it, and the row that got cut
+       by the cap was the one directly under your eye. Both of those are the
+       wrong way round for a field at the bottom of a screen.
+
+       Reversed, it is Safari's own bottom URL bar: suggestions stack upward
+       from the field with the first one against it, and the overflow runs off
+       the TOP, where the rows nobody is going to pick are. Nothing else moves —
+       `column-reverse` reverses paint, so the DOM stays ranked, arrow keys walk
+       it in order and a screen reader reads "1 of 8" about the row it is on. */
+    .g-results {
+        display: flex;
+        flex-direction: column-reverse;
+    }
+
+    /* ...and the row the cap cuts through says so, instead of just ending.
+       A hard edge across the middle of a word is the picture of something
+       broken; the same edge under 28px of fade is the oldest scroll hint there
+       is. Only when there IS an overflow — see is-scrollable in main.js — since
+       a list that fits has a real first row up there to fade away for nothing. */
+    .g-results.is-scrollable {
+        -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px);
+        mask-image: linear-gradient(to bottom, transparent, #000 28px);
+    }
+
+    /* ONE LINE UNDER THE NAME, not two.
+       ------------------------------------------------------------------
+       Two lines of 12px under a 14px name makes a 74px row. Six of those is
+       444px, which does not fit a 660px phone at all, so the list capped at
+       46dvh and the last row was sliced through the middle of a sentence — the
+       one row nearest the thumb, and the only one you were being invited to
+       read. Every complaint about this list started there.
+
+       One line makes it 50px and six of them 300px, which fits inside the cap
+       with the whole of every row visible. Nothing is lost by the clamp
+       because there is nothing left to clamp: main.js gives the row the card's
+       own subtitle now — "9 destinations inside" — which was always one line. */
+    .g-result-sub {
+        -webkit-line-clamp: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* And nothing is pre-chosen. See the base rule: on a phone the render-time
+       highlight is a shaded row nobody asked for, and it was the top one —
+       directly under the eye, in a list whose entire job is to be scanned. */
+    .g-results li[aria-selected="true"] {
+        background: transparent;
+    }
+
+    .g-results.is-navigating li[aria-selected="true"] {
+        background: var(--g-hover);
     }
 
     /* A capsule is the right shape for a bar and the wrong one for a bar with a

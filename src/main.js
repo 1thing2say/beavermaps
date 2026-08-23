@@ -6303,10 +6303,33 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       name.className = 'g-result-name';
       name.textContent = entry.name;
       li.append(name);
-      // Only worth a second line when it says something the name did not.
+      /*
+       * Only worth a second line when it says something the name did not — and
+       * my campus's own prose does not.
+       *
+       * `entry.description` is the sentence the college publishes, and it is
+       * written as a sentence: "This building consists of Welcome and Support
+       * Center, Access Card Station, CalWORKs, Career & Pathways...". Under a
+       * row that already says "Welcome and Support Center" that is five words
+       * of boilerplate, then the row's own name repeated back to it, then a
+       * list cut off mid-clause — and every row in the list starts with the
+       * same five words, so a phone showed four paragraphs that rhymed. It
+       * needed two lines to do it, which is what made each row 74px tall and
+       * the whole list nearly half the screen.
+       *
+       * buildingSub is what the place card puts under the same name, so a row
+       * and the card it opens now say the same thing about the same building
+       * rather than two different things in two different registers. It is one
+       * short line by construction: what is inside, or the name my campus files it
+       * under, or its footprint.
+       *
+       * The description is still the fallback, because a room is not a
+       * directory row and has nothing else to offer.
+       */
+      const row = entry.points.length > 1 ? null : directoryRow(entry.name);
       const hint = entry.points.length > 1
         ? `${entry.points.length} locations`
-        : entry.description;
+        : (row ? buildingSub(row) : entry.description);
       if (hint) {
         const sub = document.createElement('div');
         sub.className = 'g-result-sub';
@@ -6321,6 +6344,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       return li;
     }));
     searchResults.classList.remove('hidden');
+    // A new list has not been navigated yet, whatever the last one had been.
+    searchResults.classList.remove('is-navigating');
+    // Whether there is more of it than fits, which CSS cannot ask. The phone
+    // branch fades the edge the overflow runs off, and a list that fits must
+    // not be faded — its top edge is a whole row, not a cut one.
+    searchResults.classList.toggle(
+      'is-scrollable', searchResults.scrollHeight > searchResults.clientHeight,
+    );
     searchInput.setAttribute('aria-expanded', 'true');
     highlight(0);
   }
@@ -6527,9 +6558,15 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     if (!searchHits.length) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
+      // A keyboard cursor exists from the first arrow press and not before.
+      // The highlight is drawn off this class on a phone, where there is no
+      // pointer to have moved and a row shaded before anything was pressed
+      // reads as a row that is already chosen. See .g-results.is-navigating.
+      searchResults.classList.add('is-navigating');
       highlight((activeHit + 1) % searchHits.length);
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
+      searchResults.classList.add('is-navigating');
       highlight((activeHit - 1 + searchHits.length) % searchHits.length);
     } else if (event.key === 'Enter' && activeHit >= 0) {
       event.preventDefault();

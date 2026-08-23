@@ -415,6 +415,7 @@ test('every token the stylesheet reads is a token it defines', () => {
 const LOOK_TOKENS = [
   '--g-font', '--g-radius', '--g-radius-sm', '--g-radius-search',
   '--g-surface', '--g-surface-2', '--g-card-bg', '--g-card-filter',
+  '--g-card-bg-thick', '--g-card-filter-thick',
   '--g-text', '--g-text-dim', '--g-line', '--g-blue', '--g-highlight',
   '--g-hover', '--g-active', '--g-shadow', '--g-shadow-sm', '--g-tint', '--g-head-rule',
   '--g-label-halo',
