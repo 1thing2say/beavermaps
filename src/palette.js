@@ -552,9 +552,9 @@ export const APPLE = {
       // The two measured tiers are also the wrong way round from the day
       // table's logic — the DARKER green is the bluer one (h 201 against 188),
       // so chroma and hue both climb with lightness here.
-      tree: '#155658',          // L 32.9 C 20.1 h 201 — measured, dark grass
-      lawn: '#00615b',          // L 36.5 C 25.9 h 188 — measured, light grass
-      shrub: '#074d4e',         // L 29.0 C 20.0 h 199
+      tree: '#1a4a4b',          // L 28.5 C 13.5 h 199 — see the note below
+      lawn: '#12514c',          // L 30.5 C 15.5 h 187
+      shrub: '#123f40',         // L 24.5 C 13.0 h 198
       // The pitch — measured off maps.apple.com at last, and the reference says
       // the exact opposite of the note that used to be here.
       //
@@ -571,7 +571,7 @@ export const APPLE = {
       //
       // L 42.0 is also the ceiling the area label sets, and it clears it: the
       // ink measures 4.63:1 here and 5.67:1 on the lawn.
-      sport: '#007249',         // L 42.0 C 41.2 h 158 — measured
+      sport: '#1c5a3f',         // L 34.0 C 25.0 h 158
       // The stands. my campus's sheet draws 24 of these and this table had no entry
       // for them at all, so they fell through to the printed sheet's own ink —
       // the one part of the campus neither look had an opinion about, and the
@@ -597,7 +597,7 @@ export const APPLE = {
       // tarmac, and four points is a difference you can only find by looking
       // for it. Still inside the paved tier's hue and chroma, so the car park
       // reads as one surface with a rule on it rather than as two surfaces.
-      parking_stripe: '#60748d', // L 48.0 C 16.0 h 266
+      parking_stripe: '#475974', // L 37.5 C 16.0 h 266
       walkway: '#34445b',       // = network, the measured pathway
       crossing: '#44566c',      // L 36.0 C 15.0 h 266
       // A running track is NOT red on this map, and the note that used to say
@@ -640,11 +640,33 @@ export const APPLE = {
     // Authored up, because Standard's night preset lands these below what is
     // written and the test models that at three quarters.
     basemapConfig: {
-      colorLand: '#50657d',
-      colorGreenspace: '#008179',
-      // #1c347a once the night preset has taken its quarter off. Authored up
-      // like everything else in this block; see the note above.
-      colorWater: '#2545a3',
+      // AUTHORED FOR WHAT COMES OUT, and what comes out is not three quarters
+      // of what goes in. Measured at three points on the running map, Standard's
+      // night preset is an affine map per channel with a large ambient floor:
+      //
+      //   out.r = 13.2 + 0.122 * in.r
+      //   out.g = 15.0 + 0.137 * in.g
+      //   out.b = 20.6 + 0.197 * in.b
+      //
+      // — which fits the three measurements exactly, and has two consequences
+      // this table used to be written against the opposite of. A change here
+      // moves the rendered pixel by about an eighth of itself, so these have to
+      // be authored far brighter than they look; and the whole lit range is
+      // CLAMPED, because pure white renders #2c3247. Nothing Standard draws at
+      // night can be lighter than L 21.
+      //
+      // The old note said the preset "takes a quarter off" and the values were
+      // picked so that colorLand * 0.75 equalled the campus mask. On paper the
+      // seam was invisible. On the phone the land rendered L 10.9 against a
+      // campus at L 23.6 — a thirteen-point step — so the campus read as a lit
+      // panel pasted onto a black void, which is what it was.
+      colorLand: '#c3d3e8',
+      // The same arithmetic run backwards from the campus lawn: our planting is
+      // emissive and lands at L 24.6, so the city's greenspace is authored to
+      // arrive seven points under it. It looks like a mint and renders #112e39.
+      colorGreenspace: '#1fe3b9',
+      // And the creek, likewise, seven under the campus pool.
+      colorWater: '#4049ff',
       // #526074 once the night preset has taken its quarter off — LIGHTER than
       // the land, which is the third thing this line has said and the first one
       // measured at the zoom it matters at.
@@ -665,7 +687,7 @@ export const APPLE = {
       colorRoadLabels: '#bdcdea',
       colorPlaceLabels: '#e6e8ec',
       colorPointOfInterestLabels: '#a8aebb',
-      roadsBrightness: 1,
+      roadsBrightness: 0.55,
     },
   },
 };

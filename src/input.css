@@ -154,6 +154,12 @@
     --g-card-bg-thick: var(--g-card-bg);
     --g-card-filter-thick: none;
 
+    /* The fill of a control that sits ON a surface rather than over the map: a
+       search field inside a sheet, and nothing else yet. Both systems have one
+       and neither draws it as a border — it is a step in value, not an outline,
+       which is what lets a field read as recessed into the panel holding it. */
+    --g-fill: #f1f3f4;
+
     /* The fill behind a secondary action. Google outlines the button and leaves
        it transparent; Apple tints it with the accent at low alpha and drops the
        border. Both are expressible as one fill plus one border colour. */
@@ -213,6 +219,7 @@
     --g-highlight: #c58af9;
     --g-highlight-soft: rgba(197, 138, 249, 0.16);
     --g-hover: rgba(232, 234, 237, 0.1);
+    --g-fill: #303134;
     --g-active: rgba(232, 234, 237, 0.2);
     --g-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 6px 2px rgba(0, 0, 0, 0.35);
     --g-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6), 0 1px 3px 1px rgba(0, 0, 0, 0.35);
@@ -370,6 +377,9 @@
     --g-card-filter: saturate(220%) blur(30px);
     --g-card-bg-thick: rgba(255, 255, 255, 0.88);
     --g-card-filter-thick: saturate(130%) blur(30px);
+    /* tertiarySystemFill. Grey at an alpha rather than a colour, so it darkens
+       whatever sheet it lands on by the same amount in either theme. */
+    --g-fill: rgba(118, 118, 128, 0.12);
 
     /* label / secondaryLabel. Apple's secondary text is *translucent* rather
        than a lighter grey, which is what keeps it correct over a material whose
@@ -430,10 +440,17 @@
 :root[data-skin="apple"][data-theme="dark"] {
     --g-surface: #1c1c1e;
     --g-surface-2: #2c2c2e;
-    --g-card-bg: rgba(0, 0, 0, 0.685);
+    /* Not pure black at an alpha, which is what this was. Over a night map at
+       L 18 that lands the corner controls around L 6 — darker than anything
+       Mapbox draws — so they stopped reading as objects sitting on the map and
+       started reading as holes cut out of it. Apple's dark material is a grey
+       tint, not an absence: systemGray6 carried at a higher alpha, which keeps
+       the control above its backdrop wherever the backdrop happens to be. */
+    --g-card-bg: rgba(28, 28, 30, 0.78);
     --g-card-filter: saturate(167%) blur(30px);
     --g-card-bg-thick: rgba(0, 0, 0, 0.86);
     --g-card-filter-thick: saturate(120%) blur(30px);
+    --g-fill: rgba(118, 118, 128, 0.24);
 
     --g-text: #ffffff;
     --g-text-dim: rgba(235, 235, 245, 0.6);
@@ -3948,13 +3965,30 @@ body.no-dirbutton .g-directions {
         overflow: hidden;
     }
 
-    /* The 48px pill is the ROW now rather than the box around it, because the
-       box has a list in it. Same height, same padding, same shape — it is the
-       part of .g-search that is still a search bar. */
+    /* A FIELD INSIDE A SHEET, not a bar across the screen.
+       ------------------------------------------------------------------
+       The row was the full width of the phone, edge to edge, with no fill of
+       its own — so the "search bar" was a 390px strip of the sheet with a
+       magnifier at one end, indistinguishable from the sheet it was drawn on
+       and reading as browser furniture rather than as a control. Every map app
+       worth copying does the same thing here and none of them do that: the
+       sheet is the surface, and the field is a *control on it*, inset from its
+       edges and filled a step darker so it reads as recessed.
+
+       So: 16px in from each side, 40px tall rather than 48 (a control on a
+       panel, not a bar that IS one), the corner radius controls use rather than
+       the one panels use, and --g-fill behind it.
+
+       The bottom margin carries the home indicator with env(), because this is
+       the lowest thing in the app and in a standalone window there is no
+       browser chrome underneath to keep it clear of the gesture area. */
     .g-search-row {
         flex: none;
-        height: 48px;
-        padding: 0 8px 0 16px;
+        height: 40px;
+        margin: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+        padding: 0 6px 0 12px;
+        border-radius: var(--g-radius-sm);
+        background: var(--g-fill);
     }
 
     /* A card in this column is a SHEET, and a sheet wears the thicker glass.
@@ -4000,17 +4034,12 @@ body.no-dirbutton .g-directions {
 
     .g-search-row {
         outline: 2px solid transparent;
-        outline-offset: -2px;
-        /* Inherited while the row IS the box, which is the closed state. */
-        border-radius: inherit;
+        /* OUTSIDE the field now, not inset. The ring was offset inward because
+           the box it drew on was flush with the screen edge and would have been
+           clipped; this box is inset 16px, so there is room to draw the ring
+           where a ring goes — around the control, not eating 2px of it. */
+        outline-offset: 1px;
         transition: outline-color var(--g-t-state) ease;
-    }
-
-    /* ...and squared off at the top once there is a list resting on it, so the
-       ring follows the corner the sheet actually has there rather than curving
-       away from it and cutting the bottom row of suggestions. */
-    .g-search:has(#place-results:not(.hidden)) .g-search-row {
-        border-radius: 0 0 var(--g-radius) var(--g-radius);
     }
 
     .g-search:focus-within .g-search-row {
@@ -4022,9 +4051,12 @@ body.no-dirbutton .g-directions {
        The list is inside the field's own box here rather than floating under
        it, so it gives up being a card: its own blur over the field's blur is
        two panes of glass with nothing between them, and its shadow would fall
-       inside the box that casts it. What it keeps is the hairline, which is now
-       doing real work — it is the line between the answers and the question,
-       and in a reversed column `border-bottom` is the edge facing the field. */
+       inside the box that casts it.
+
+       It used to keep a hairline along the edge facing the field, as the line
+       between the answers and the question. That line is drawn now — the field
+       is a filled pill with 10px of sheet above it, and a full-width rule
+       stretching past both ends of it only looked like something left over. */
     .g-results {
         position: static;
         z-index: auto;
@@ -4034,7 +4066,6 @@ body.no-dirbutton .g-directions {
         backdrop-filter: none;
         box-shadow: none;
         border-radius: 0;
-        border-bottom: 1px solid var(--g-line);
     }
 
     /* BEST MATCH NEAREST THE FIELD, which means nearest the thumb.
@@ -4437,12 +4468,29 @@ body.no-dirbutton .g-directions {
        bar, which is a readout rather than a control: it still rides above the
        sheet, and at 19px tall it now always has room to.
 
-       Pinned one drop below the layers button, off the same three tokens, so
-       the two read as one column and neither has to know the other's size. */
+       Pinned DIRECTLY below the layers button, off the same two tokens, so the
+       two read as one column and neither has to know the other's size.
+
+       Directly, with no gap, because they were separated by --g-layers-drop —
+       which is the distance between the layers button and the MENU it opens,
+       borrowed here for want of a better number. Two 44px squares 8px apart in
+       the same corner are not two controls, they are one control that has been
+       broken; every map app puts its corner controls in a single stack split by
+       a hairline, and that is what the radii and the divider below make. */
     .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group:has(.mapboxgl-ctrl-geolocate) {
         position: fixed;
-        top: calc(var(--g-layers-top) + var(--g-layers-btn) + var(--g-layers-drop));
+        top: calc(var(--g-layers-top) + var(--g-layers-btn));
         right: var(--g-gap);
+        /* The bottom of one box. The hairline is the top edge rather than a
+           separate element, and it is the same line the layers menu rules its
+           own sections with. */
+        border-top: 1px solid var(--g-line);
+        border-radius: 0 0 var(--g-radius-sm) var(--g-radius-sm);
+    }
+
+    /* ...and the top of it. */
+    .g-layers-btn {
+        border-radius: var(--g-radius-sm) var(--g-radius-sm) 0 0;
     }
 
     /* AND THE ZOOM PAIR GOES.

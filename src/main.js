@@ -1939,10 +1939,25 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const preset = lightingBench && lightingBench.preset !== 'auto'
       ? lightingBench.preset : clockPreset();
     const lit = LAMP_BY_PRESET[preset] ?? 0;
-    // The pool is weak even at full: it is a wash over ground somebody is trying
-    // to read a map on, not a light source. The core carries the brightness.
-    map.setPaintProperty('campus-lamp-pool', 'circle-opacity', 0.30 * lit);
-    map.setPaintProperty('campus-lamp-core', 'circle-opacity', 0.55 * lit);
+    /*
+     * The pool is weak even at full: it is a wash over ground somebody is
+     * trying to read a map on, not a light source. The core carries the
+     * brightness.
+     *
+     * AND NOT AT ALL UNTIL YOU ARE CLOSE ENOUGH FOR IT TO BE LIGHT. The whole
+     * campus frames at z14.7, and there a lamp's pool is a 3px circle: 251 of
+     * them are not a lit campus, they are 251 orange specks, and they were
+     * comfortably the busiest thing on the night map — over the buildings, the
+     * fields and the paths they are supposed to be lighting. The effect needs
+     * the pools to be big enough to read as pools, which is a walking scale.
+     *
+     * Off at the framing zoom, full by 17.5, which is roughly where a single
+     * building fills a phone. Interpolated rather than switched so that a
+     * pinch does not flash them on.
+     */
+    const byZoom = (peak) => ['interpolate', ['linear'], ['zoom'], 16, 0, 17.5, peak];
+    map.setPaintProperty('campus-lamp-pool', 'circle-opacity', byZoom(0.30 * lit));
+    map.setPaintProperty('campus-lamp-core', 'circle-opacity', byZoom(0.55 * lit));
   }
 
   function addAmenityLayer() {

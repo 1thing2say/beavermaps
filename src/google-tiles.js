@@ -137,7 +137,7 @@ const APPLE_DARK_STYLE = [
   { elementType: 'labels.text.fill', stylers: [{ color: '#e6e8ec' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#20242e' }] },
   { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#67788e' }] },
-  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#155658' }] },
+  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#1a4a4b' }] },
   // Apple does not set a night map in one ink. A place name is near-white, a
   // street name is the blue #bdcdea below, and a POI is coloured by what it
   // SELLS: measured off the reference, a shop is #f6df73 at C 55.4, a clinic
@@ -150,7 +150,7 @@ const APPLE_DARK_STYLE = [
   // `poi.park` — these rules resolve last-match-wins, not most-specific-wins.
   { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#f6df73' }] },
   { featureType: 'poi.medical', elementType: 'labels.text.fill', stylers: [{ color: '#ff8e92' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#00615b' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#12514c' }] },
   // The same green the campus prints its own area names in, so a park label
   // does not change colour at the boundary. Lifted off Apple's #7de08c for the
   // contrast reason set out beside `areaLabel` in src/palette.js.

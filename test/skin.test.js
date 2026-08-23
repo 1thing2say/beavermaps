@@ -237,11 +237,74 @@ function styled(rules, featureType, elementType) {
   return hit?.stylers?.find((s) => s.color)?.color ?? null;
 }
 
-// Standard's night preset lands a basemapConfig colour at about three quarters
-// of what is written, so the dark tables are authored up. Undo that before
-// comparing one to a colour that does not go through the lighting.
-const asRendered = (hex, theme) =>
-  (theme === 'light' ? hex : `#${[1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * 0.75).toString(16).padStart(2, '0')).join('')}`);
+/*
+ * What the night preset actually does to a colour, measured rather than
+ * assumed — and there are TWO answers, because the campus and the city do not
+ * travel the same path.
+ *
+ * This used to be one line: multiply by three quarters. Under that model the
+ * dark tables were authored so that colorLand * 0.75 came out equal to the
+ * campus mask, and this test passed. The model was wrong by a factor of six.
+ * Photographed on a phone, Standard's land rendered L 10.9 while the campus
+ * over it rendered L 23.6, and the campus read as a lit panel pasted onto a
+ * black void — the exact failure this test exists to catch, passing.
+ *
+ * Both models below are least-squares fits to colours read off the running map
+ * at z14.7 under `night`, and both are affine per channel:
+ *
+ *   LIT      what Standard does to a basemapConfig colour. Three samples of
+ *            colorLand; the fit reproduces all three exactly. Note the size of
+ *            the intercepts against the size of the slopes — most of what you
+ *            see at night is ambient, and only an eighth of it is the colour
+ *            anybody authored. It also means the range is CLAMPED: feed it
+ *            white and it renders #2c3247, so nothing lit can pass L 21.
+ *
+ *   EMISSIVE what the campus sheet does, which sets fill-emissive-strength and
+ *            therefore keeps most of its authored value. Four samples — lawn,
+ *            tree, sport, building — fit to within 4/255 per channel.
+ *
+ * If Mapbox retunes Standard these stop being true, and the way to find out is
+ * to re-measure, not to reason about it.
+ */
+const NIGHT_LIT = [[0.1219, 13.2], [0.1368, 15.0], [0.1965, 20.6]];
+const NIGHT_EMISSIVE = [[0.6019, 15.4], [0.8979, -9.4], [0.7091, 21.9]];
+
+const through = (model, hex) => `#${[1, 3, 5].map((i, c) => {
+  const [m, b] = model[c];
+  return Math.max(0, Math.min(255, Math.round(m * parseInt(hex.slice(i, i + 2), 16) + b)))
+    .toString(16).padStart(2, '0');
+}).join('')}`;
+
+/** The provider's ground, as it reaches the screen. */
+const asRendered = (hex, theme) => (theme === 'light' ? hex : through(NIGHT_LIT, hex));
+
+/** Ours, as it reaches the screen. */
+const asCampus = (hex, theme) => (theme === 'light' ? hex : through(NIGHT_EMISSIVE, hex));
+
+/** Relative luminance, for saying which of two grounds is the lighter. */
+function lightness(hex) {
+  const ch = [1, 3, 5].map((i) => {
+    const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  const y = 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  return y > 0.008856 ? 116 * y ** (1 / 3) - 16 : 903.3 * y;
+}
+
+/*
+ * How far the campus is allowed to stand off the city it sits in, after dark.
+ *
+ * Not zero, and it cannot be zero: the lit path tops out at L 21 and the
+ * campus sheet is emissive, so an exact match is unreachable at any authored
+ * value. It should not be zero either — a campus at exactly the city's value
+ * is the hole in the map the palette's own note warns about. What it must be
+ * is SMALL and it must be UP: the campus is the subject, so it is a shade
+ * lighter than its surroundings, the way Apple's own night map lifts a campus
+ * out of the blocks around it.
+ *
+ * Eight points. Measured, the three grounds sit at +7.2, +7.3 and +7.5.
+ */
+const NIGHT_LIFT = 8;
 
 test('the ground under the campus matches the ground around it', () => {
   // The seam. Our campus sheet is painted over a hole cut in whatever the
@@ -267,10 +330,24 @@ test('the ground under the campus matches the ground around it', () => {
       ];
       for (const [key, ours] of pairs) {
         const theirs = asRendered(config[key], theme);
+        // By day the two are the same paint and must simply agree.
+        if (theme === 'light') {
+          assert.ok(
+            deltaE(theirs, ours) < 2,
+            `${skin}/${theme}: Standard's ${key} renders ${theirs}, campus has ${ours} `
+            + `(dE ${deltaE(theirs, ours).toFixed(1)})`,
+          );
+          continue;
+        }
+        // After dark they are two different paths to the screen, so the thing
+        // to hold is the STEP between them rather than their equality. See
+        // NIGHT_LIFT: up, because the campus is the subject, and small, because
+        // it is still the same town.
+        const lift = lightness(asCampus(ours, theme)) - lightness(theirs);
         assert.ok(
-          deltaE(theirs, ours) < 2,
-          `${skin}/${theme}: Standard's ${key} renders ${theirs}, campus has ${ours} `
-          + `(dE ${deltaE(theirs, ours).toFixed(1)})`,
+          lift > 0 && lift < NIGHT_LIFT,
+          `${skin}/${theme}: ${key} renders ${theirs} and the campus ${asCampus(ours, theme)}, `
+          + `a lift of ${lift.toFixed(1)} — wanted a shade above the city, under ${NIGHT_LIFT}`,
         );
       }
 
@@ -415,7 +492,7 @@ test('every token the stylesheet reads is a token it defines', () => {
 const LOOK_TOKENS = [
   '--g-font', '--g-radius', '--g-radius-sm', '--g-radius-search',
   '--g-surface', '--g-surface-2', '--g-card-bg', '--g-card-filter',
-  '--g-card-bg-thick', '--g-card-filter-thick',
+  '--g-card-bg-thick', '--g-card-filter-thick', '--g-fill',
   '--g-text', '--g-text-dim', '--g-line', '--g-blue', '--g-highlight',
   '--g-hover', '--g-active', '--g-shadow', '--g-shadow-sm', '--g-tint', '--g-head-rule',
   '--g-label-halo',
