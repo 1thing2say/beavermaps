@@ -444,11 +444,21 @@
        L 18 that lands the corner controls around L 6 — darker than anything
        Mapbox draws — so they stopped reading as objects sitting on the map and
        started reading as holes cut out of it. Apple's dark material is a grey
-       tint, not an absence: systemGray6 carried at a higher alpha, which keeps
-       the control above its backdrop wherever the backdrop happens to be. */
-    --g-card-bg: rgba(28, 28, 30, 0.78);
+       tint, not an absence: a grey carried at a high alpha, which keeps the
+       control above its backdrop wherever the backdrop happens to be.
+
+       The value is arithmetic rather than taste. The night map's land renders
+       L 18.3; pure black at 0.685 over it came out L 6.4 and the first lift,
+       to systemGray6, still only reached L 12.4 — both still DARKER than the
+       map, which is the whole defect. A control has to sit above its ground to
+       look like it is sitting on it. At 0.80 over that land this lands L 21,
+       three points proud, which is where the reference keeps its own. */
+    --g-card-bg: rgba(46, 46, 49, 0.80);
     --g-card-filter: saturate(167%) blur(30px);
-    --g-card-bg-thick: rgba(0, 0, 0, 0.86);
+    /* And the sheet, for the same reason and by the same arithmetic: near-black
+       glass over a near-black map is not a sheet, it is a hole with type in it.
+       L 15.6, which reads as a dark panel rather than as an absence. */
+    --g-card-bg-thick: rgba(38, 38, 41, 0.92);
     --g-card-filter-thick: saturate(120%) blur(30px);
     --g-fill: rgba(118, 118, 128, 0.24);
 
@@ -864,6 +874,7 @@ body.navigating .app-chrome {
 .g-debug.hidden,
 .g-search-clear.hidden,
 .g-spin-inline.hidden,
+.g-shortcuts.hidden,
 .g-results.hidden {
     display: none;
 }
@@ -1192,6 +1203,34 @@ body.navigating .app-chrome {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* A SHORTCUT, which is a chip: the fastest way back to a place you keep going.
+   ---------------------------------------------------------------------------
+   Capsule rather than the small radius the rest of the controls use, because
+   this is a piece of content that can be pressed rather than a control that
+   holds content — the same distinction Apple draws between a tag and a button.
+   `flex: none` and `nowrap` are what let the row scroll: without them the chips
+   would compress to fit and the names would truncate, which is the thing the
+   scrolling exists to avoid. */
+.g-shortcut {
+    flex: none;
+    scroll-snap-align: start;
+    height: 32px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 16px;
+    background: var(--g-fill);
+    color: var(--g-text);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.g-shortcut:active {
+    background: var(--g-active);
 }
 
 /* A horizontal chip strip lived here — twelve pill buttons scrolling sideways
@@ -2539,8 +2578,20 @@ body.navigating .app-chrome {
    notice put it in front of a logo that was already there — the credit read
    "© Mapbox © OpenStreetMap Improve this map [mapbox]", with the mark it is
    crediting trailing its own notice. Ordered rather than reordered in the DOM,
-   which is Mapbox's to arrange. */
-.mapboxgl-ctrl-bottom-left .mapboxgl-ctrl-logo {
+   which is Mapbox's to arrange.
+
+   AND IT HAS TO NAME THE WRAPPER, which is what this rule did not do and why
+   the mark had been trailing the whole time. `order` moves a flex ITEM, and the
+   item here is the `.mapboxgl-ctrl` div Mapbox puts around the anchor, not the
+   anchor. Setting it on the `<a>` moved nothing, and the mistake was invisible
+   for as long as the two were stacked in a column narrow enough to wrap: a
+   column shows the same order either way round only because it is the DOM order
+   both times. It became visible the moment they fitted on one line.
+
+   Both forms are named because which one is the item depends on a Mapbox
+   version, and neither costs anything when it does not match. */
+.mapboxgl-ctrl-bottom-left > .mapboxgl-ctrl:has(> .mapboxgl-ctrl-logo),
+.mapboxgl-ctrl-bottom-left > .mapboxgl-ctrl-logo {
     order: -1;
 }
 
@@ -3912,11 +3963,33 @@ body.no-dirbutton .g-directions {
            Without it the wordmark ran under the zoom buttons: the two corners
            are independently positioned and neither knows the other is there. */
         left: var(--g-gap);
-        right: calc(var(--g-gap) * 2 + 44px);
+        /* THE WHOLE WIDTH, because there is no longer anything in the opposite
+           corner to keep clear of. This was inset by a control column that has
+           since moved to the top-right, and then by a scale bar that is gone
+           (see below) — so the reservation outlived both things it was
+           reserving for, and it was the only reason the notice and the wordmark
+           could not sit on one line. 252 + 88 needs 348; this gives 370. */
+        right: var(--g-gap);
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         gap: 6px;
+    }
+
+    /* AND THE SCALE BAR GOES.
+       ------------------------------------------------------------------
+       It is a readout rather than a control, and it was the last thing floating
+       loose over the bottom of the map — a third object at a third height,
+       beside a credit line it was squeezing onto two rows.
+
+       Neither map this app is measured against ships one on a phone: Apple
+       shows a scale only while you are pinching, and Google not at all. Nor is
+       it load-bearing here. Every distance this app quotes is quoted in metres
+       and minutes on the route panel, off the real walking network, which is a
+       better answer than reading a bar against a straight line. It stays on the
+       sidebar layout, where there is room for it and a mouse to zoom with. */
+    .mapboxgl-ctrl-scale {
+        display: none;
     }
 
     /* THE FIELD IS THE FOOT OF THE SHEET.
@@ -3989,6 +4062,84 @@ body.no-dirbutton .g-directions {
         padding: 0 6px 0 12px;
         border-radius: var(--g-radius-sm);
         background: var(--g-fill);
+    }
+
+    /* THE SHELF: what the sheet holds when it is holding nothing else.
+       ------------------------------------------------------------------
+       Sits between the field and the suggestions in the reversed column, so it
+       is directly above the field and goes away the moment a list replaces it.
+
+       Scrolls rather than fits. `overflow-x: auto` with the scrollbar hidden is
+       the standard chip row, and the two rules under it are what make it feel
+       like one on a phone: scroll-snap so a flick lands on a chip edge rather
+       than mid-name, and scroll-padding matching the sheet's own inset so a
+       snapped chip sits where the field's left edge is rather than jammed
+       against the glass. */
+    .g-shortcuts {
+        display: flex;
+        gap: 8px;
+        padding: 10px 16px 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+        scroll-snap-type: x proximity;
+        scroll-padding-left: 16px;
+        overscroll-behavior-x: contain;
+    }
+
+    .g-shortcuts::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* ONE CREDIT STRIP, not three things at three heights.
+       ------------------------------------------------------------------
+       The notice, the wordmark and the scale bar sat at y717, y743 and y753 —
+       a staircase down the bottom of the map, each on its own background or
+       none. They are all the same KIND of thing: small print that has to be
+       legible and must not be covered. So the strip carries one surface behind
+       all of it, the notice stops carrying its own, and the wordmark loses the
+       bottom margin that was floating it 6px off the baseline the scale bar
+       already sits on.
+
+       The notice itself is untouched in every way that matters — same words,
+       same size, still wrapping rather than truncating, still never hidden
+       under Mapbox. See the note at .mapboxgl-ctrl-attrib. */
+    .mapboxgl-ctrl-bottom-left {
+        /* ONE LINE. Stacked, the notice and the wordmark made a 63px block that
+           read as a second sheet above the real one — which is the opposite of
+           what small print should do. Side by side they measure 252 + 88 and
+           fit the 370px between the margins with room over. Still wrapping
+           rather than truncating if a device disagrees about the font: the
+           block grows, and a notice that has been cut off is a notice that has
+           not been given.
+
+           A scrim rather than a surface, for the same reason. Enough to carry
+           11px type over a map and not enough to be a panel in its own right. */
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        /* Hugs its own words. `left` and `right` are both set, to bound the
+           wrap, and a box with both set and no width fills the span between
+           them — so under Google, whose notice is six words rather than the
+           Mapbox line's twelve, the scrim stretched the width of the phone
+           behind a caption that used half of it. Over-constrained with a width,
+           `right` drops out and the box takes the size of what is in it. */
+        width: fit-content;
+        max-width: 100%;
+        background: color-mix(in srgb, var(--g-surface) 55%, transparent);
+        -webkit-backdrop-filter: blur(12px);
+        backdrop-filter: blur(12px);
+        border-radius: var(--g-radius-sm);
+        padding: 3px 8px;
+    }
+
+    .mapboxgl-ctrl-attrib {
+        background: transparent !important;
+    }
+
+    .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl-logo {
+        margin-bottom: 0;
     }
 
     /* A card in this column is a SHEET, and a sheet wears the thicker glass.

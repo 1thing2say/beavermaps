@@ -189,6 +189,24 @@
                         <span class="g-icon" data-icon="directions"></span>
                     </button>
                 </div>
+                <!-- The shortcuts row, which is what this sheet holds when it is
+                     holding nothing else.
+
+                     A phone shows the field and then 700px of map, and the sheet
+                     under it read as a toolbar rather than as a sheet, because a
+                     sheet has something in it. Apple's has Favourites; this has
+                     the places this campus is actually walked to, which is a
+                     list the app already keeps for ranking search results — see
+                     src/popular.js. Same source, same ordering, same action on a
+                     press as picking the row out of the suggestion list.
+
+                     Between the field and the results in DOM order, which in the
+                     phone's reversed column puts it directly above the field and
+                     under the suggestions. Empty and hidden until main.js fills
+                     it, so a browser with JS still loading shows a bar rather
+                     than an empty shelf. -->
+                <div id="place-shortcuts" class="g-shortcuts hidden" role="group"
+                    aria-label="Places you go"></div>
                 <ul id="place-results" role="listbox" aria-label="Matching destinations" class="g-results hidden"></ul>
             </div>
 

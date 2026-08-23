@@ -3331,7 +3331,23 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         '--g-kb-h', `${Math.max(0, Math.round(covered))}px`,
       );
     };
-    viewport.addEventListener('resize', publishKeyboard);
+    /*
+     * ...and tell the map its box may have moved under it.
+     *
+     * Mapbox sizes its canvas from the container and watches the container, and
+     * that is not the same thing as watching the VIEWPORT: on iOS a keyboard
+     * can change the layout viewport without the container's own box changing
+     * in a way the observer reports on the same frame. A canvas that has not
+     * caught up is drawn at the old size and the difference shows as a band of
+     * page background under the map — which is exactly the white strip
+     * photographed under the sheet with a keyboard up.
+     *
+     * Only on `resize`. `scroll` fires continuously while the visual viewport
+     * moves and a resize per frame would be a re-layout per frame; the box does
+     * not change on a scroll anyway.
+     */
+    const settle = () => { publishKeyboard(); map.resize(); };
+    viewport.addEventListener('resize', settle);
     viewport.addEventListener('scroll', publishKeyboard);
     publishKeyboard();
   }
@@ -6161,6 +6177,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const searchInput = document.getElementById('place-search');
   const searchResults = document.getElementById('place-results');
   const searchClear = document.getElementById('place-clear');
+  const placeShortcuts = document.getElementById('place-shortcuts');
 
   const MAX_RESULTS = 8;
   // Built once from the committed artifact, which is static — unlike the place
@@ -6178,6 +6195,56 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let popularBonus = popularity();
   function refreshPopularity() {
     popularBonus = popularity({ directory: campusDirectory });
+    renderShortcuts();
+  }
+
+  /**
+   * The row of places the sheet offers when it is offering nothing else.
+   *
+   * FULL NAMES AT THEIR OWN WIDTH, and the row scrolls.
+   *
+   * The first draft of this fixed three chips across the phone, on the
+   * reasoning that a shortcut nobody can see is not a shortcut. Then I measured
+   * the names it would be holding: the three this campus actually ranks first
+   * are "Welcome and Support Center", "Student Center" and "Evangelisti
+   * Culinary Arts Center", and three of those in 390px is 114px each. Every
+   * chip would have read "Welcome and Su…". A row of truncated building names
+   * is not a faster way to pick a building, it is a quiz.
+   *
+   * So they take the width they need and the row scrolls sideways, which costs
+   * the second and third chip some visibility and costs the first one nothing.
+   * Four rather than three, since the ones past the edge are now free.
+   *
+   * The same ranking the suggestion list opens with, which is deliberate: a
+   * person who taps the field expects to see what was already on the shelf, and
+   * two orderings of the same places would be two things to keep in step. And
+   * the same handler on a press, so a shortcut and its row cannot disagree
+   * about what picking it means.
+   *
+   * Re-rendered from refreshPopularity, so walking somewhere reorders the shelf
+   * for next time without anything else having to know that it should.
+   */
+  function renderShortcuts() {
+    if (!placeShortcuts) return;
+    const hits = popularHits().slice(0, 4);
+    placeShortcuts.replaceChildren(...hits.map((entry) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'g-shortcut';
+      chip.textContent = entry.name;
+      // The full name for anyone who cannot see how far the label was cut.
+      chip.title = entry.name;
+      chip.setAttribute('aria-label', `Go to ${entry.name}`);
+      chip.addEventListener('click', () => chooseDestination(entry));
+      return chip;
+    }));
+    // Never on screen at the same time as the list that holds the same places.
+    // This can run while the list is open — walking somewhere reorders the
+    // shelf — and unhiding it there would put the same three names on screen
+    // twice.
+    placeShortcuts.classList.toggle(
+      'hidden', !hits.length || !searchResults.classList.contains('hidden'),
+    );
   }
   let searchIndex = [];
   let searchHits = [];
@@ -6288,6 +6355,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function closeResults() {
     searchResults.classList.add('hidden');
     afterExit(searchResults, () => searchResults.replaceChildren());
+    // ...and the shelf comes back, unless there is nothing on it.
+    if (placeShortcuts?.childElementCount) placeShortcuts.classList.remove('hidden');
     searchInput.setAttribute('aria-expanded', 'false');
     searchInput.removeAttribute('aria-activedescendant');
     searchHits = [];
@@ -6359,6 +6428,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       return li;
     }));
     searchResults.classList.remove('hidden');
+    // The shelf is what the sheet shows INSTEAD of a list, not above one:
+    // both hold the same places in the same order, and a phone showing the
+    // three most likely answers twice, 40px apart, would just be asking which
+    // of the two to trust.
+    placeShortcuts?.classList.add('hidden');
     // A new list has not been navigated yet, whatever the last one had been.
     searchResults.classList.remove('is-navigating');
     // Whether there is more of it than fits, which CSS cannot ask. The phone
