@@ -139,13 +139,40 @@
         <div id="top-left" class="g-topleft app-chrome">
 
             <!-- Three boxes for one field, and each earns its place across the
-                 two looks: .g-search is the surface (a floating pill under
-                 classic, the sidebar's head under Apple), .g-search-row is the
-                 line the field and the directions button share, and
-                 .g-search-field is the part Apple fills and rounds — the button
-                 sits outside that fill, the way a control beside a field does,
-                 rather than inside the box you type into. -->
+                 layouts: .g-search is the surface (a floating pill under the
+                 classic sidebar, the head of the panel under Apple's, and the
+                 head of the bottom sheet on a phone), .g-search-row is the line
+                 the field and the directions button share, and .g-search-field
+                 is the part Apple fills and rounds — the button sits outside
+                 that fill, the way a control beside a field does, rather than
+                 inside the box you type into.
+
+                 First in the column in all three, which is what makes the phone
+                 sheet work: the sheet's contents are this and then whatever has
+                 been found, in that order, so a list or a card arrives
+                 underneath the field rather than displacing it. -->
             <div class="g-search g-card">
+                <!-- The sheet's head, and phone-only — `display: none` above the
+                     phone breakpoint, where the field is the top of a sidebar
+                     and a wordmark over it would be a second title on a page
+                     that already has one.
+
+                     On a phone the column is a bottom sheet whose resting state
+                     is this row and the field under it, which is the shape
+                     maps.apple.com uses: a grabber, the name of the thing, and
+                     the one control you came for. It is what stops a sheet with
+                     a single input in it reading as a bar that has slid to the
+                     wrong end of the screen.
+
+                     aria-hidden because it is decoration twice over: the page
+                     title already says beavermaps, and a screen reader meeting
+                     the word again immediately before the search field learns
+                     nothing and loses its place. The mark is a background image
+                     for the reason .g-boot-mark used to be — see .g-sheet-mark. -->
+                <div class="g-sheet-brand" aria-hidden="true">
+                    <span class="g-sheet-mark"></span>
+                    <span class="g-sheet-word">beavermaps</span>
+                </div>
                 <div class="g-search-row">
                     <div class="g-search-field">
                         <label for="place-search" class="sr-only">Search for a destination</label>
@@ -165,12 +192,11 @@
                         <span class="g-icon" data-icon="directions"></span>
                     </button>
                 </div>
-                <!-- The shortcuts row: what hangs under the bar when nothing
+                <!-- The shortcuts row: what sits under the field when nothing
                      has been typed into it.
 
-                     A phone shows a search bar and then 700px of map, and a
-                     search bar with nothing under it is a prompt to think of a
-                     name — which is the one thing a visitor to a campus cannot
+                     A search field with nothing under it is a prompt to think of
+                     a name — which is the one thing a visitor to a campus cannot
                      do. Apple's sheet has Favourites and Google's bar has
                      categories; this has the places this campus is actually
                      walked to, a list the app already keeps for ranking search
@@ -178,11 +204,13 @@
                      same action on a press as picking the row out of the
                      suggestion list.
 
-                     Between the field and the results in DOM order, and on a
-                     phone both of those hang off the bottom of the bar — only
-                     ever one at a time, since main.js hides each for the other.
-                     Empty and hidden until main.js fills it, so a browser with
-                     JS still loading shows a bar rather than an empty shelf. -->
+                     Between the field and the results in DOM order, and only
+                     ever one of the two is showing since main.js hides each for
+                     the other. On a phone the resting sheet is the wordmark and
+                     the field alone, so these wait for the field to be touched
+                     — see the phone block in src/input.css. Empty and hidden
+                     until main.js fills it, so a browser with JS still loading
+                     shows a field rather than an empty shelf. -->
                 <div id="place-shortcuts" class="g-shortcuts hidden" role="group"
                     aria-label="Places you go"></div>
                 <ul id="place-results" role="listbox" aria-label="Matching destinations" class="g-results hidden"></ul>

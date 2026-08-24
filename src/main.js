@@ -3257,9 +3257,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    *
    * iOS does not resize the layout viewport for the keyboard — it lays the
    * keyboard OVER the page and leaves every `bottom` in the document pointing
-   * at the same place it always did. So a bottom sheet sits underneath the
-   * keyboard, and the suggestion list hanging off the bar at the top of the
-   * screen runs its last rows under one. Both are capped off this.
+   * at the same place it always did. So a bottom sheet — which on a phone is
+   * the search field, its suggestions and whatever card is open, all in one —
+   * sits underneath the keyboard the moment you touch the thing you type into.
+   * Lifting it off this is what keeps the field and its list above the keys.
    *
    * `window.innerHeight - height - offsetTop` rather than the height alone,
    * because the visual viewport also moves: a pinch-zoomed or scrolled page
@@ -6404,12 +6405,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     placeShortcuts?.classList.add('hidden');
     // A new list has not been navigated yet, whatever the last one had been.
     searchResults.classList.remove('is-navigating');
-    // Whether there is more of it than fits, which CSS cannot ask. The phone
-    // branch fades the edge the overflow runs off, and a list that fits must
-    // not be faded — its top edge is a whole row, not a cut one.
-    searchResults.classList.toggle(
-      'is-scrollable', searchResults.scrollHeight > searchResults.clientHeight,
-    );
     searchInput.setAttribute('aria-expanded', 'true');
     highlight(0);
   }

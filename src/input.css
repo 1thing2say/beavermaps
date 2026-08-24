@@ -247,14 +247,13 @@
        it, to cap the menu that hangs off it, and by the control stack in the
        opposite corner working out how far it may rise.
 
-       This is the DESKTOP value, and it is a gap because at these widths there
-       is nothing above the button — the column is a sidebar on the other side
-       of the window and the corner is the button's alone. The phone block
-       redefines it, because there the top of the screen is the search bar's and
-       this control queues under it; the arithmetic is stated once, there, in
-       terms of the bar rather than in a number that would have to be kept in
-       step with it. That is the whole reason this is a token: four rules read
-       it and none of them has to know why it moved. */
+       A gap, because there is nothing above this button in either layout: on a
+       desktop the column is a sidebar on the other side of the window, and on a
+       phone the field is down in the bottom sheet and the top of the screen is
+       map all the way to the edge. The phone block restates it anyway, because
+       it has been three different things — a bar's height, a bar plus a shelf —
+       and the token is what let each of those move four rules that never
+       mention any of it. */
     --g-layers-top: var(--g-gap);
 
     /* THE MOTION VOCABULARY, so that everything that moves moves the same way.
@@ -309,8 +308,10 @@
     /* How tall the bottom sheet currently is, written by a ResizeObserver in
        main.js. Nothing in CSS can measure a sibling, and the credit line has to
        ride directly above the sheet however tall the sheet happens to be — see
-       the phone block. 0 when nothing is open, which is the resting state and
-       therefore the right default if the observer never runs. */
+       the phone block. 0 is the right default rather than the resting value:
+       the sheet is never empty on a phone now, since the search field lives in
+       it, but a credit parked in the corner is where it belongs if the observer
+       never runs at all. */
     --g-sheet-h: 0px;
 
     /* And how tall Mapbox's control stack is, from the same observer. The stack
@@ -3714,6 +3715,60 @@ body.no-dirbutton .g-directions {
     padding: 7px 12px;
 }
 
+/* --- the sheet's wordmark --------------------------------------------------
+
+   OFF EVERYWHERE BUT A PHONE. Above the phone breakpoint the field is the head
+   of a sidebar, and a wordmark over it is a title on a page whose <title> is
+   already the same word. It is turned back on in the phone block, where the
+   column is a bottom sheet and its resting state needs to say what it is. */
+.g-sheet-brand {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 2px 10px;
+}
+
+/* 32 rather than any other size, for the reason .g-navbar-mark states: the file
+   is a 32px pixel drawing and any width that is not a whole multiple of it puts
+   a row and a half of source into one row of screen. Drawn as a background
+   rather than an <img> so the same selectors that theme everything else can
+   swap it — an <img> can only choose its file from `prefers-color-scheme`,
+   which disagrees with this app's `data-theme` the moment anybody picks one. */
+.g-sheet-mark {
+    width: 32px;
+    height: 32px;
+    flex: none;
+    background-image: url('/src/logo.png');
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .g-sheet-mark {
+        background-image: url('/src/logo-dark.png');
+    }
+}
+
+:root[data-theme="dark"] .g-sheet-mark {
+    background-image: url('/src/logo-dark.png');
+}
+
+:root[data-theme="light"] .g-sheet-mark {
+    background-image: url('/src/logo.png');
+}
+
+/* The name, at the weight Apple sets theirs: heavier than body copy and smaller
+   than a panel title, because it is identifying the sheet rather than titling
+   what is in it. */
+.g-sheet-word {
+    font-size: 19px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: var(--g-text);
+}
+
 /* --- narrow screens -------------------------------------------------------- */
 /*
    One column holds the left edge down to 640px, and below that it becomes a
@@ -3740,33 +3795,22 @@ body.no-dirbutton .g-directions {
  */
 @media (max-width: 640px) {
 
-    /* WHERE THE TOP OF THE SCREEN GOES, as three numbers rather than as five
-       guesses.
+    /* THE TOP OF THE SCREEN IS MAP, all of it.
        ------------------------------------------------------------------
-       The field is a floating bar at the top here, and everything else that
-       wants the top of a phone queues under it: the shelf hangs off the bar,
-       the layers button sits under the shelf, locate sits under the button, and
-       the layers menu measures its own height down from there. Four rules, one
-       column, and the only way that stays true when the bar changes size is if
-       not one of them states the bar's size itself.
+       There was a bar up here and three tokens describing it, because
+       everything that wants the top of a phone had to queue under it — the
+       shelf off the bar, the layers button under the shelf, locate under the
+       button, the layers menu measuring down from there. The field is in the
+       sheet again, so there is no queue and nothing to describe: the control
+       stack sits at the top of the screen and the map runs behind it to the
+       edge, which is what both maps this one is measured against do.
 
-       --g-layers-top is REDEFINED rather than replaced, which is the whole
-       reason it was ever a token: the button, locate, the menu's cap and the
-       control stack's ceiling in the opposite corner all read it already, so
-       moving the bar in here moves four rules that never mention the bar.
-
-       --g-shelf-h is the strip the shortcuts take under the bar, and it is a
-       constant rather than a measurement even though the shelf comes and goes
-       with the suggestion list. A layers button that jumped 50px up the screen
-       the moment a finger touched the field would be worse than one sitting
-       50px lower than it strictly needs to in the one state — an empty
-       popularity ranking — that this app is barely ever in. */
+       --g-layers-top stays a token even though it is now a single term. Four
+       rules read it — the button, locate, the menu's height cap and the control
+       stack's ceiling in the opposite corner — and the point of the token was
+       always that none of them has to know what is above it. */
     :root {
-        --g-search-top: calc(env(safe-area-inset-top, 0px) + var(--g-gap));
-        --g-search-h: 48px;
-        --g-shelf-h: 40px;
-        --g-layers-top: calc(var(--g-search-top) + var(--g-search-h)
-            + var(--g-shelf-h) + var(--g-gap));
+        --g-layers-top: calc(env(safe-area-inset-top, 0px) + var(--g-gap));
     }
 
     .g-topleft {
@@ -3805,12 +3849,55 @@ body.no-dirbutton .g-directions {
            the overshoot is still a pixel, it is just a pixel below wherever the
            visible bottom of the screen currently is. */
         bottom: calc(var(--g-kb-h) - 1px);
-        padding-bottom: 1px;
+        /* The overshoot back, plus the home indicator on a phone that has one.
+           The sheet reaches the bottom of the screen and now has rows in it
+           again — the suggestion list runs to that edge — so without this the
+           last row sits under the indicator on an iPhone. The PAINT still goes
+           all the way down; it is only the content that stops short, which is
+           the same trick the 1px is. Zero on anything without an inset, so
+           every measurement taken in a desktop browser is unchanged. */
+        padding-bottom: calc(1px + env(safe-area-inset-bottom, 0px));
         left: 0;
         right: 0;
         width: auto;
         max-width: none;
         max-height: 62dvh;
+        /* ONE SURFACE, not a stack of cards with map showing between them.
+           ------------------------------------------------------------------
+           This is the same merge the Apple sidebar makes above 641px and for
+           the same reason, so the note there is the long version: the column
+           stops being a spacer and becomes the material, and its children give
+           up being surfaces and keep their padding and their type.
+
+           A phone is where it matters more. The sidebar's cards are 400px wide
+           with map either side, so four panes of glass in a sleeve is at worst
+           fussy; a bottom sheet is the full width of the screen, and the seams
+           between stacked cards read as the sheet being broken into pieces
+           rather than as sections of one thing. Every phone map — Apple's and
+           Google's alike — draws this as a single sheet.
+
+           THE THICK GLASS MOVES UP HERE WITH IT and the reasoning is unchanged:
+           this box is full-bleed and hundreds of pixels tall, so it covers one
+           flat field of park green rather than a sample of the map, and the
+           regular material stops reading as translucency and starts reading as
+           a stain. It was written against `> .g-card` when the cards were the
+           surfaces. There is one surface now, so it is written on the surface.
+
+           Rounded at the TOP only. The bottom edge is the bottom of the screen
+           and has nothing to round against — which is what the last panel used
+           to have a rule of its own to say, and no longer needs.
+
+           `pointer-events: auto` because the column is transparent to clicks by
+           default so the gaps between its cards do not block panning. There are
+           no gaps now; it is a sheet, and a sheet swallows what lands on it. */
+        gap: 0;
+        pointer-events: auto;
+        background-color: var(--g-card-bg-thick);
+        background-image: var(--g-sheen);
+        -webkit-backdrop-filter: var(--g-card-filter-thick);
+        backdrop-filter: var(--g-card-filter-thick);
+        border-radius: var(--g-radius) var(--g-radius) 0 0;
+        box-shadow: var(--g-shadow), var(--g-rim);
         /* NOT `justify-content: flex-end`, which is what this was and is
            incompatible with the scrolling below. A flex container that packs to
            the end and then overflows puts the overflow past its START edge,
@@ -3833,7 +3920,10 @@ body.no-dirbutton .g-directions {
 
            `contain` rather than `auto` so a flick that reaches the end of this
            list stops there instead of continuing into the map behind it. */
-        overflow-y: auto;
+        /* `hidden` on the horizontal so the children are clipped to the
+           corner radius above — which is all it has to do, since nothing in
+           here is wider than the sheet. */
+        overflow: hidden auto;
         overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
     }
@@ -3966,12 +4056,28 @@ body.no-dirbutton .g-directions {
         max-height: calc(62dvh - var(--g-navbar-h));
     }
 
-    /* The card that meets the bottom edge gives up its bottom corners: there is
-       nothing under them any more to round against. No bottom padding for the
-       credits either — they are above the sheet now, not on it. */
-    .g-topleft > .g-panel:last-child {
-        border-bottom-left-radius: 0;
-        border-bottom-right-radius: 0;
+    /* One material, so the children keep their padding and their type and give
+       up being surfaces. The sheen goes with the rest: one pane of glass has
+       one specular fall down its top edge, and four stacked sections each with
+       their own are four panes in a sleeve — which is the arrangement the merge
+       above exists to stop looking like. */
+    .g-topleft > .g-card {
+        background-color: transparent;
+        background-image: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
+        border-radius: 0;
+    }
+
+    /* What separates the sections now that nothing has an edge of its own. It
+       belongs to the section BELOW rather than the one above, which is what
+       keeps the sheet's own bottom edge clean whichever panel happens to be
+       last. Safe to state unconditionally because the search cluster is always
+       first and always present, so anything showing has something above it to
+       be divided from. */
+    .g-topleft > .g-panel {
+        border-top: 1px solid var(--g-line);
     }
 
     /* THE CREDITS GO OVER THE SHEET.
@@ -3994,8 +4100,9 @@ body.no-dirbutton .g-directions {
        So it sits directly above the sheet, on the map, and moves as the sheet
        grows. Which is what every phone map does with this text, and not by
        coincidence: the sheet is the document and the credit belongs to the map
-       behind it. --g-sheet-h is written by the observer in main.js and is 0
-       when nothing is open, so this one rule also parks it back in the corner.
+       behind it. --g-sheet-h is written by the observer in main.js, so this one
+       rule follows the sheet from its resting 121px up to its 62dvh cap without
+       being told any of those numbers.
 
        LOWERED, not raised. An earlier pass put this corner at 21 to get it over
        the sheet, which this arrangement no longer needs and which had a cost in
@@ -4050,83 +4157,170 @@ body.no-dirbutton .g-directions {
         display: none;
     }
 
-    /* THE FIELD IS THE TOP BAR.
+    /* THE FIELD IS THE HEAD OF THE SHEET.
        ------------------------------------------------------------------
-       It was the foot of the sheet, on the reasoning that a phone is held at
-       the bottom and the one control that is always the answer to "now what"
-       should be under the thumb. That is a true sentence about reach and still
-       the wrong call here, for a reason reach does not cover: the sheet is
-       where every ANSWER lands too — the place card, its directory, the route
-       — so the question and the answer were competing for one edge of the
-       screen, and the field spent its life being shoved about by whatever it
-       had just found. Worse each time it found something bigger.
+       It was a fixed bar at the top of the screen, put there because the sheet
+       is where every ANSWER lands — the place card, its directory, the route —
+       and a field living at the same edge spent its life being shoved about by
+       whatever it had just found.
 
-       At the top it is out of that argument. The bar owns the top of the
-       screen, the sheet owns the bottom, and neither can move the other. It is
-       also what a browser does with the thing you type into and what it finds,
-       and what Google does with this exact pair on this exact screen size.
+       What that reasoning missed is the arrangement maps.apple.com actually
+       uses, which is not two edges but ONE SURFACE AT TWO HEIGHTS. The question
+       and the answer stop competing the moment they are the same sheet: at rest
+       it is a wordmark and a field, typing grows it into a list, and picking
+       something grows it into a card. Nothing is displacing anything else,
+       because there is only one thing.
 
-       FIXED, so the sheet's own scroller cannot carry it away. It is still a
-       DOM child of the column — markup, focus and a screen reader meet the
-       field first, which is the order it should be read in — and taking it out
-       of flow is what leaves the column free to be a bottom sheet with nothing
-       of the field's in it. Safe for the same reason .g-layers is: nothing
-       between here and the viewport carries a transform or a filter, so this
-       positions against the window rather than against the scrolling column.
+       So it is back in the flow, first in the column and therefore the top of
+       the sheet, with everything the sheet can hold arriving underneath it. It
+       gives up being a surface — the column is the surface now — and becomes a
+       head: a wordmark, a row, and whichever list is showing.
 
-       Which also hands 104px back to the credit strip. --g-sheet-h is the
-       column's measured height, and a sheet holding only the search box was
-       never empty; now a map with nothing open really has nothing over it. */
+       The reach argument survives too, better than it did at either edge. At
+       rest the sheet is short, so the field sits low, right under the thumb;
+       it only climbs when there is something on screen that you got to by
+       typing, at which point your hand is already there. */
     .g-search {
-        position: fixed;
-        top: var(--g-search-top);
-        left: var(--g-gap);
-        right: var(--g-gap);
+        position: static;
         width: auto;
         max-width: none;
-        height: var(--g-search-h);
+        height: auto;
+        flex: none;
+        flex-direction: column;
+        align-items: stretch;
+        padding: 12px;
     }
 
-    /* AND THE SHELF HANGS OFF THE BAR rather than sitting inside it.
+    /* THE WORDMARK, which is what stops the resting sheet reading as a bar that
+       has slid to the wrong end of the screen.
        ------------------------------------------------------------------
-       It was a row within the sheet, which is where it belonged while the sheet
-       was the search box. Inside a floating bar it would be a second row of a
-       control, and that is not what a chip is: chips are content lying on the
-       map, and every phone map draws them as their own small pills under the
-       bar rather than as a tray bolted to it. So each chip takes the card
-       material and the row itself has none.
+       A sheet with a single input in it and nothing else says nothing about
+       what it belongs to. Apple's says "Apple Maps" over theirs, in a sheet
+       whose whole resting content is that line and the field under it, and it
+       is the line that makes the shape read as an app rather than as a stray
+       control.
 
-       Absolutely positioned, for the same reason the suggestion list is: both
-       hang under the bar, only ever one of them is showing (main.js hides each
-       for the other), and neither should be able to change the height of the
-       thing it hangs from.
-
-       The base rule's padding grows to 6px on every side, and that is shadow
-       room: `overflow-x: auto` computes overflow-y to `auto` as well, so a
-       chip's shadow is clipped by its own scroller unless there is space inside
-       for it to fall into. In the sidebar the chips have a card under them and
-       need none. The matching negative left and right put the first chip back
-       on the bar's own left edge instead of 6px inside it. */
-    .g-shortcuts {
-        position: absolute;
-        top: 100%;
-        left: -6px;
-        right: -6px;
-        padding: 6px;
-        scroll-padding-left: 6px;
+       It goes when the sheet grows. Branding is what a surface shows when it
+       has nothing better to say, and the moment there are results or a card
+       there is something better — keeping it would push the field and
+       everything under it 42px further up the screen to say a word the title
+       bar has already said. Two ways in, because there are two ways to grow:
+       a list under the field, or a panel below the search cluster entirely. */
+    .g-sheet-brand {
+        display: flex;
     }
 
-    /* A chip on the map is a card, not an inset fill. --g-fill is a step DARKER
-       than the surface it is drawn on, which is what makes it read as recessed
-       on a sheet — and as a hole punched in the campus when there is no sheet
-       under it. 34px rather than 32 so the strip below the bar comes to a round
-       40 with its offset, which is the number --g-shelf-h states. */
+    .g-search:has(#place-results:not(.hidden)) .g-sheet-brand,
+    .g-topleft:has(> .g-panel:not(.hidden)) .g-sheet-brand {
+        display: none;
+    }
+
+    /* THE GRABBER, drawn by the head rather than added to the markup.
+       ------------------------------------------------------------------
+       .g-search is always the first child and always present, so its ::before
+       is reliably the top of the sheet and no element has to exist to hold a
+       6px pill.
+
+       IT IS A SIGNIFIER AND NOT YET A GESTURE. The sheet does grow and shrink
+       — on focus, on a result, on a card — but it grows because its contents
+       changed, not because anything was dragged. This says "the thing you are
+       looking at is a sheet", which is true, and it is what the reference
+       draws; it does not yet promise a drag that is not implemented. */
+    .g-search::before {
+        content: "";
+        display: block;
+        width: 36px;
+        height: 5px;
+        margin: -4px auto 8px;
+        border-radius: 999px;
+        background: var(--g-text-dim);
+        opacity: 0.35;
+    }
+
+    /* A FIELD INSIDE A SURFACE IS FILLED, not floated.
+       ------------------------------------------------------------------
+       The same call the Apple sidebar makes and for the same reason: this is
+       the one place in the app where a control is drawn ON the material rather
+       than as one, because a floating pill on a sheet is a second pane of glass
+       over the first.
+
+       --g-hover rather than --g-surface-2, which is the token that looks
+       right and is not: an opaque fill inside a translucent sheet is a solid
+       rectangle punched through the blur. A translucent fill darkens whatever
+       the sheet is over, so the field reads as a field on park green and on a
+       car park alike. */
+    .g-search-field {
+        padding: 0 6px 0 10px;
+        border-radius: var(--g-radius-sm);
+        background: var(--g-hover);
+    }
+
+    /* AND THE RING GOES ROUND THE FIELD, not round the cluster.
+       ------------------------------------------------------------------
+       The base rule rings .g-search, which was right while that box WAS the
+       control — a floating pill with nothing else in it. It is the head of a
+       sheet now, holding a wordmark and a row and a list, and a 2px outline
+       round all of that reads as the top half of the app being selected rather
+       than as a cursor being somewhere. */
+    .g-search:focus-within {
+        outline-color: transparent;
+    }
+
+    .g-search:focus-within .g-search-field {
+        outline: 2px solid var(--g-blue);
+        outline-offset: 1px;
+    }
+
+    /* THE SHORTCUTS WAIT TO BE ASKED FOR.
+       ------------------------------------------------------------------
+       They were chips lying on the map under a floating bar, which is what they
+       had to be while the bar floated. Back inside the sheet they are a row of
+       the head again — an inset fill on a surface, not a card over a map, for
+       the same reason the field is.
+
+       WHAT IS NEW IS THAT THEY ARE NOT IN THE RESTING SHEET. The reference puts
+       one thing above the field, and it is the wordmark; a resting sheet
+       carrying a wordmark AND a row of chips is taller than the shape it is
+       copying and buries the field further from the thumb. So the chips arrive
+       on the first touch of the field, in the same beat the sheet grows — which
+       is the moment they are useful anyway, since the state they answer for is
+       "I am ready to type and cannot think of a name".
+
+       The cost is real and worth stating: at rest the sheet no longer offers
+       anywhere to go, which was the whole argument for having these. It is one
+       tap rather than none, and the tap is on the control you were reaching for
+       regardless.
+
+       `:not(.hidden)` so this cannot fight main.js, which hides the row
+       outright whenever the suggestion list is showing. */
+    .g-shortcuts {
+        display: none;
+        /* Out to the sheet's own edges, past the head's padding, and the
+           padding given straight back inside. A row that scrolls sideways has
+           to be CLIPPED at the edge of the screen or the cut looks like a
+           mistake rather than like more content: stopped 12px short, the last
+           chip ends in mid-air with a margin beyond it. `scroll-padding-left`
+           is the other half — it puts a snapped chip back at the text margin
+           instead of hard against the glass. */
+        margin: 10px -12px 0;
+        padding: 0 12px 2px;
+        scroll-padding-left: 12px;
+    }
+
+    .g-search:focus-within .g-shortcuts:not(.hidden) {
+        display: flex;
+    }
+
+    /* An inset fill, because there is a surface under it now. --g-fill is a
+       step darker than what it is drawn on, which is what makes it read as
+       recessed in a sheet — and as a hole punched in the campus when there was
+       no sheet beneath it. */
     .g-shortcut {
         height: 34px;
-        background: var(--g-card-bg-thick);
-        -webkit-backdrop-filter: var(--g-card-filter-thick);
-        backdrop-filter: var(--g-card-filter-thick);
-        box-shadow: var(--g-shadow), var(--g-rim);
+        background: var(--g-fill);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
     }
 
     /* ONE CREDIT STRIP, not three things at three heights.
@@ -4181,74 +4375,50 @@ body.no-dirbutton .g-directions {
         margin-bottom: 0;
     }
 
-    /* A card in this column is a SHEET, and a sheet wears the thicker glass.
+    /* THE LIST IS A SECTION OF THE SHEET.
        ------------------------------------------------------------------
-       See --g-card-bg-thick. Every card here is full-bleed and hundreds of
-       pixels tall, so each one covers a single region of the map rather than a
-       sample of it, and on this campus that region is usually one flat field of
-       park green. The regular material stopped reading as translucency and
-       started reading as a stain: the suggestion sheet was washed green with
-       the tree canopy legible as a gradient across it, and the place card had
-       the same wash behind its title.
+       It has been a floating card hanging under a bar and, before that, a
+       flattened region inside the search box. It is neither now: the sheet is
+       the surface, and this is the sheet's second section — the head's row
+       above it, a rule between, the list running down to the bottom edge.
 
-       Written against the column rather than against each card, because what
-       decides the level is being IN this column — full width, over the map,
-       tall — and the next panel added down here would want it for the same
-       reason and would not think to ask. */
-    .g-topleft > .g-card {
-        background: var(--g-card-bg-thick);
-        -webkit-backdrop-filter: var(--g-card-filter-thick);
-        backdrop-filter: var(--g-card-filter-thick);
-    }
+       Which is also the only arrangement the sheet's rounded corners survive.
+       An absolutely positioned list is either clipped by the radius or hangs
+       out past the material it belongs to; one in the flow of a box with
+       `overflow: hidden auto` is simply clipped to it, correctly, for free.
 
-    /* THE FOCUS RING IS THE PILL'S AGAIN.
-       ------------------------------------------------------------------
-       It was moved onto .g-search-row while .g-search was the whole foot of the
-       sheet with the list inside it: a ring on the outer box then drew a 2px
-       rectangle around the bar AND four suggestions AND the gap between them,
-       which reads as the lower half of the app being selected rather than as a
-       cursor being somewhere. The list hangs outside the bar now, so the outer
-       box IS the control again and the base rule is right unaided. */
+       The negative margins take it back out to the sheet's own edges, past the
+       head's 12px of padding, so the rule above it and the rows below it run
+       the full width — a divider that stops 12px short on both sides reads as a
+       line drawn on the card rather than as the edge of a section.
 
-    /* THE LIST IS A CARD AGAIN, hanging under the bar.
-       ------------------------------------------------------------------
-       It was flattened — no blur, no shadow, no radius, `position: static` —
-       because it lived INSIDE the search box, and its own glass over that box's
-       glass is two panes with nothing between them. It hangs under the bar
-       again rather than in it, so it is a floating surface over the map like
-       every other one here and takes the base rule's card straight back. Only
-       the phone's own three adjustments are left.
-
-       THICK, for the reason written at .g-topleft > .g-card: this box is the
-       width of the phone and hundreds of pixels tall, so it covers one flat
-       field of park green rather than a sample of the map, and the regular
-       material stops reading as translucency and starts reading as a stain.
-
-       The cap is the screen less everything above the list AND less the
-       keyboard, which is the half that only matters now: the list opens
-       downward, so a keyboard eats its last rows and nothing else in this
-       layout would have noticed. --g-kb-h is measured in main.js because iOS
-       does not resize the layout viewport for a keyboard. */
+       No cap of its own. The sheet's 62dvh is the cap, and the sheet scrolls;
+       a second maximum here would build a scroller inside a scroller, which is
+       the arrangement `.g-place-body` above gives up for the same reason. The
+       keyboard is handled where it should be, on the sheet — see --g-kb-h on
+       .g-topleft, which lifts the whole thing clear rather than shortening one
+       list inside it. */
     .g-results {
-        max-height: calc(100dvh - var(--g-kb-h) - var(--g-search-top)
-            - var(--g-search-h) - 6px - var(--g-gap));
-        background: var(--g-card-bg-thick);
-        -webkit-backdrop-filter: var(--g-card-filter-thick);
-        backdrop-filter: var(--g-card-filter-thick);
-        overscroll-behavior: contain;
+        position: static;
+        z-index: auto;
+        margin: 10px -12px -12px;
+        padding: 4px 0 6px;
+        max-height: none;
+        min-height: 0;
+        background: transparent;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
+        border-radius: 0;
+        border-top: 1px solid var(--g-line);
+        overflow: visible;
     }
 
-    /* ...and the row the cap cuts through says so, instead of just ending.
-       A hard edge across the middle of a word is the picture of something
-       broken; the same edge under 28px of fade is the oldest scroll hint there
-       is. `to top` — the overflow runs off the BOTTOM of a list that hangs
-       downward, and this said `to bottom` for as long as the list was reversed.
-       Only when there IS an overflow, see is-scrollable in main.js, since a
-       list that fits has a real last row down there to fade away for nothing. */
-    .g-results.is-scrollable {
-        -webkit-mask-image: linear-gradient(to top, transparent, #000 28px);
-        mask-image: linear-gradient(to top, transparent, #000 28px);
-    }
+    /* A scroll fade lived here, on the row the list's own cap cut through. The
+       list has no cap and does not scroll any more — the sheet does, which is
+       the "one scroller, not two nested ones" rule .g-place-body above states —
+       so there is no edge of this list's making to soften. It went with the
+       `is-scrollable` class that drove it; see main.js. */
 
     /* ONE LINE UNDER THE NAME, not two.
        ------------------------------------------------------------------
@@ -4291,14 +4461,13 @@ body.no-dirbutton .g-directions {
        Hidden rather than moved, and by visibility so the control keeps its
        place in the stack and comes back where it was.
 
-       THE SUGGESTION LIST COVERS BOTH OF THESE and needs no rule of its own.
-       The field is the top bar again and its list hangs down the middle of the
-       screen, across a corner whose controls are sealed in a stacking context
-       of Mapbox's own at z-index 2 — against the column's 20, so the list is
-       simply painted over them. A control under an open suggestion list is
-       covered, which is what every map does and what it should do. It is only
-       the MENU that needs answering, because the menu is glass and a hard dark
-       square would show through it. */
+       THE SUGGESTION LIST NO LONGER COMES NEAR EITHER OF THEM. It is a section
+       of the sheet at the bottom of the screen, and these are pinned to the
+       top — the two cannot meet, however long the list runs, because the sheet
+       is capped well short of them and the control stack's own ceiling is
+       measured from the layers button down. It is only the MENU that needs
+       answering, because the menu is glass and a hard dark square would show
+       through it. */
     body:has(#layers-menu:not(.hidden)) .mapboxgl-ctrl-group:has(.mapboxgl-ctrl-geolocate) {
         visibility: hidden;
     }
