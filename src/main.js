@@ -3311,8 +3311,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    *
    * iOS does not resize the layout viewport for the keyboard — it lays the
    * keyboard OVER the page and leaves every `bottom` in the document pointing
-   * at the same place it always did. The bottom sheet's last row is the search
-   * field, so without this the act of tapping the field is what hides it.
+   * at the same place it always did. So a bottom sheet sits underneath the
+   * keyboard, and the suggestion list hanging off the bar at the top of the
+   * screen runs its last rows under one. Both are capped off this.
    *
    * `window.innerHeight - height - offsetTop` rather than the height alone,
    * because the visual viewport also moves: a pinch-zoomed or scrolled page
