@@ -156,10 +156,10 @@
    "campus": "Main Campus",
    "sections": 123,
    "mapName": "Technical Education West (TEW)",
-   "mapKind": "label",
+   "mapKind": "building",
    "coords": [
-    -121.3464336,
-    38.6520039
+    -121.346561,
+    38.6518265
    ],
    "rooms": [
     "400",
@@ -398,10 +398,10 @@
    "campus": "Main Campus",
    "sections": 13,
    "mapName": "Pool",
-   "mapKind": "label",
+   "mapKind": "building",
    "coords": [
-    -121.3461123,
-    38.6495059
+    -121.346068,
+    38.6494815
    ],
    "rooms": [
     "POOL"

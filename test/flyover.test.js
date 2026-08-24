@@ -83,8 +83,13 @@ test('the Parking Garage flies and a surface car park does not', () => {
 });
 
 test('no area name flies — those are my campus\'s own word for a piece of ground', () => {
+  // Five are my campus's letterspaced capitals — STADIUM, TENNIS COURTS and so on —
+  // and the sixth is "Closed", the stamp over the fenced ground west of the
+  // STEM centre. That one is set in sentence case at the largest size on the
+  // sheet, so nothing about how it is typed says "ground": build-labels.mjs
+  // reads the grey shape under it instead.
   const areas = labels.filter((f) => f.properties.kind === 'area');
-  assert.ok(areas.length === 5, `expected 5 area labels, found ${areas.length}`);
+  assert.ok(areas.length === 6, `expected 6 area labels, found ${areas.length}`);
   for (const feature of areas) {
     const thing = { name: feature.properties.text, labelKind: 'area' };
     assert.equal(tierOf(thing), FLYOVER_TIER.FLAT, `${feature.properties.text} would fly`);
@@ -358,6 +363,58 @@ test('every label alias names a directory row that exists', () => {
     assert.ok(names.has(to), `"${from}" is aliased to "${to}", which is not a directory row`);
     assert.ok(!names.has(from), `"${from}" is already a directory row and needs no alias`);
   }
+});
+
+test('every name printed on the sheet reaches a flyover, and the one that does not says why', () => {
+  // The requirement in one test: a person who can read a building's name off
+  // this map can fly over that building. It was not true for a long time and
+  // the failures were all silent — a tap that lifted a pin, showed a small card
+  // and offered nothing else, on names my campus's own cartographer had set.
+  //
+  // Reproduced end to end from the two files main.js actually consults, and in
+  // main.js's own order: a tap asks what footprint is under the pointer first
+  // (`buildingAt`) and falls back to matching the printed word against a
+  // directory row (`directoryRow`). Both, because both are load-bearing — a
+  // plate is set BESIDE the building it names, so the pixel under the word is
+  // frequently not the building.
+  const main = readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
+  const block = /const LABEL_ALIASES = new Map\(\[([\s\S]*?)\]\);/.exec(main);
+  const aliases = new Map([...block[1].matchAll(/\['([^']+)',\s*'([^']+)'\]/g)]
+    .map(([, from, to]) => [from, to]));
+
+  const inRing = ([px, py], ring) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+  const covering = (point) => buildings.find((f) => f.geometry.coordinates.some((p) => inRing(point, p[0])));
+
+  const refused = [];
+  for (const label of labels) {
+    const { kind, text } = label.properties;
+    if (kind !== 'building' && kind !== 'plate') continue;
+    const name = text.trim();
+    const row = covering(label.geometry.coordinates)
+      ?? buildings.find((f) => f.properties.name === (aliases.get(name) ?? name));
+    assert.ok(row, `"${name}" is printed on the map and reaches no building at all`);
+    if (canFlyOver(asCard(row.properties))) {
+      // ...and a flyover needs somewhere to put the pin and something to draw
+      // the highlight around. A name that reaches a row with no measurement
+      // behind it would fly to an empty sky.
+      assert.ok(roofOf(row.properties.name), `"${row.properties.name}" flies with no measured roof`);
+    } else {
+      refused.push(row.properties.name);
+    }
+  }
+
+  // One building on this campus is deliberately not flown, and the reason is
+  // written down beside it rather than left as a fact about the output.
+  assert.deepEqual([...new Set(refused)], ['Career Technical Education (CTE)']);
+  assert.ok(STALE_IMAGERY.has('Career Technical Education (CTE)'));
 });
 
 test('the campus box holds the campus, with room for a building on its edge', () => {

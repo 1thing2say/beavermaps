@@ -55,6 +55,14 @@ const DATA = path.join(root, 'campus-data/wayfind/api');
 const TARGET = path.join(root, 'src/buildings.json');
 
 const BUILDING_FILL = '#fff';
+// The pool, which is the one structure on this sheet the cartographer did not
+// draw in white — it is drawn as water, because it is. It is a structure all
+// the same: my campus hand-authored a Touchable region over it, bound to their own
+// "Pool" location, and the printed sheet sets "Pool" on it in the same type it
+// uses for the Gym next door. Excluding it on fill alone left a labelled
+// building on this campus that could not be tapped, carded or flown over.
+// Exactly one shape in the file carries this fill.
+const POOL_FILL = '#37afcb';
 const BUILDING_STROKE = '#231f20'; // every real footprint is outlined in this
 const DECOR_STROKE = '#a6a6a6';    // the three street-label plates down the west edge
 const KEEP_ALWAYS_M2 = 400; // above this, every #fff shape was a building
@@ -71,7 +79,7 @@ const SMALL_BUILDING_M2 = 200;
 // --- read the SVG -----------------------------------------------------------
 
 /**
- * The white shapes that are candidate footprints.
+ * The shapes that are candidate footprints: the white ones, and the pool.
  *
  * <polyline> never reaches here: readShapes excludes it by type, because it is
  * an open figure used only for stroked line work, and the file's one white
@@ -79,7 +87,7 @@ const SMALL_BUILDING_M2 = 200;
  */
 function readCandidates(svg) {
   return readAllShapes(svg).filter(({ attrs }) => {
-    if (attrs.fill !== BUILDING_FILL) return false;
+    if (attrs.fill !== BUILDING_FILL && attrs.fill !== POOL_FILL) return false;
     // Rounded corners mean a UI chip, not a footprint: the "P" parking pins and
     // the BUS/SOS edge markers are white rects with rx/ry, and the markers are
     // large enough (381 m²) to clear the area test on their own. No building on
@@ -125,32 +133,60 @@ for (const s of shapes) {
     keep = minSpanMetres(s.ring) >= MIN_SPAN_M
       && !(s.curvy && s.ring.length > GLYPH_VERTS);
   } else keep = false;
-  if (keep) buildings.push({ ...s, m2 });
+  if (keep) buildings.push({ ...s, m2, c: centroid(s.ring) });
 }
 
 // Name a footprint when a hand-authored touchable region sits inside it. Where
 // footprints nest, the smallest container wins: taking the first match in
 // document order instead makes the assignment depend on paint order, so it
 // silently moves to a different polygon whenever the kept set changes.
-const named = new Map();
-for (const t of touchables) {
-  const ring = touchableRing(t);
-  if (!ring) continue;
-  const c = centroid(ring);
+const regions = touchables
+  .map((t) => ({ ring: touchableRing(t), name: locations.get(t.LocationID)?.Name }))
+  .filter((r) => r.ring && r.name)
+  .map((r) => ({ ...r, c: centroid(r.ring), m2: ringArea(r.ring) * M2_PER_UNIT2 }));
 
+const named = new Map();
+for (const region of regions) {
   let hit = -1;
   let best = Infinity;
   buildings.forEach((b, i) => {
-    if (b.m2 < best && pointInRing(c, b.ring)) {
+    if (b.m2 < best && pointInRing(region.c, b.ring)) {
       best = b.m2;
       hit = i;
     }
   });
-  if (hit < 0) continue;
-
-  const name = locations.get(t.LocationID)?.Name;
-  if (name && !named.has(hit)) named.set(hit, name);
+  if (hit >= 0 && !named.has(hit)) named.set(hit, region.name);
 }
+
+// ...and the other way round, for a touchable drawn around a CLUSTER.
+//
+// The rule above assumes a region is a patch on one building, and for 32 of
+// my campus's 44 named regions it is. Of the twelve whose centroid lands in nothing,
+// eleven are car parks, the stadium, the tennis courts and a hall that is not
+// on this sheet any more — nothing a footprint rule should be finding. The
+// twelfth is Technical Education West, which is twelve portables with a single
+// polygon thrown around all of them: the centroid falls in the alley between
+// two, so the whole building came out unnamed — no directory row, no card, no
+// flyover, for a plate that is printed on my campus's own sheet.
+//
+// So a footprint whose own centroid falls inside a region takes that region's
+// name. Smallest containing region wins, for the same reason as above.
+//
+// This is the WEAKER question and only ever runs on what is still unnamed,
+// because a region drawn around several buildings would otherwise rename ones
+// the forward pass had already got right. Measured over the whole file it
+// changes nothing else: it agrees with the forward pass on all 59 footprints
+// they both reach, contradicts it on none, and adds exactly the twelve
+// portables of TEW.
+buildings.forEach((b, i) => {
+  if (named.has(i)) return;
+  let hit = null;
+  for (const region of regions) {
+    if (!pointInRing(b.c, region.ring)) continue;
+    if (!hit || region.m2 < hit.m2) hit = region;
+  }
+  if (hit) named.set(i, hit.name);
+});
 
 const features = buildings.map((b, i) => {
   let ring = b.ring.map(project);
@@ -161,8 +197,15 @@ const features = buildings.map((b, i) => {
     type: 'Feature',
     properties: {
       name: named.get(i) ?? null,
-      // Placeholder, not survey data — see HEIGHT_* above.
-      height: b.m2 < SMALL_BUILDING_M2 ? HEIGHT_SMALL_M : HEIGHT_DEFAULT_M,
+      // Placeholder, not survey data — see HEIGHT_* above. Except for the
+      // pool, where zero is the measurement rather than a way of hiding it:
+      // src/landcover.json already draws the water, and standing a slab of
+      // building colour up over it would cover the thing this footprint is
+      // for. src/main.js filters the extrusion to what has a height, so the
+      // pool stays a footprint — tappable, cardable, flyable — with no mass.
+      height: b.attrs.fill === POOL_FILL ? 0
+        : b.m2 < SMALL_BUILDING_M2 ? HEIGHT_SMALL_M
+        : HEIGHT_DEFAULT_M,
       area_m2: Math.round(b.m2),
     },
     geometry: { type: 'Polygon', coordinates: [ring] },
@@ -172,6 +215,6 @@ const features = buildings.map((b, i) => {
 writeFileSync(TARGET, `${JSON.stringify({ type: 'FeatureCollection', features })}\n`);
 
 const total = features.reduce((s, f) => s + f.properties.area_m2, 0);
-console.log(`[build-buildings] ${shapes.length} #fff shapes -> ${features.length} footprints`);
+console.log(`[build-buildings] ${shapes.length} candidate shapes -> ${features.length} footprints`);
 console.log(`[build-buildings] named ${named.size}, total footprint area ${total.toLocaleString()} m2`);
 console.log(`[build-buildings] -> src/buildings.json`);

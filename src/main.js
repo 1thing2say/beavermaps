@@ -965,6 +965,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       slot: 'middle',
       // Extrusion is genuinely expensive to fill. Never draw it zoomed out.
       minzoom: 15,
+      // Only what has mass. The pool is a footprint with a height of zero —
+      // it is a hole in the ground, and src/landcover.json already draws the
+      // water in it — so extruding it would put a slab of building colour over
+      // the thing the footprint exists to name. It stays in the source, where
+      // the directory, the card and the flyover all still find it.
+      filter: ['>', ['get', 'height'], 0],
       paint: {
         'fill-extrusion-color': colors.building,
         'fill-extrusion-height': ['get', 'height'],

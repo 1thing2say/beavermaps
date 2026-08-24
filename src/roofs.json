@@ -1,5 +1,5 @@
 {
- "generated": "2026-08-15",
+ "generated": "2026-08-24",
  "source": "Google Photorealistic 3D Tiles, geometric error 2.01 m",
  "datum": "metres above the WGS84 ellipsoid",
  "note": "centre is [longitude, latitude, roof_m]. roof_m is the median of the highest mesh sample in each 3 m cell inside the footprint, inset 2.5 m from its edge; ground_m is the median of the lowest sample per cell in the 14 m collar outside it; height_m is the difference. peak_m is the tallest cell, so it holds stair cores, aerials and overhanging trees. cells is how many cells the roof figure rests on. See scripts/build-roofs.mjs.",
@@ -313,6 +313,20 @@
    "cells": 489
   },
   {
+   "name": "Pool",
+   "area_m2": 1107,
+   "centre": [
+    -121.3461138,
+    38.6495032,
+    -4.8
+   ],
+   "roof_m": -4.8,
+   "ground_m": -4.3,
+   "height_m": -0.5,
+   "peak_m": -1.7,
+   "cells": 93
+  },
+  {
    "name": "Portable Village",
    "area_m2": 2673,
    "centre": [
@@ -353,6 +367,20 @@
    "height_m": 4.3,
    "peak_m": 3.1,
    "cells": 67
+  },
+  {
+   "name": "Ranch House",
+   "area_m2": 315,
+   "centre": [
+    -121.3487026,
+    38.6494148,
+    2.9
+   ],
+   "roof_m": 2.9,
+   "ground_m": -2.5,
+   "height_m": 5.3,
+   "peak_m": 7.4,
+   "cells": 18
   },
   {
    "name": "Rec.",
@@ -409,6 +437,20 @@
    "height_m": 8.7,
    "peak_m": 10.4,
    "cells": 338
+  },
+  {
+   "name": "Technical Education West (TEW)",
+   "area_m2": 1155,
+   "centre": [
+    -121.3463828,
+    38.6519562,
+    0.9
+   ],
+   "roof_m": 0.9,
+   "ground_m": -2.6,
+   "height_m": 3.6,
+   "peak_m": 1.6,
+   "cells": 27
   },
   {
    "name": "Welcome and Support Center",

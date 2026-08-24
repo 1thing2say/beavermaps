@@ -252,6 +252,9 @@ const onPlate = (cx, cy) => {
 const carParks = shapes.filter((s) => s.attrs.fill === '#a9afb7').map((s) => s.ring);
 // One shape, and the only non-building facility whose label sits on a car park.
 const poolShape = shapes.filter((s) => s.attrs.fill === '#37afcb').map((s) => s.ring);
+// The one fenced-off area on the sheet, west of the STEM centre, drawn in grey
+// and stamped "Closed". See build-landcover.mjs, which draws the same shape.
+const closedGround = shapes.filter((s) => s.attrs.fill === '#8c8c8c').map((s) => s.ring);
 
 const footprints = JSON.parse(readFileSync(BUILDINGS, 'utf8')).features;
 const inFootprint = (coords) =>
@@ -273,6 +276,26 @@ const namesALot = (cx, cy, coords) => {
   return !inFootprint(coords);
 };
 
+/**
+ * True for a label that annotates the ground rather than naming a building.
+ *
+ * There is exactly one on this sheet: "Closed", set across the fenced-off area
+ * west of the STEM centre. It has no capitals to catch it — the uppercase rule
+ * above is what marks STADIUM and TENNIS COURTS as areas — and it sits on no
+ * car park and inside no footprint, so it fell through to `building`, which is
+ * the one thing it certainly is not. At 14.5 pt it is the largest type on the
+ * whole map, so it then outranked every real building name in the collision
+ * solver, drew a POI disc, opened a card and offered a helicopter tour of a
+ * patch of fenced grass.
+ *
+ * Asked of the shape rather than of the word, because the word is a coincidence
+ * and the grey ground under it is the fact.
+ */
+const marksClosedGround = (cx, cy) => {
+  const p = svgFromPdf([cx, cy]);
+  return closedGround.some((ring) => pointInRing(p, ring));
+};
+
 const features = [];
 const suppressed = [];
 for (const block of blocks) {
@@ -289,7 +312,7 @@ for (const block of blocks) {
     type: 'Feature',
     properties: {
       text,
-      kind: area ? 'area'
+      kind: area || marksClosedGround(cx, cy) ? 'area'
         : onPlate(cx, cy) ? 'plate'
         : namesALot(cx, cy, projectPdf([cx, cy])) ? 'parking'
         : 'building',

@@ -38,10 +38,16 @@ test('every footprint is an area, and none of them twice', () => {
   const zones = areas.filter((a) => a.kind === 'zone');
   const buildingAreas = areas.filter((a) => a.kind === 'building');
 
-  // 96 footprints, 58 of them grouped into the directory's 30 named buildings.
-  // If the identity test in buildAreas ever stops matching, this becomes 126
-  // and the Health Education Complex gets outlined nine times over.
-  assert.equal(buildingAreas.length, 30 + (96 - 58));
+  // 97 footprints, 72 of them grouped into the directory's 33 buildings, and
+  // 25 left over. Derived from the directory rather than restated, because the
+  // two numbers move together and a hand-copied total would only ever be a
+  // second place for them to disagree. If the identity test in buildAreas ever
+  // stops matching, this becomes 130 and the Health Education Complex gets
+  // outlined nine times over.
+  const claimed = directory.features.reduce((n, f) => n + f.geometry.coordinates.length, 0);
+  assert.equal(directory.features.length, 33);
+  assert.equal(claimed, 72);
+  assert.equal(buildingAreas.length, directory.features.length + (buildings.features.length - claimed));
   assert.equal(
     buildingAreas.reduce((n, a) => n + a.polygons.length, 0),
     buildings.features.length,
@@ -200,7 +206,7 @@ test('a missing overlay costs its own areas and nothing else', () => {
   }).counts.zones, 0);
 
   const noDirectory = buildAreas({ buildings, basemap, zoneKinds });
-  assert.equal(noDirectory.filter((a) => a.kind === 'building').length, 96);
+  assert.equal(noDirectory.filter((a) => a.kind === 'building').length, 97);
 
   assert.deepEqual(buildAreas(), []);
   assert.deepEqual(highlightFor(CATEGORY_BY_ID.get('bike')), {

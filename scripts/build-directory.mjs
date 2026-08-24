@@ -119,6 +119,38 @@ function entranceFor(group) {
   return best?.vertex ?? null;
 }
 
+/**
+ * Footprints the printed sheet names and my campus's touchable table does not.
+ *
+ * build-buildings.mjs names a footprint from my campus's Touchable regions, which is
+ * their own hand-authored answer to "what is this shape" and is right 71 times
+ * out of 97. It is not the only answer. The Ranch House is drawn on the sheet,
+ * printed with its name inside its own walls, and has no touchable region at
+ * all — nobody at my campus ever made it a destination — so it arrived here as a
+ * nameless 315 m2 polygon and dropped out of `groupByName` before it could
+ * become a building. On the map that reads as a labelled building you can tap
+ * straight through: no card, no directory row, no flyover.
+ *
+ * This is the file where the two naming sources already meet, so the second one
+ * is applied here rather than upstream — build-labels.mjs reads buildings.json,
+ * and naming a footprint from labels.json in the script that writes it would
+ * make the pipeline a loop.
+ *
+ * A `building` label ONLY, never a plate, and that restriction is the whole
+ * rule. A building label is set inside the shape it names; a plate is set
+ * beside it with a leader line, which means a plate lands on whatever happens
+ * to be under it — Environmental Resources' plate sits on a 76 m2 outbuilding
+ * that is not Environmental Resources, and adopting it would put a second row
+ * of that name in the directory. Measured over the sheet, the restricted rule
+ * claims exactly one footprint.
+ */
+for (const footprint of footprints) {
+  if (footprint.properties.name) continue;
+  const printed = labels.find((l) => l.properties.kind === 'building'
+    && pointInRing(l.geometry.coordinates, footprint.geometry.coordinates[0]));
+  if (printed) footprint.properties.name = printed.properties.text;
+}
+
 const groups = [...groupByName(footprints).values()];
 const features = [];
 

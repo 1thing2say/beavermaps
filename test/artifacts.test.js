@@ -38,13 +38,25 @@ test('buildings have plausible footprints and heights', () => {
     const area = ringAreaM2(f.geometry.coordinates[0]);
     // build-buildings.mjs floors at 60 m2; the largest is the parking garage.
     assert.ok(area > 50, `footprint covers only ${area.toFixed(0)} m2`);
-    assert.ok(f.properties.height > 0 && f.properties.height < 60,
+    // Zero is a measurement here, not a missing one: the pool is a footprint
+    // with nothing above the ground, so build-buildings.mjs writes 0 and
+    // src/main.js filters the extrusion layer to `height > 0` rather than
+    // standing a slab of building colour up over the water. Everything else
+    // carries a placeholder mass.
+    assert.ok(f.properties.height >= 0 && f.properties.height < 60,
       `height ${f.properties.height} m`);
     // The extrusion reads area_m2 nowhere, but a disagreement means the file was
     // hand-edited rather than regenerated.
     assert.ok(Math.abs(area - f.properties.area_m2) / area < 0.1,
       `area_m2 ${f.properties.area_m2} disagrees with the geometry's ${area.toFixed(0)}`);
   }
+  // ...and the exemption stays one shape. A second massless footprint would
+  // mean the height rule had started dropping buildings rather than describing
+  // a hole, and the extrusion filter would silently stop drawing them.
+  assert.deepEqual(
+    features.filter((f) => f.properties.height === 0).map((f) => f.properties.name),
+    ['Pool'],
+  );
 });
 
 // src/map-images.js draws one pictogram per kind and addresses them with
