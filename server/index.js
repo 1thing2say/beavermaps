@@ -6,7 +6,7 @@ import pathFinderModule from 'geojson-path-finder';
 import { point, featureCollection } from '@turf/helpers';
 import { nearestPoint } from '@turf/nearest-point';
 import { buildManeuvers, FEET_PER_KM } from '../src/maneuvers.js';
-import { wireForm, sendWire } from './wire.js';
+import { wireForm, sendWire, compressedStatic } from './wire.js';
 
 // geojson-path-finder ships CommonJS with no "exports" map, so under bare Node
 // the default import is the module namespace rather than the class itself.
@@ -215,7 +215,14 @@ app.get('/healthz', (_req, res) => res.json({ ok: true, vertices: vertices.lengt
 
 // Serve the built front-end when it exists. In dev the Vite server handles
 // this and proxies /api back here instead.
+//
+// Two layers, in this order. The first answers compressible files to clients
+// that accept gzip and sets the cache policy — dist/ is 3,576 KB uncompressed
+// and 993 KB gzipped, which is the same argument as the API payloads and the
+// same size of saving. Everything it does not answer falls through to
+// express.static, which keeps ranges, HEAD and the rest where they belong.
 if (existsSync(distDir)) {
+  app.use(compressedStatic(distDir));
   app.use(express.static(distDir));
   // Fallback as middleware rather than app.get('*') — Express 5 no longer
   // accepts a bare wildcard path.

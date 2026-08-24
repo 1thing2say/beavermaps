@@ -1,5 +1,6 @@
 import { hostname } from 'node:os';
 import { defineConfig } from 'vite';
+import compression from 'compression';
 import tailwindcss from '@tailwindcss/vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
@@ -38,8 +39,55 @@ const useHttps = process.env.HTTPS === '1';
  */
 const LAN_HOST = `${hostname().replace(/\.local$/i, '')}.local`.toLowerCase();
 
+/**
+ * Gzip what the dev server sends, which matters here far more than it sounds.
+ *
+ * Vite dev serves every module unbundled and with its sourcemap inlined as
+ * base64, and the map is the bulk of it: src/main.js goes out as 1,653 KB, of
+ * which 1,347 KB is the map. Base64 is about the most compressible payload
+ * there is, so that one file drops to 321 KB — the whole page went 4,826 KB to
+ * roughly a fifth of that. Nothing was compressed before this: measured on the
+ * wire, every dev module came back with encodedBodySize equal to
+ * decodedBodySize.
+ *
+ * It only shows up on a phone. Over localhost the bytes are free and this is
+ * pure overhead; over `npm run dev:https` on the LAN it is the difference
+ * between a map that appears and one you wait for — and the LAN is the whole
+ * point of dev:https, since a phone needs a secure context for geolocation.
+ *
+ * PER REQUEST RATHER THAN CACHED, deliberately, which is the opposite of the
+ * choice server/wire.js makes for the API payloads. Those are constants read
+ * once at boot; these are transformed on demand and change under HMR every time
+ * a file is saved, so a cache keyed on anything would be a staleness bug in
+ * exchange for CPU that a single developer's laptop is not short of.
+ *
+ * `text/event-stream` is excluded because that is how Vite pushes HMR updates
+ * to the client. Buffering a stream that exists to deliver events the moment
+ * they happen breaks it — the updates arrive when the buffer flushes, or not at
+ * all.
+ */
+function devCompression() {
+  return {
+    name: 'mapper-dev-compression',
+    apply: 'serve',
+    configureServer(server) {
+      const gzip = compression({
+        filter: (req, res) => {
+          const type = res.getHeader('Content-Type') ?? '';
+          if (String(type).includes('text/event-stream')) return false;
+          return compression.filter(req, res);
+        },
+      });
+      // Before Vite's own middlewares rather than after, so the wrapper is
+      // around the response by the time anything writes to it.
+      server.middlewares.use(gzip);
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
+    devCompression(),
     tailwindcss(),
     // Spread rather than a falsy entry: Vite accepts `false` in the array, but
     // an unconditional basicSsl() would flip HTTPS on for plain `npm run dev`

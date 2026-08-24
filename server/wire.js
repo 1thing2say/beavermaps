@@ -9,6 +9,8 @@
 
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 
 /**
  * `no-cache` means "you may cache this, but ask before reusing it" — not "do
@@ -40,10 +42,14 @@ export function etagFor(raw) {
   return `W/"${raw.length.toString(16)}-${hash}"`;
 }
 
-/** One payload, in both the forms a client might ask for it in. */
-export function wireForm(value) {
-  const raw = Buffer.from(JSON.stringify(value));
+/** Bytes, in both the forms a client might ask for them in. */
+export function wireBytes(raw) {
   return { raw, gzip: gzipSync(raw, { level: 6 }), etag: etagFor(raw) };
+}
+
+/** The same, for something that still has to be turned into JSON first. */
+export function wireForm(value) {
+  return wireBytes(Buffer.from(JSON.stringify(value)));
 }
 
 /**
@@ -84,4 +90,94 @@ export function sendWire(req, res, wire) {
   // progress bar can read.
   res.set('Content-Length', String(body.length));
   return res.end(body);
+}
+
+// ---------------------------------------------------------------------------
+// The built front-end
+// ---------------------------------------------------------------------------
+
+/**
+ * Which built files are worth compressing.
+ *
+ * Everything Vite emits into dist/ is text except the images, and an already
+ * compressed PNG only gets bigger for the trouble. `.gz` is here because a
+ * precompressed file would be double-encoded.
+ */
+const COMPRESSIBLE = /\.(js|mjs|css|html|json|svg|map|txt|webmanifest)$/i;
+
+/**
+ * Below this, gzip is not worth its own framing — the header and trailer are
+ * about 20 bytes and a small file barely shrinks. It is also the size at which
+ * a saving stops being visible on any connection.
+ */
+const MIN_COMPRESS = 1024;
+
+/**
+ * Serve dist/ compressed, and tell caches how long each file is good for.
+ *
+ * A layer IN FRONT of express.static rather than a replacement for it. It
+ * answers only the case it improves — a compressible file, to a client that
+ * asked for gzip — and calls next() for everything else, so ranges, HEAD,
+ * directory indexes, 304s and the traversal guards stay express.static's
+ * problem rather than becoming mine.
+ *
+ * MEMOISED ON mtime AND SIZE, so `npm run build` is picked up without a restart
+ * while a file that has not changed is compressed once no matter how many
+ * phones ask for it. That is the same reasoning as the API payloads above and
+ * the opposite conclusion from the dev server's, which compresses per request
+ * because its bytes change every time a file is saved. The difference is
+ * whether the thing being served holds still.
+ *
+ * CACHING IS THE OTHER HALF and is worth as much as the compression on a second
+ * visit. Vite writes a content hash into every asset filename, so those bytes
+ * can never change under that name and are safe to keep for a year — `immutable`
+ * says so explicitly, which stops a browser revalidating them on a reload.
+ * index.html is the one file with a stable name, and it is what names the
+ * hashed assets, so it has to be re-asked for every time or a rebuild is
+ * invisible.
+ */
+export function compressedStatic(dir) {
+  const cache = new Map();
+
+  return function serveCompressed(req, res, next) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    if (!COMPRESSIBLE.test(req.path)) return next();
+    if (!acceptsGzip(req.headers['accept-encoding'])) return next();
+
+    // The traversal guard: a resolved path that is not inside dir is not ours,
+    // whatever it looks like. express.static does this too — this middleware
+    // just must not be the hole in it.
+    const file = path.resolve(dir, `.${req.path}`);
+    if (file !== dir && !file.startsWith(dir + path.sep)) return next();
+
+    let stat;
+    try {
+      stat = statSync(file);
+    } catch {
+      return next();                       // missing, or not a file we can read
+    }
+    if (!stat.isFile() || stat.size < MIN_COMPRESS) return next();
+
+    const stamp = `${stat.mtimeMs}:${stat.size}`;
+    let entry = cache.get(file);
+    if (entry?.stamp !== stamp) {
+      entry = { stamp, ...wireBytes(readFileSync(file)) };
+      cache.set(file, entry);
+    }
+
+    // A hashed name cannot change its contents, so it never needs asking about
+    // again. Anything else — index.html above all — does.
+    const hashed = req.path.startsWith('/assets/');
+    res.set('Cache-Control', hashed ? 'public, max-age=31536000, immutable' : REVALIDATE);
+    res.set('Vary', 'Accept-Encoding');
+    res.set('ETag', entry.etag);
+    res.type(path.extname(req.path));
+
+    const asked = (req.headers['if-none-match'] ?? '').split(',').map((t) => t.trim());
+    if (asked.includes(entry.etag)) return res.status(304).end();
+
+    res.set('Content-Encoding', 'gzip');
+    res.set('Content-Length', String(entry.gzip.length));
+    return res.end(req.method === 'HEAD' ? undefined : entry.gzip);
+  };
 }
