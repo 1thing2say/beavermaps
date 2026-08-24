@@ -6,6 +6,7 @@ import pathFinderModule from 'geojson-path-finder';
 import { point, featureCollection } from '@turf/helpers';
 import { nearestPoint } from '@turf/nearest-point';
 import { buildManeuvers, FEET_PER_KM } from '../src/maneuvers.js';
+import { wireForm, sendWire } from './wire.js';
 
 // geojson-path-finder ships CommonJS with no "exports" map, so under bare Node
 // the default import is the module namespace rather than the class itself.
@@ -99,6 +100,44 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
+// What goes on the wire
+//
+// GeoJSON is decimal digits and punctuation, which is close to the most
+// compressible thing there is. The eight a cold load asks for were 1,988 KB
+// uncompressed and are 246 KB gzipped; src/basemap.json alone goes 1,577 KB to
+// 170. That was the single biggest cost in a cold load — measured in a
+// throttled browser against these very files, the overlays took 1,838 ms at
+// 8 Mbps before and 250 ms after.
+//
+// (The boot line below counts nine, not eight: /api/landcover is the older
+// partial extraction the sheet replaced, still served and no longer fetched.)
+//
+// COMPRESSED ONCE, AT BOOT, rather than per request. Every one of these is
+// already read once and held — see OVERLAYS — so they are constants, and a
+// generic compression middleware would re-gzip 1.6 MB of unchanging basemap for
+// every visitor. That is ~35 ms of server CPU per phone to produce a byte-wise
+// identical answer each time. Paying it here costs a few hundred milliseconds
+// of startup, once.
+//
+// /api/route is deliberately NOT here. It is the one response that cannot be
+// precomputed, and it is about 4 KB — gzip takes it to 1 KB, which is three
+// TCP segments saved on a request nobody is waiting 2 MB for. One mechanism,
+// applied where the bytes actually are.
+// ---------------------------------------------------------------------------
+
+const wireStart = Date.now();
+const WIRE = {
+  network: wireForm(network),
+  vertices: wireForm({ vertices }),
+  ...Object.fromEntries(Object.entries(OVERLAYS).map(([name, data]) => [name, wireForm(data)])),
+};
+console.log(
+  `[mapper] wire forms ready in ${Date.now() - wireStart}ms (` +
+  `${Math.round(Object.values(WIRE).reduce((n, w) => n + w.raw.length, 0) / 1024)} KB -> ` +
+  `${Math.round(Object.values(WIRE).reduce((n, w) => n + w.gzip.length, 0) / 1024)} KB gzipped)`
+);
+
+// ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
 const app = express();
@@ -145,30 +184,12 @@ function route(req, res) {
 app.get('/api/route', route);
 app.post('/api/route', route);
 
-/**
- * `no-cache` means "you may cache this, but ask before reusing it" — not "do
- * not cache". Express already puts an ETag on every JSON response, so the ask
- * costs one conditional request and comes back 304 with an empty body whenever
- * the data has not changed.
- *
- * This replaces `max-age=300`, which was five minutes during which the browser
- * would not even ask. Regenerating an overlay and reloading the page then
- * showed the old geometry with a fresh server sitting right there answering
- * correctly, and the only ways out were a hard reload or waiting it out. The
- * data is served from memory and changes only when a build script runs, so
- * revalidating is close to free and being stale is not.
- */
-const REVALIDATE = 'no-cache';
-
 // The client draws the path network but no longer bundles it — one copy, and
 // editing paths.json no longer means rebuilding the front-end.
 //
 // my campus's paths only. The approach network is deliberately not here: it is routed
 // over and never drawn. See the `approach` import above.
-app.get('/api/network', (_req, res) => {
-  res.set('Cache-Control', REVALIDATE);
-  res.json(network);
-});
+app.get('/api/network', (req, res) => sendWire(req, res, WIRE.network));
 
 /**
  * Every vertex in the routing graph, campus and approach alike, as bare pairs.
@@ -184,16 +205,10 @@ app.get('/api/network', (_req, res) => {
  * the framing costs more than the data: `{"type":"Feature","properties":{},…}`
  * around each of these is roughly six times the two numbers inside it.
  */
-app.get('/api/vertices', (_req, res) => {
-  res.set('Cache-Control', REVALIDATE);
-  res.json({ vertices });
-});
+app.get('/api/vertices', (req, res) => sendWire(req, res, WIRE.vertices));
 
-for (const [name, data] of Object.entries(OVERLAYS)) {
-  app.get(`/api/${name}`, (_req, res) => {
-    res.set('Cache-Control', REVALIDATE);
-    res.json(data);
-  });
+for (const name of Object.keys(OVERLAYS)) {
+  app.get(`/api/${name}`, (req, res) => sendWire(req, res, WIRE[name]));
 }
 
 app.get('/healthz', (_req, res) => res.json({ ok: true, vertices: vertices.length }));
