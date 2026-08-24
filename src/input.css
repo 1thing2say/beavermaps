@@ -3979,7 +3979,7 @@ body.no-dirbutton .g-directions {
        Both of them are in this corner now and nothing else is, which is what
        makes raising it safe: the zoom and locate buttons are in the opposite
        corner and stay under the card where they belong. 21 rather than 20 —
-       just past the column, not up among the boot splash.
+       one past the column, which is the only thing it has to clear.
 
        A row, because Mapbox floats these and two floated credits in a corner
        that is now only one line tall would stack rather than sit side by side.
@@ -4411,122 +4411,6 @@ body.no-dirbutton .g-directions {
     }
 }
 
-/* --- the boot splash ------------------------------------------------------- */
-
-/* Over everything, including Mapbox's own controls, until the map is up. Its
-   colours are the app's own tokens rather than fixed, so the splash is already
-   in the right theme at first paint instead of flashing white and correcting. */
-.g-boot {
-    position: fixed;
-    inset: 0;
-    z-index: 100;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 28px;
-    background: var(--g-surface);
-    /* The fade is on the way OUT only — see .g-boot--gone. Fading in would mean
-       the first thing a cold load shows is a blank page. */
-    transition: opacity 320ms ease-out;
-}
-
-.g-boot--gone {
-    opacity: 0;
-    pointer-events: none;
-}
-
-/* THE MARK IS 32 PIXELS AND IS DRAWN AT 128, and every one of those pixels is
-   meant to be seen. `image-rendering: pixelated` is the whole of that: the
-   browser's default is a smooth resample, which at 4x turns a hard-edged mark
-   into a blur of it. `crisp-edges` is the older spelling and is kept underneath
-   because Firefox spelled it that way first.
-
-   128 is a fixed multiple of the source rather than a percentage, so the
-   scaling stays a whole number of pixels and no row of the mark is a row and a
-   half — which is the one way to reintroduce the blur this is avoiding.
-
-   A BACKGROUND RATHER THAN AN <img>, and that is the theme and not taste. The
-   mark has three colours and no alpha in the file it came from: white ground,
-   black body, red dot. White becomes transparent in both variants, and the
-   BLACK has to become white on a dark ground or half the mark disappears. An
-   <img> can only choose its file with `prefers-color-scheme`, and this app's
-   theme is a `data-theme` attribute that JavaScript sets — the two disagree
-   whenever somebody has chosen a theme, and the first version of this
-   photographed as a white mark on a white page. A background-image is picked by
-   the same selectors every other themed thing here uses, so it cannot. */
-.g-boot-mark {
-    width: 128px;
-    height: 128px;
-    background-image: url('/src/logo.png');
-    background-size: 100% 100%;
-    background-repeat: no-repeat;
-    image-rendering: crisp-edges;
-    image-rendering: pixelated;
-}
-
-/* Dark by preference, unless a light theme has been chosen explicitly... */
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .g-boot-mark {
-        background-image: url('/src/logo-dark.png');
-    }
-}
-
-/* ...and dark by choice, which wins over the preference in both directions. */
-:root[data-theme="dark"] .g-boot-mark {
-    background-image: url('/src/logo-dark.png');
-}
-
-:root[data-theme="light"] .g-boot-mark {
-    background-image: url('/src/logo.png');
-}
-
-/* A conic sweep masked into a ring, which is one element and no JavaScript.
-   `mask` rather than a border so the fade goes all the way round rather than
-   living in one quadrant of a rotating arc. */
-.g-boot-spin {
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    background: conic-gradient(from 0deg, transparent 0%, var(--g-text-dim) 90%, var(--g-text-dim));
-    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
-    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
-    animation: g-boot-turn 900ms linear infinite;
-}
-
-@keyframes g-boot-turn {
-    to { transform: rotate(360deg); }
-}
-
-/* Somebody who asked for less motion has not asked for less information, so the
-   ring stays and stops — the same call src/spinner.js makes for its own. */
-@media (prefers-reduced-motion: reduce) {
-    .g-boot-spin { animation: none; }
-}
-
-/* ...and once the bundle is up, this box stops being a ring and becomes the
-   frame around the real one. See the handover in main.js.
-   ---------------------------------------------------------------------------
-   Everything the placeholder drew has to go, not just the animation: a conic
-   gradient still under spin.js's twelve spokes is two spinners at slightly
-   different speeds. `position: relative` is what the ring is swapped in FOR —
-   spin.js places its lines at top/left 50% absolutely and needs a containing
-   block, and giving it one here rather than inline keeps the geometry in the
-   stylesheet with the rest of the splash.
-
-   38px is the `md` spinner's drawn diameter — radius 9, lines reaching 7 past
-   it, 3 wide — so the box is the size of what is in it and the splash's 28px
-   flex gap measures from the right place. */
-.g-boot-spin.is-live {
-    width: 38px;
-    height: 38px;
-    position: relative;
-    background: none;
-    -webkit-mask: none;
-    mask: none;
-    animation: none;
-}
-
 /* --- touch targets ---------------------------------------------------------
 
    THE ONE THING THE PHONE LAYOUT ACTUALLY GOT WRONG. Audited at 320, 360, 390
@@ -4734,9 +4618,12 @@ body.no-dirbutton .g-directions {
 }
 
 /* 28px is a whole multiple of the 32px source only if it is 32 — so it is 32.
-   The mark is a pixel drawing and the boot splash draws it at 128 for the same
-   reason: any size that is not a whole multiple puts a row and a half of source
-   pixels into one row of screen and the hard edges go soft. See .g-boot-mark. */
+   The mark is a pixel drawing: any size that is not a whole multiple of the
+   source puts a row and a half of its pixels into one row of screen and the
+   hard edges go soft. `image-rendering` is the other half of the same point —
+   the browser's default is a smooth resample, which softens the mark even at
+   1:1 on a 2x display. `crisp-edges` is the older spelling, kept underneath
+   because Firefox spelt it that way first. */
 .g-navbar-mark {
     width: 32px;
     height: 32px;

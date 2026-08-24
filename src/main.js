@@ -317,66 +317,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // at the default view" is only answerable by asking the running map.
   if (import.meta.env.DEV) window.__map = map;
 
-  /**
-   * The boot splash, taken down.
-   *
-   * The mark and the ring are in index.html rather than built here, because a
-   * splash assembled by the bundle arrives after the wait it exists to cover.
-   * The ring is CSS for the same reason, so it turns at first paint instead of
-   * waiting for spin.js to arrive inside the bundle. All this does is arrange
-   * for the whole thing to go.
-   *
-   * IT GOES ON A RACE, not on one event, and that is deliberate. `map.on('load')`
-   * is the honest signal and is what normally wins; the timer behind it is there
-   * so that a style that never loads, a token that has expired or a throw
-   * somewhere above shows the app rather than a logo forever. A splash you can
-   * get stuck behind is worse than no splash.
-   */
-  const boot = document.getElementById('boot');
-  if (boot) {
-    // THE HANDOVER. The mark and a turning ring are on screen from first paint
-    // because both are CSS — that is what the ring in index.html is for, and on
-    // a cold load it is the only thing that can be, since spin.js is inside the
-    // bundle that has not arrived yet.
-    //
-    // But this line IS the bundle arriving. So the placeholder is spent now and
-    // the real spinner takes over for the rest of the wait, which is nearly all
-    // of it: the map's style, sprite, glyphs and eight overlay requests all
-    // happen after this point. What was a stand-in for seconds is now a stand-in
-    // for the handful of milliseconds before this statement runs.
-    //
-    // Same object either way — twelve fading spokes is spin.js's shape and the
-    // conic ring was drawn to read as it — so the swap is not something you can
-    // see happen. It is the difference between a ring that only looks like the
-    // app's spinner and the app's spinner.
-    const bootRing = boot.querySelector('.g-boot-spin');
-    let stopBootSpin = null;
-    if (bootRing) {
-      bootRing.classList.add('is-live');
-      stopBootSpin = spin(bootRing, { size: 'md' });
-    }
-
-    let gone = false;
-    const dismissBoot = () => {
-      if (gone) return;
-      gone = true;
-      // Before the fade rather than after the removal: twelve animating divs
-      // left running behind a display:none splash are twelve animations nobody
-      // is looking at.
-      stopBootSpin?.();
-      boot.classList.add('g-boot--gone');
-      // After the fade, not with it: removing the node immediately would cut
-      // the transition off at its first frame.
-      setTimeout(() => boot.remove(), 400);
-    };
-    map.once('load', dismissBoot);
-    // The floor is a beat rather than zero, so a warm reload does not flash the
-    // mark for one frame — which reads as a glitch rather than as a splash.
-    const shown = performance.now();
-    map.once('load', () => setTimeout(dismissBoot, Math.max(0, 450 - (performance.now() - shown))));
-    setTimeout(dismissBoot, 8000);
-  }
-
   // The path network now arrives from the server rather than the bundle, so
   // these start empty.
   let customNetwork = null;

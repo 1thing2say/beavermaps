@@ -13,9 +13,13 @@
          that attribute is set by src/theme.js — which is inside a bundle a
          megabyte and a half long. So the first paint happens at the light
          defaults whatever the device asked for, and a dark-mode visitor gets a
-         white flash followed by a correction. The boot splash below made that
-         impossible to ignore: it drew its white ground under a mark that had
-         already picked its dark variant.
+         white flash followed by a correction.
+
+         THAT MATTERS MORE NOW THAT NOTHING COVERS THE LOAD. There used to be a
+         splash over the whole viewport; the page itself is what a cold load
+         shows, and `--g-surface` on <body> is the ground the map fades in over.
+         Get this attribute wrong and that ground is the wrong colour for the
+         length of the load, with the chrome floating over it in the right one.
 
          Duplicated here rather than imported, deliberately, because anything
          importable arrives too late by definition — this has to run before the
@@ -25,11 +29,8 @@
          AND RESOLVING IS THE POINT. This used to write the stored MODE, "auto"
          included — and `data-theme="auto"` is a value no selector in the
          stylesheet matches, so every token fell back to the light palette until
-         the bundle landed. The splash was worse off than if this script had
-         never run: .g-boot-mark picks its variant from `prefers-color-scheme`
-         and had already switched to the white-bodied dark mark, so a dark-mode
-         phone got that mark on a white ground and the logo simply vanished for
-         the length of the load, with the spinner beside it grey-on-grey.
+         the bundle landed — which is the white flash this exists to prevent,
+         happening anyway, out of a script written to prevent it.
 
          theme.js stores the mode and applies the THEME — see applyThemeAttribute
          — so "auto" was never a value this attribute should hold. -->
@@ -72,31 +73,6 @@
 -->
 
 <body class="g-body">
-
-    <!-- The boot splash, which is markup rather than a thing main.js builds.
-         The bundle is a megabyte and a half and the map is a network away, so
-         anything constructed in JavaScript arrives after the wait it exists to
-         cover. This is in the document, so it is on screen at first paint.
-
-         Removed by main.js the moment the map reports itself loaded — see
-         `dismissBoot`. It also removes ITSELF on a timer, so a build that
-         throws before the map exists shows a page rather than a logo forever. -->
-    <div id="boot" class="g-boot">
-        <div id="boot-logo" class="g-boot-mark" role="img" aria-label="beavermaps"></div>
-        <!-- spin.js's spinner goes here — main.js starts one in this box the
-             moment the bundle is up, which is nearly the whole of the wait.
-             What is drawn in CSS is only what covers the milliseconds BEFORE
-             that: spin.js lives in the bundle, so a ring it draws cannot appear
-             until the bundle has, and on a throttled load that is seconds after
-             the mark with the splash sitting there looking stuck at exactly the
-             moment it is meant to say "working".
-
-             The two are the same drawing on purpose — twelve fading spokes is
-             spin.js's shape and a conic-gradient ring reads as the same object
-             — so the handover is not something you can see. See .g-boot-spin
-             and .is-live in src/input.css. -->
-        <div class="g-boot-spin" aria-hidden="true"></div>
-    </div>
 
     <!-- The top bar, which is off unless the debug menu asks for it.
          ======================================================================
