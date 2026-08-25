@@ -153,6 +153,11 @@
        Classic has no material to thicken, so both of these are its card. */
     --g-card-bg-thick: var(--g-card-bg);
     --g-card-filter-thick: none;
+    /* No tiers here. The classic look has no material to have tiers of —
+       a card is an opaque sheet — but the tokens have to exist, or a rule
+       written for one look falls through to nothing in the other. */
+    --g-card-bg-thin: var(--g-card-bg);
+    --g-card-filter-thin: none;
 
     /* The fill of a control that sits ON a surface rather than over the map: a
        search field inside a sheet, and nothing else yet. Both systems have one
@@ -376,10 +381,78 @@
        (the page background, a label halo, a browser without backdrop-filter). */
     --g-surface: #ffffff;
     --g-surface-2: #f2f2f7;
-    --g-card-bg: rgba(255, 255, 255, 0.68);
-    --g-card-filter: saturate(220%) blur(30px);
-    --g-card-bg-thick: rgba(255, 255, 255, 0.88);
-    --g-card-filter-thick: saturate(130%) blur(30px);
+    /* THE MATERIAL, read off maps.apple.com rather than recalled.
+       ------------------------------------------------------------------
+       Their whole system, from the stylesheets the site actually serves
+       (maps-app-web-client/_common.css and /static/shell.css), is four
+       lines long:
+
+           .mw-card       backdrop-filter: blur(50px);  background #fff9 / #0009
+           .mw-nav-bar    backdrop-filter: blur(50px);  background #fffc / #0009
+           .mw-popover,
+           .mw-zoom-*,
+           .mw-user-location-control,
+           .mw-map-type-control
+                          backdrop-filter: blur(15px);  background #fffc / #0009
+
+       and every one of them sits inside an `@supports (backdrop-filter:
+       blur(...))` with an opaque fallback (#fdfdfd / #121212 for the
+       controls, #f2f2f2 / #2b2b2b for the cards) outside it.
+
+       TWO THINGS IN THAT ARE NOT WHAT THIS FILE ASSUMED.
+
+       There is no `saturate()`. Not on one rule, not anywhere in 450 KB of
+       their CSS — the only filter functions they use at all are
+       `brightness(85%)` on some artwork. The "blur + saturate(180%)"
+       recipe every article about this material repeats is not what Apple
+       ships. These tokens carried saturate(220%) in light and 167% in
+       dark, which over a map is a real effect: the ground under the glass
+       came out more colourful than the ground beside it, so the panel read
+       as a filter laid on the map rather than as a pane in front of it.
+
+       And the blur is not one number. Theirs is 50px on anything the size
+       of a card and 15px on a floating control, which is a 3.3x range —
+       this file had a flat 30px, i.e. too soft for a 44px button and far
+       too hard for a sidebar. The difference is most of what makes their
+       big surfaces read as frosted and their small ones as tinted.
+
+       So: three tiers, no saturation.
+
+         --g-card-filter        cards, menus, lists, the sidebar
+         --g-card-filter-thick  the phone sheet, which is the same 50px —
+                                what makes it "thick" is its alpha, since
+                                it is full-bleed over one flat field of
+                                colour and a card's alpha reads as a stain
+         --g-card-filter-thin   the small floating controls
+
+       WHAT IS DELIBERATELY NOT COPIED is the alpha in the dark theme and
+       the mobile sheet. Apple's dark material is #0009 — 60% pure BLACK —
+       where ours is a 46,46,49 grey at 80%, and their phone tray is not
+       glass at all (`backdrop-filter: unset`, an opaque #2b2b2b). Both are
+       theirs to choose and both would undo decisions this app made on
+       purpose: the ink contrasts in this block are composited against
+       these alphas, and the sheet being a material rather than a panel is
+       the whole point of the look. The rim and the sheen below stay too —
+       maps.apple.com draws neither, because it is running the older
+       vibrancy material and this app is dressed as iOS 26, which adds a
+       specular edge on top of exactly the blur described above. */
+    /* OPAQUE HERE, TRANSLUCENT IN THE @supports BLOCK BELOW, which is the
+       third thing their stylesheet does that this one did not. Every
+       backdrop-filter on maps.apple.com is inside `@supports`, and the
+       value outside it is not a thinner glass — it is a solid colour.
+
+       It has to be. A material is a blur AND an alpha, and the alpha alone
+       is not a weaker version of the pair: it is a card you can read the
+       map through. Without the guard, a browser that does not composite
+       backdrop-filter — Firefox before 103, an older Safari, a machine
+       where the compositor has fallen back to software — got 68% white
+       with roads running under the text. */
+    --g-card-bg: var(--g-surface-2);
+    --g-card-filter: blur(50px);
+    --g-card-bg-thick: var(--g-surface-2);
+    --g-card-filter-thick: blur(50px);
+    --g-card-bg-thin: var(--g-surface);
+    --g-card-filter-thin: blur(15px);
     /* tertiarySystemFill. Grey at an alpha rather than a colour, so it darkens
        whatever sheet it lands on by the same amount in either theme. */
     --g-fill: rgba(118, 118, 128, 0.12);
@@ -456,13 +529,15 @@
        map, which is the whole defect. A control has to sit above its ground to
        look like it is sitting on it. At 0.80 over that land this lands L 21,
        three points proud, which is where the reference keeps its own. */
-    --g-card-bg: rgba(46, 46, 49, 0.80);
-    --g-card-filter: saturate(167%) blur(30px);
+    --g-card-bg: var(--g-surface-2);
+    --g-card-filter: blur(50px);
+    --g-card-bg-thin: var(--g-surface-2);
+    --g-card-filter-thin: blur(15px);
     /* And the sheet, for the same reason and by the same arithmetic: near-black
        glass over a near-black map is not a sheet, it is a hole with type in it.
        L 15.6, which reads as a dark panel rather than as an absence. */
-    --g-card-bg-thick: rgba(38, 38, 41, 0.92);
-    --g-card-filter-thick: saturate(120%) blur(30px);
+    --g-card-bg-thick: var(--g-surface-2);
+    --g-card-filter-thick: blur(50px);
     --g-fill: rgba(118, 118, 128, 0.24);
 
     --g-text: #ffffff;
@@ -502,6 +577,43 @@
        on opposite sides of the renderer. It moved from a warm #1e1e1b to this
        when the night ground went cool. */
     --g-label-halo: #20242e;
+}
+
+/* ...AND THE GLASS ITSELF, ONLY WHERE THERE IS A COMPOSITOR TO DRAW IT.
+   ---------------------------------------------------------------------------
+   The two blocks above define the Apple look's surfaces as OPAQUE. This is the
+   only place the app is translucent, and it is gated the way maps.apple.com
+   gates every one of theirs: a `@supports` on the property itself, with a solid
+   colour outside it.
+
+   The pairing is what matters. A material is a blur and an alpha together, and
+   the alpha on its own is not a weaker version of it — it is a card you can
+   read the map through. Ungated, a browser that does not composite
+   backdrop-filter drew 68% white with roads running under the text.
+
+   Both themes in one block, and both after their own, so the cascade lands the
+   right way round: these selectors are the same specificity as the ones above
+   and win on order.
+
+   THE VALUES ARE THE MEASURED ONES and the arithmetic behind them is in the
+   comments above, where the token is introduced — 0.80 in dark because black at
+   0.685 over an L 18.3 night map renders L 6.4, darker than the ground it is
+   meant to sit on; 0.92 for the sheet because it is full-bleed over one flat
+   field and a card's alpha reads as a stain across that much area. Apple's own
+   are #fff9 / #fffc / #0009, which is where the light values come from and is
+   what the dark ones deliberately depart from. */
+@supports ((-webkit-backdrop-filter: blur(50px)) or (backdrop-filter: blur(50px))) {
+    :root[data-skin="apple"] {
+        --g-card-bg: rgba(255, 255, 255, 0.68);
+        --g-card-bg-thick: rgba(255, 255, 255, 0.88);
+        --g-card-bg-thin: rgba(255, 255, 255, 0.80);
+    }
+
+    :root[data-skin="apple"][data-theme="dark"] {
+        --g-card-bg: rgba(46, 46, 49, 0.80);
+        --g-card-bg-thick: rgba(38, 38, 41, 0.92);
+        --g-card-bg-thin: rgba(46, 46, 49, 0.80);
+    }
 }
 
 :root[data-theme="dark"] {
@@ -2981,10 +3093,10 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
    .mapboxgl-control-container for the same 0-3-0 reason the margin reset above
    needs: mapbox-gl.css is injected after this file and wins every tie. */
 [data-skin="apple"] .mapboxgl-control-container .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
-    background-color: var(--g-card-bg);
+    background-color: var(--g-card-bg-thin);
     background-image: var(--g-sheen);
-    -webkit-backdrop-filter: var(--g-card-filter);
-    backdrop-filter: var(--g-card-filter);
+    -webkit-backdrop-filter: var(--g-card-filter-thin);
+    backdrop-filter: var(--g-card-filter-thin);
     box-shadow: var(--g-shadow-sm), var(--g-rim);
 }
 
@@ -3052,10 +3164,10 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
    printing the word under it. */
 [data-skin="apple"] .g-layers-btn {
     border: 0;
-    background-color: var(--g-card-bg);
+    background-color: var(--g-card-bg-thin);
     background-image: var(--g-sheen);
-    -webkit-backdrop-filter: var(--g-card-filter);
-    backdrop-filter: var(--g-card-filter);
+    -webkit-backdrop-filter: var(--g-card-filter-thin);
+    backdrop-filter: var(--g-card-filter-thin);
     box-shadow: var(--g-shadow), var(--g-rim);
     color: var(--g-text);
 }
