@@ -4667,9 +4667,51 @@ body.no-dirbutton .g-directions {
     .g-search:has(#place-results:not(.hidden)) .g-shelf-title,
     .g-topleft:has(> .g-panel:not(.hidden)) .g-browse,
     .g-topleft:has(> .g-panel:not(.hidden)) .g-shelf-title,
+    /* THE SHELF GOES WITH THEM, and it did not. This rule listed the heading
+       and the grid and left the four shortcut rows behind it, so picking
+       Restrooms off the grid gave you a sheet holding four buildings you were
+       not looking at, and then, under them, the restrooms you asked for. */
+    .g-topleft:has(> .g-panel:not(.hidden)) .g-shortcuts,
     /* No shelf, no heading for it. renderShortcuts hides the row when the
        suggestion list holds the same names. */
     .g-search:has(#place-shortcuts.hidden) .g-shelf-title {
+        display: none;
+    }
+
+    /* A PANEL'S HEAD IS THE SHEET'S TITLE NOW, so it is set like one.
+       ------------------------------------------------------------------
+       16px medium is right for a card in a sidebar, where it is one heading
+       among four and the column itself is the frame. With one panel at a time
+       it is the only heading on screen and it names what the whole sheet is
+       about — "Restrooms", "Welcome and Support Center" — so it takes the same
+       20px semibold the sections of the home page use. Anything less and the
+       sheet reads as a list that arrived from nowhere.
+
+       The sub goes up a point with it and stays dim: at 12px under a 20px
+       title it was a caption on a heading rather than the second line of one. */
+    .g-topleft > .g-panel .g-panel-title {
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+
+    .g-topleft > .g-panel .g-panel-sub {
+        margin-top: 3px;
+        font-size: 13px;
+    }
+
+    /* ONE PANEL AT A TIME.
+       ------------------------------------------------------------------
+       `data-front` is written by src/sheet-stack.js onto whichever panel was
+       opened last, and only while the column is a sheet — above the breakpoint
+       the attribute is not written at all, which is why this rule lives inside
+       the phone block and not beside .g-panel.
+
+       Everything else that is open stays open and keeps its state; it is simply
+       not the thing the sheet is currently about. Closing the front one is what
+       brings it back, which is why there is no back button: the dismiss in each
+       panel's head already is one. */
+    .g-topleft[data-depth] > .g-panel:not(.hidden):not([data-front]) {
         display: none;
     }
 

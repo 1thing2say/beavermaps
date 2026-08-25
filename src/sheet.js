@@ -357,5 +357,22 @@ export function createSheet({ el, grip, enabled }) {
     apply(detent);
   }
 
-  return { refit, apply: (name) => apply(name), get detent() { return detent; } };
+  /**
+   * Open the sheet at least this far, and never close it further.
+   *
+   * What a panel arriving asks for. A card that opens while the sheet is
+   * collapsed has to be reachable, and a card that opens while the sheet is
+   * already full must not knock it back down to half — so this is a floor
+   * rather than a set. Measured, not compared by name: `rest` is content-sized
+   * and can be TALLER than `half` when the thing that just opened is a long
+   * place card, and in that case the right answer is to leave it alone.
+   */
+  function atLeast(name) {
+    if (!enabled()) return;
+    const heights = measure();
+    if (heights[detent] >= heights[name]) return;
+    apply(name, heights);
+  }
+
+  return { refit, atLeast, apply: (name) => apply(name), get detent() { return detent; } };
 }

@@ -38,6 +38,7 @@ import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
 import { createSkinControl, preferredSkin, applySkinAttribute } from './skin.js';
 import { createSheet } from './sheet.js';
+import { createSheetStack } from './sheet-stack.js';
 import { googleGround } from './google-tiles.js';
 import { canFlyOver, framing, footprintExtent, roofOf, massOf } from './flyover.js';
 import { createFlyover } from './flyover-view.js';
@@ -3339,9 +3340,42 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     enabled: () => phone.matches,
   });
   sheet.refit();
-  phone.addEventListener('change', () => sheet.refit());
-  window.addEventListener('resize', () => sheet.refit());
-  viewport?.addEventListener('resize', () => sheet.refit());
+
+  /**
+   * ...and make it show one thing at a time.
+   *
+   * The sheet's children are a column, which is what a sidebar is and what a
+   * phone is not: full width, a place card, a category's results and a route
+   * form all up at once is a pile with two close buttons in it and no way to
+   * tell which one the sheet is about. See src/sheet-stack.js — it keeps the
+   * order they were opened in and shows the last, so each panel's own dismiss
+   * is also the way back to the one underneath it.
+   *
+   * The closes are named here rather than found in the DOM because they are not
+   * interchangeable: clearing a category repaints a highlight and closes an
+   * animation, and closing a place card releases the flyover's WebGL canvas. A
+   * stack that synthesised a click on whatever button it found in the head
+   * would be guessing at both.
+   */
+  const sheetStack = createSheetStack({
+    el: document.getElementById('top-left'),
+    enabled: () => phone.matches,
+    panels: [
+      { el: placePanel, dismiss: closePlaceCard },
+      { el: categoryPanel, dismiss: clearCategory },
+      { el: sidePanel, dismiss: () => toggleRoutePanel(false) },
+      { el: legendPanel, dismiss: () => toggleLegendPanel(false) },
+    ],
+    // A panel that arrives while the sheet is collapsed is a panel nobody can
+    // read. A floor rather than a set, so one opening over a sheet already
+    // pulled to full does not knock it back down.
+    onFront: (panel) => { if (panel) sheet.atLeast('half'); },
+  });
+
+  const refitSheet = () => { sheet.refit(); sheetStack.refit(); };
+  phone.addEventListener('change', refitSheet);
+  window.addEventListener('resize', refitSheet);
+  viewport?.addEventListener('resize', refitSheet);
 
   /**
    * Empty a surface only once it has finished leaving.
