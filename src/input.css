@@ -3751,12 +3751,18 @@ body.no-dirbutton .g-directions {
     padding: 7px 12px;
 }
 
-/* --- the sheet's wordmark --------------------------------------------------
+/* --- the sheet's head ------------------------------------------------------
 
-   OFF EVERYWHERE BUT A PHONE. Above the phone breakpoint the field is the head
-   of a sidebar, and a wordmark over it is a title on a page whose <title> is
-   already the same word. It is turned back on in the phone block, where the
-   column is a bottom sheet and its resting state needs to say what it is. */
+   OFF EVERYWHERE BUT A PHONE, both of them. Above the phone breakpoint the
+   field is the head of a sidebar: a wordmark over it is a title on a page whose
+   <title> is already the same word, and a grabber is an offer to drag something
+   that is not a sheet and does not move. Both are turned back on in the phone
+   block, where the column IS a bottom sheet — one to say what it is, one to
+   take hold of it by. */
+.g-sheet-grip {
+    display: none;
+}
+
 .g-sheet-brand {
     display: none;
     align-items: center;
@@ -4251,26 +4257,142 @@ body.no-dirbutton .g-directions {
         display: none;
     }
 
-    /* THE GRABBER, drawn by the head rather than added to the markup.
+    /* THE GRABBER, and the strip of sheet it owns.
        ------------------------------------------------------------------
-       .g-search is always the first child and always present, so its ::before
-       is reliably the top of the sheet and no element has to exist to hold a
-       6px pill.
+       It used to be `.g-search::before` — 36x5 of dim ink drawn because every
+       phone sheet draws one, with a note under it admitting it was "a signifier
+       and not yet a gesture". It is a gesture now, so it is an element: see
+       #sheet-grip in index.html and src/sheet.js.
 
-       IT IS A SIGNIFIER AND NOT YET A GESTURE. The sheet does grow and shrink
-       — on focus, on a result, on a card — but it grows because its contents
-       changed, not because anything was dragged. This says "the thing you are
-       looking at is a sheet", which is true, and it is what the reference
-       draws; it does not yet promise a drag that is not implemented. */
-    .g-search::before {
-        content: "";
-        display: block;
+       THE HIT AREA IS THE STRIP, NOT THE PILL. 36x5 is a target nobody can hit
+       and it is not what you aim at anyway — you put your thumb at the top of
+       the sheet. So the button spans the full width and is 26px tall, the pill
+       is drawn inside it, and the whole band answers a press.
+
+       `touch-action: none` is the load-bearing line. The sheet scrolls, and a
+       scroller claims a vertical drag before any handler sees it; this says the
+       browser has no gesture of its own here, which is what makes the grabber
+       the one place a drag is ALWAYS the sheet. Everywhere else src/sheet.js has
+       to decide, and gives the tie to the scroller.
+
+       No hover or press treatment: it is a 5px pill, and a grabber that lights
+       up is a grabber pretending to be a button. What it does carry is a focus
+       ring, because it is reachable from a keyboard and a focused control that
+       shows nothing is a control that has vanished. */
+    .g-sheet-grip {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+        width: 100%;
+        height: 26px;
+        padding: 0;
+        border: 0;
+        background: none;
+        touch-action: none;
+        /* The pill is the only thing drawn here and it is small; without this
+           the band reads as a dead zone above the wordmark rather than as the
+           top of the sheet you can take hold of. */
+        cursor: grab;
+    }
+
+    .g-topleft.is-dragging .g-sheet-grip {
+        cursor: grabbing;
+    }
+
+    .g-sheet-grabber {
         width: 36px;
         height: 5px;
-        margin: -4px auto 8px;
         border-radius: 999px;
         background: var(--g-text-dim);
         opacity: 0.35;
+    }
+
+    /* The head loses the margin the pseudo-element used to hold, since the
+       grabber is its own row above it now. */
+    .g-search {
+        padding-top: 4px;
+    }
+
+    /* THE DETENTS, and what changes at each of them.
+       ------------------------------------------------------------------
+       `data-detent` is written by src/sheet.js and exists only while the sheet
+       is drivable, which is why the height cap is lifted on the attribute
+       rather than in the block above: with no script, no attribute, and the
+       sheet is the content-sized 62dvh-capped box it has always been. That is
+       the fallback, and it is the same thing `rest` is.
+
+       Only `half` and `full` carry an inline height. At `rest` the script
+       REMOVES it, so a card opening still grows the sheet on its own — the
+       behaviour every measurement in this block was tuned against. */
+    .g-topleft[data-detent="half"],
+    .g-topleft[data-detent="full"] {
+        max-height: none;
+    }
+
+    /* The sheet moves under its own curve, and only when it is not being
+       dragged: a transition on a height that is being written every frame from
+       a finger is a sheet that lags the thumb holding it. Same duration and
+       easing as the control stack that rides above it, so the two travel
+       together rather than one chasing the other. */
+    .g-topleft {
+        transition: height 240ms var(--g-ease-sheet);
+    }
+
+    .g-topleft.is-dragging {
+        transition: none;
+    }
+
+    /* The chips come back at any height above the resting one.
+       ------------------------------------------------------------------
+       They were put behind the field's focus when the sheet was rebuilt, which
+       was the right call for a sheet with one state and a real cost noted at
+       the time: at rest it offered nowhere to go. A sheet you can open is the
+       other answer to that — dragging it up is a request for more of it, and
+       what "more" means when there is nothing found yet is the eight ways in.
+
+       This is Apple's arrangement too. Their collapsed sheet is a wordmark and
+       a field; the one you drag up is Find Nearby. */
+    .g-topleft[data-detent="half"] .g-shortcuts:not(.hidden),
+    .g-topleft[data-detent="full"] .g-shortcuts:not(.hidden) {
+        /* ...AND THEY STOP BEING A SHELF AND BECOME A LIST.
+           --------------------------------------------------------------
+           The horizontal row is right where it is a row: under a focused
+           field it is a strip of suggestions above a keyboard, and the
+           chips past the right edge cost nothing because the list below is
+           the real answer. Dragged open there is no keyboard, no list, and
+           a whole sheet of room — and a four-item scroller across the top
+           of it, with the fourth item cut off, is the one arrangement that
+           manages to look emptier than nothing.
+
+           A column rather than a two-up grid, which is what Apple uses for
+           Find Nearby and what this tried first. Their labels are one word
+           — Coffee, Parking, Hotels — and ours are the names of buildings:
+           "Welcome and Support Center" is 26 characters and does not fit in
+           half of a 390px sheet. The row that scrolls exists precisely so
+           these names are never truncated (see .g-shortcut), and a grid
+           would truncate every one of them. */
+        display: grid;
+        gap: 8px;
+        /* The shelf's negative margins go with the shelf. They exist so a
+           scrolling row bleeds to both edges of the sheet; a list of rows is
+           inset with everything else in the head. */
+        margin: 12px 0 0;
+        padding: 0;
+        overflow: visible;
+    }
+
+    .g-topleft[data-detent="half"] .g-shortcuts .g-shortcut,
+    .g-topleft[data-detent="full"] .g-shortcuts .g-shortcut {
+        height: 44px;
+        /* A button centres its label; a row does not. */
+        text-align: left;
+        padding: 0 16px;
+        /* The capsule goes with the shelf. A full-width 44px capsule reads as
+           a pill someone stretched; at this size and this width it is a row,
+           and a row in this app has the card's own corner. */
+        border-radius: var(--g-radius-sm);
+        font-size: 15px;
     }
 
     /* A FIELD INSIDE A SURFACE IS FILLED, not floated.

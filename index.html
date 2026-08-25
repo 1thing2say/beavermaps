@@ -184,6 +184,35 @@
                  sheet work: the sheet's contents are this and then whatever has
                  been found, in that order, so a list or a card arrives
                  underneath the field rather than displacing it. -->
+            <!-- THE GRABBER, and it is a control now rather than a picture of
+                 one.
+                 ==================================================================
+                 It was a `::before` on .g-search: 36x5 of rounded dim ink, drawn
+                 because every phone sheet draws one. Which made it a promise the
+                 app did not keep — the sheet grew when its contents grew and
+                 answered a finger with nothing.
+
+                 A real element because a pseudo-element cannot be hit-tested,
+                 focused or labelled, and this needs all three. It is the one
+                 part of the sheet that is ALWAYS a sheet gesture: everywhere
+                 else a drag might belong to the list underneath it, and here it
+                 never does. `touch-action: none` in the stylesheet is what makes
+                 that true rather than merely intended.
+
+                 A button rather than a div with handlers, so it comes with the
+                 keyboard for free: Enter and Space cycle to the next detent, the
+                 same as a tap, and src/sheet.js adds the arrows on top because a
+                 sheet has a direction and cycling through the top to get back
+                 down is not one.
+
+                 Phone-only, like the wordmark under it. Above the breakpoint
+                 this column is a sidebar and there is nothing to grab. -->
+            <button id="sheet-grip" type="button" class="g-sheet-grip"
+                    aria-controls="top-left" aria-expanded="false"
+                    aria-label="Resize the sheet">
+                <span class="g-sheet-grabber" aria-hidden="true"></span>
+            </button>
+
             <div class="g-search g-card">
                 <!-- The sheet's head, and phone-only — `display: none` above the
                      phone breakpoint, where the field is the top of a sidebar

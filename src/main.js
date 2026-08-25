@@ -36,6 +36,7 @@ import { createThemeControl, preferredTheme, applyThemeAttribute } from './theme
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
 import { createSkinControl, preferredSkin, applySkinAttribute } from './skin.js';
+import { createSheet } from './sheet.js';
 import { googleGround } from './google-tiles.js';
 import { canFlyOver, framing, footprintExtent, roofOf, massOf } from './flyover.js';
 import { createFlyover } from './flyover-view.js';
@@ -3311,6 +3312,35 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     viewport.addEventListener('scroll', publishKeyboard);
     publishKeyboard();
   }
+
+  /**
+   * ...and make the sheet answer a finger.
+   *
+   * Everything above measures the sheet. This lets somebody move it: three
+   * detents, a drag off the grabber, a flick, and a tap for the next height.
+   * See src/sheet.js, which holds the whole gesture — nothing about it reaches
+   * back into this file, because a sheet that has to be told what is inside it
+   * is a sheet that has to be told again the next time a panel is added.
+   *
+   * `enabled` rather than a construct-on-demand, because the breakpoint can be
+   * crossed by turning a phone over. Above it the column is a sidebar with no
+   * detents, and `refit` is what takes the inline height back off so the
+   * stylesheet's own rules are the only ones in play there.
+   *
+   * Refitted on both viewports. The layout one moves on a rotation, the visual
+   * one on a keyboard — and the full detent is measured off the visual
+   * viewport, so a sheet held open while the keyboard arrives has to be
+   * re-clamped or its top ends up behind the keys.
+   */
+  const sheet = createSheet({
+    el: document.getElementById('top-left'),
+    grip: document.getElementById('sheet-grip'),
+    enabled: () => phone.matches,
+  });
+  sheet.refit();
+  phone.addEventListener('change', () => sheet.refit());
+  window.addEventListener('resize', () => sheet.refit());
+  viewport?.addEventListener('resize', () => sheet.refit());
 
   /**
    * Empty a surface only once it has finished leaving.
