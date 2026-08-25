@@ -2023,6 +2023,17 @@ body.navigating .app-chrome {
     gap: 2px;
 }
 
+/* Room for the dismiss, on the row it actually sits over.
+   ---------------------------------------------------------------------------
+   The × is absolutely positioned at the head's top right, so it overlaps the
+   FIRST endpoint and nothing else. Padding the whole head would take the width
+   off both rows to solve a collision that only one of them can have; this takes
+   it off the row the button is on. Nothing collided while the fields were 179px
+   wide — they were too short to reach anything. */
+.g-endpoint:first-child .g-endpoint-text {
+    padding-right: 40px;
+}
+
 .g-endpoint {
     display: flex;
     /* Top, not centre. The row was two lines of fixed height and centring the
@@ -2034,23 +2045,20 @@ body.navigating .app-chrome {
     gap: 12px;
 }
 
-/* ...and down to the value's own line, rather than sitting against the small
-   grey caption above it. 26px is the caption's line plus half the value's. */
+/* ...and centred on the field's own line.
+   ---------------------------------------------------------------------------
+   This was 21px, which was "the caption's line plus half the value's" — and the
+   caption is gone, so it was carrying the height of an element that is no
+   longer drawn and the dot sat a whole line below the text it marks. Half the
+   difference between the row's 26px field and this 12px mark. */
 .g-endpoint > .g-dot {
-    margin-top: 21px;
+    margin-top: 7px;
 }
 
 .g-endpoint-text {
     display: flex;
     flex-direction: column;
     min-width: 0;
-}
-
-.g-endpoint-label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: var(--g-text-dim);
 }
 
 .g-endpoint-value {
@@ -3876,7 +3884,43 @@ body.no-dirbutton .g-directions {
    Same markup, same class, same behaviour, and one fewer thing that can be
    clipped by a container it does not know about. */
 .g-endpoint-text {
+    /* FLEX: 1, and without it the field was 179px wide inside a 390px sheet.
+       ------------------------------------------------------------------
+       A flex item with no `flex` sizes to its content, and the content here is
+       an <input> asking for `width: 100%` — which resolves against a box whose
+       width is being decided by that same input. The circle breaks in the
+       browser's favour: it falls back to the control's INTRINSIC width, which
+       for a text input is about twenty characters. So both ends of every route
+       were a 20-character window regardless of how much room the panel had, and
+       "Welcome and Support Center" — 214px of text at this size — arrived as
+       "Welcome and Support C…" on a phone and in the 400px sidebar alike. */
+    flex: 1;
     min-width: 0;
+}
+
+/* THE LABELS COME OFF THE FACE OF IT and stay in the accessibility tree.
+   ---------------------------------------------------------------------------
+   They were 11px uppercase with 0.6px of tracking — STARTING POINT, DESTINATION
+   — above the value each one described. That is two lines of chrome per field
+   in the tightest box in the app, and it is not what any map does: Google's
+   directions rows are a dot, a square and two fields with placeholder text, and
+   Apple's are the same. The ring and the square already say which end is which,
+   in less space and in every language.
+
+   Hidden the accessible way rather than with `display: none`, which would take
+   the <label> out of the tree along with the picture of it and leave two inputs
+   named by nothing. The placeholders carry the visible half now — "Starting
+   point" and "Destination" rather than the "Not set" they used to say, which
+   named a state instead of the field. */
+.g-endpoint-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 .g-endpoint-results {
