@@ -906,6 +906,55 @@ export function relit(colour, target, mix, dim) {
  */
 const KEEP = new Set(['label', 'labelHalo', 'pinRing', 'style', 'lightPreset']);
 
+/**
+ * Does the ground under the campus follow the clock?
+ *
+ * A question about WHO IS DRAWING IT, which is why it takes a provider and not
+ * a preset.
+ *
+ * The time-of-day move below exists to keep two things in step, and only one of
+ * them is ours. Mapbox Standard relights its own city from a config value: the
+ * campus sheet is emissive and cannot be relit, so it is repainted instead, and
+ * the two arrive at the same hour by different routes. That is the whole reason
+ * `underPreset` exists — see the note on `litPalette` in src/main.js.
+ *
+ * Google's ground is a raster. A tile is a picture: it arrives already lit,
+ * there is no lighting model in front of it, and the only thing that decides
+ * its colours is the style array baked into the session token — which is keyed
+ * on the look and the theme and knows nothing about the sun. So under Google
+ * there is nothing on the other side of the move to stay in step WITH, and
+ * moving our half alone is not a match, it is the seam.
+ *
+ * Measured, at 21:00 on the dark theme with Google drawing: the city ground
+ * renders L 31.9 and the campus mask L 25.9, six points below the ground it is
+ * supposed to continue, with every other campus surface carried down with it.
+ * That is the "yucky contrast" — the college as a darker, bluer patch inside a
+ * lighter city, with the boundary drawn by the step rather than by anything on
+ * the map.
+ *
+ * The two halves are already authored to agree exactly: GROUND_STYLE's land is
+ * #374d64 at L 31.9 and `mask` is #3c4c5e at L 31.7, two tenths of a point
+ * apart, and test/skin.test.js holds them there. What that test asserts of the
+ * TABLES was not true of the SCREEN, because nothing was checking the palette
+ * the app actually paints with. It is now.
+ *
+ * WHAT THIS GIVES UP is the sun, under one provider: a Google map no longer
+ * warms at dawn or cools at dusk. Less than it sounds. Nothing was following
+ * the sun there — the city never moved, only the campus did — so this does not
+ * switch a feature off, it stops half of one from showing as a defect. And at
+ * night, which is when it was worst, nothing is lost at all: the dark tables
+ * ARE the night map, measured off Apple's, and the preset was darkening a night
+ * palette a second time.
+ *
+ * Getting it back means moving Google's half too, which is not a colour change
+ * but a new session token and a re-fetch of every visible tile each time the
+ * sun crosses a threshold — and it would carry that double-darkening onto the
+ * whole map rather than half of it. Worth doing deliberately, if at all.
+ */
+export function followsClock(provider) {
+  return provider !== 'google';
+}
+
 export function underPreset(colors, preset) {
   const move = TIME_OF_DAY[preset];
   if (!move || (!move.mix && !move.dim && !move.lift)) return colors;

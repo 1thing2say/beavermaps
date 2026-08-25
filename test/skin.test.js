@@ -18,7 +18,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { LOOKS, SATELLITE, FONTS, palette, styleKey } from '../src/palette.js';
+import {
+  LOOKS, SATELLITE, FONTS, palette, styleKey, underPreset, followsClock,
+} from '../src/palette.js';
 import { GROUND_STYLE } from '../src/google-tiles.js';
 import { SKINS } from '../src/skin.js';
 import { root, contrast, deltaE, lch, flatten, toHex } from './helpers.js';
@@ -369,6 +371,82 @@ test('the ground under the campus matches the ground around it', () => {
       }
     }
   }
+});
+
+/*
+ * Every hour of the day, on the provider that cannot follow one.
+ *
+ * The test above compares the palette TABLES. This one compares what the app
+ * actually paints with, which is not the same object: `litPalette` in
+ * src/main.js runs the table through `underPreset` first, and the four presets
+ * are reachable from the clock and from the lighting bench in the debug menu
+ * alike. So the seam the test above is written to catch could be — and was —
+ * wide open at three hours out of four while that test passed.
+ *
+ * Measured on the running app at 21:00, dark theme, Google drawing: the city
+ * ground rendered L 31.9 and the campus mask L 25.9. Six points, uniform across
+ * every campus surface, because `underPreset` moves the whole table together.
+ * The campus was a darker, bluer patch inside a lighter city and the boundary
+ * was drawn by the step rather than by anything on the map.
+ *
+ * The rule this holds is `followsClock`: a raster tile arrives already lit and
+ * the style array baked into its session token knows nothing about the sun, so
+ * under Google there is nothing on the other side of the move to stay in step
+ * with — and moving our half alone is the seam. Restated here rather than
+ * imported from main.js, which is a DOM module; the composition being asserted
+ * is the two lines of `litPalette`.
+ */
+const PRESETS = ['day', 'dawn', 'dusk', 'night'];
+
+const painted = (skin, theme, provider, preset) => {
+  const base = LOOKS[skin][theme];
+  return followsClock(provider) ? underPreset(base, preset) : base;
+};
+
+test('the boundary holds at every hour the app can draw', () => {
+  for (const skin of SKINS) {
+    for (const theme of THEMES) {
+      const rules = GROUND_STYLE[skin][theme];
+      if (!rules.length) continue;   // classic light IS Google's own daylight map
+      for (const preset of PRESETS) {
+        const p = painted(skin, theme, 'google', preset);
+        for (const [featureType, elementType, ours, what] of [
+          [null, 'geometry', p.mask, 'land'],
+          ['water', 'geometry', p.land.pool, 'water'],
+          ['poi.park', 'geometry', p.land.lawn, 'planting'],
+        ]) {
+          const theirs = styled(rules, featureType, elementType);
+          assert.ok(
+            deltaE(theirs, ours) < 2,
+            `${skin}/${theme} at ${preset}: raster ${what} is ${theirs}, `
+            + `campus has ${ours} (dE ${deltaE(theirs, ours).toFixed(1)})`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test('...and the sun still moves the map where something can follow it', () => {
+  // The other half of the rule, asserted so the fix above cannot quietly become
+  // "the app no longer has a time of day". Under Mapbox the city IS relit — by
+  // Standard, from a config value — so the campus has to move with it, and
+  // three of the four presets have to be a real change.
+  assert.ok(followsClock('mapbox'), 'Mapbox no longer follows the clock');
+  assert.ok(!followsClock('google'), 'Google is being asked to follow the clock');
+
+  for (const preset of ['dawn', 'dusk', 'night']) {
+    for (const skin of SKINS) {
+      const flat = LOOKS[skin].light;
+      assert.notEqual(
+        underPreset(flat, preset).mask, flat.mask,
+        `${skin} at ${preset} paints the campus exactly as it does at midday`,
+      );
+    }
+  }
+  // ...and midday is the one that must not move, since it is what the tables
+  // are authored at. `underPreset` returns the palette itself, not a copy.
+  assert.equal(underPreset(LOOKS.apple.light, 'day'), LOOKS.apple.light);
 });
 
 // ---------------------------------------------------------------------------

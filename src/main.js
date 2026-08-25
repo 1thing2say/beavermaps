@@ -55,7 +55,7 @@ import { createLightingControl } from './lighting.js';
 import roomsData from './rooms.json';
 import { buildRoomIndex, lookupRoom } from './rooms.js';
 import { popularity, popularNames, recordVisit } from './popular.js';
-import { FONTS, SATELLITE, palette, styleKey, underPreset, toward } from './palette.js';
+import { FONTS, SATELLITE, palette, styleKey, underPreset, followsClock, toward } from './palette.js';
 
 import {
   buildAreas,
@@ -274,6 +274,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     const base = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
     const preset = lightingBench && lightingBench.preset !== 'auto'
       ? lightingBench.preset : clockPreset();
+    // ...unless nothing on the other side of the move can follow it. Google's
+    // ground is a raster and arrives already lit, so relighting ours alone is
+    // the seam rather than the fix. See `followsClock` in src/palette.js for
+    // the measurement and for what it costs.
+    if (!followsClock(currentProvider)) return base;
     return underPreset(base, preset);
   }
 
