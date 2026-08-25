@@ -456,12 +456,19 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // becomes one too. Must match the media query in src/input.css.
   const phone = window.matchMedia('(max-width: 640px)');
   // ...and where the legend holds the right edge it is furniture, where it is a
-  // sheet over the map it is not, so on a phone it starts closed. Set here and
+  // sheet over the map it is not, so on a phone it stays closed. Set here and
   // not with the rest of the chrome because campusPadding measures this panel
-  // and the first fitBounds is a few lines below — closing it afterwards would
-  // frame the campus around a card that is not there. The button that re-opens
-  // it is told about this where it is declared.
-  if (phone.matches) legendPanel.classList.add('hidden');
+  // and the first fitBounds is a few lines below — opening it afterwards would
+  // frame the campus around a card that is not there. The button that closes it
+  // again is told about this where it is declared.
+  //
+  // OPENING, not closing, and the direction is the whole point. This read
+  // `if (phone.matches) legendPanel.classList.add('hidden')` — the panel was
+  // open in the markup and a phone shut it here, which is a line that cannot
+  // run until the bundle has parsed. Everything before that moment painted an
+  // empty Legend panel across the bottom sheet. The markup carries `hidden` now
+  // and a desktop is what asks for it back.
+  if (!phone.matches) legendPanel.classList.remove('hidden');
   const navBanner = document.getElementById('nav-banner');
   const navFooter = document.getElementById('nav-footer');
   const navStack = document.getElementById('nav-stack');

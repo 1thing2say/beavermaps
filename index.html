@@ -49,6 +49,39 @@
             document.documentElement.dataset.theme = theme;
         }());
     </script>
+    <!-- AND THE LOOK, FOR THE SAME REASON AND WITH A LOUDER SYMPTOM.
+         src/skin.js says it in as many words: "set it late and the app opens as
+         Google Maps and becomes Apple Maps a moment later, which reads as a bug
+         even to someone who wanted Apple all along." That is exactly what was
+         happening — `applySkinAttribute` is called from inside the bundle, so
+         until the bundle parsed there was no `data-skin` on <html> at all and
+         every `[data-skin="apple"]` rule in the stylesheet missed. What paints
+         in the meantime is not a neutral placeholder: it is the CLASSIC look,
+         complete, because classic is what the unqualified rules are.
+
+         It is worse than the theme flash because it is bigger. The theme gets
+         one attribute wrong and the ground is the wrong shade; this gets the
+         whole design language wrong — opaque cards instead of glass, 8px
+         corners instead of 14, Roboto instead of the system face, a round blue
+         directions button, the legend open in a white panel — for the length of
+         a cold load.
+
+         Restated rather than imported, for the reason the theme block gives:
+         anything importable arrives too late by definition. What is duplicated
+         is `preferredSkin`, which is one line, and the asymmetry in it is
+         load-bearing — the stored value only ever means "I went back", so an
+         empty localStorage has to fall through to Apple. -->
+    <script>
+        (function () {
+            var skin = 'apple';
+            try {
+                if (localStorage.getItem('mapper-skin') === 'classic') skin = 'classic';
+            } catch (e) {
+                /* Private mode can throw on localStorage; Apple is the default. */
+            }
+            document.documentElement.dataset.skin = skin;
+        }());
+    </script>
 </head>
 
 <!--
@@ -399,7 +432,19 @@
                  and everything that is not the map goes in it — and a key is
                  reference rather than navigation, so it sits at the foot of
                  the column under the directory. -->
-            <div id="legend-panel" class="g-card g-panel g-legend" role="region" aria-label="Map legend">
+            <!-- CLOSED IN THE MARKUP, and opened by whoever wants it open.
+                 It used to be the other way round: open here, and main.js added
+                 `hidden` on a phone once the bundle had parsed. Everything in
+                 that sentence after "open here" happens too late — a cold load
+                 on a phone painted an empty Legend panel across the bottom
+                 sheet for the length of the load, which is a placeholder for
+                 nothing, over the map, in a state nobody asked for.
+
+                 Stating the closed state here costs a desktop a legend that
+                 arrives with the bundle rather than with the first paint, which
+                 is the honest order anyway: every row in it is disabled until
+                 amenities.json and places.json land. -->
+            <div id="legend-panel" class="g-card g-panel g-legend hidden" role="region" aria-label="Map legend">
                 <div class="g-panel-head g-panel-head--section">
                     <div>
                         <h2 class="g-panel-title">Legend</h2>
