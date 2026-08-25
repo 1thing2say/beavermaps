@@ -138,6 +138,13 @@ export function createSheet({ el, grip, enabled }) {
     if (held) el.style.height = '';
     el.dataset.detent = 'rest';
     const rest = Math.round(el.getBoundingClientRect().height);
+    // ...and again in the state whose size is actually in question. The sheet
+    // shows MORE at the open detents than at rest — a category grid, a section
+    // heading, the shelf — so what `full` has to fit is not the resting content
+    // measured a line above. Same reason as the attribute swap: the stylesheet
+    // decides what is in there, and it decides differently per detent.
+    el.dataset.detent = 'full';
+    const content = el.scrollHeight;
     if (at) el.dataset.detent = at; else delete el.dataset.detent;
     el.style.height = held;
 
@@ -145,7 +152,12 @@ export function createSheet({ el, grip, enabled }) {
     // its top half behind the keys. The sheet's own `bottom` is already lifted
     // by --g-kb-h; this is the other end of the same measurement.
     const screen = Math.round(window.visualViewport?.height ?? window.innerHeight);
-    const full = Math.max(rest, screen - MAP_STRIP);
+    // NEVER TALLER THAN WHAT IS IN IT. The ceiling is the screen less a strip
+    // of map; the sheet only reaches it when there is enough to fill it. Open a
+    // sheet holding six rows to 88% of a phone and the bottom third is a field
+    // of blank material, which reads as content that failed to load rather than
+    // as a sheet that is open.
+    const full = clamp(content, rest, screen - MAP_STRIP);
     const half = clamp(Math.round(screen * 0.5), rest, full);
     return { rest, half, full };
   }

@@ -2768,17 +2768,59 @@ body.navigating .app-chrome {
    Scoped to the Google provider for the same reason the Mapbox wordmark is
    hidden there — see that rule above. Under Mapbox this line credits Mapbox and
    OpenStreetMap, and their marks are not this one. */
+[data-provider="google"] .mapboxgl-ctrl-attrib-inner {
+    /* A ROW, so the mark and the words are centred against each other rather
+       than sat on a shared baseline.
+       -----------------------------------------------------------------------
+       This was `vertical-align`, which is the obvious way to put a box in a
+       line of text and the wrong one here: it aligns the mark's BOTTOM EDGE to
+       an offset from the baseline, and the mark is a full-height glyph where a
+       capital G reaches about three quarters of an em. So the two are centred
+       on nothing, the offset has to be re-derived every time the size changes,
+       and at 11px being one pixel out is visible.
+
+       Safe because this whole block is scoped to the Google provider, whose
+       notice is a plain string. Mapbox's is three links and a button, and each
+       would become a flex item of its own. */
+    display: flex;
+    align-items: center;
+    gap: 0.36em;
+}
+
 [data-provider="google"] .mapboxgl-ctrl-attrib-inner::before {
     content: "";
-    display: inline-block;
-    width: 0.95em;
-    height: 0.95em;
-    margin-right: 0.36em;
-    /* Sits the mark on the text baseline. A replaced box aligns on its bottom
-       edge by default, which puts the whole glyph above the baseline and the
-       line looks like the G is floating over the words. */
-    vertical-align: -0.13em;
+    flex: none;
+    /* BIGGER THAN THE CAPS, on purpose, and this is the second thing that was
+       wrong. At 0.95em the mark was 10px of four-colour logo with a counter two
+       pixels across — the white gap that makes a G a G goes to whatever is
+       behind it, and on a dark scrim that is dark, so it closed up and the mark
+       read as a coloured blob rather than as a letter. A logo has a size below
+       which it stops being the logo. 1.25em against a cap height of about
+       0.72em is the proportion Google's own placements use. */
+    width: 1.25em;
+    height: 1.25em;
     background: url('/src/google-g.svg') center / contain no-repeat;
+}
+
+/* ...AND THE HIDDEN WORDMARK STOPS HOLDING A PLACE IN THE LINE.
+   ---------------------------------------------------------------------------
+   `[data-provider="google"] .mapboxgl-ctrl-logo { display: none }` above hides
+   the mark. It does not hide the `.mapboxgl-ctrl` div Mapbox wraps it in, and
+   that div is a FLEX ITEM of the credit strip: zero wide, but with the strip's
+   6px gap on both sides of it and its own box between them.
+
+   Measured on a 390px phone: the strip's content ran 34 to 180.3 inside a box
+   whose padding ended at 18 and 180.3. Sixteen pixels of nothing on the left,
+   none on the right — which is not a rounding error, it is the notice sitting
+   visibly off-centre in its own pill.
+
+   Under Mapbox the wrapper holds a wordmark and must stay.
+
+   `!important` because Mapbox writes `style="display: block"` onto that div
+   from LogoControl, and an inline style beats any selector. Same reason the
+   attribution's own background above carries one. */
+[data-provider="google"] .mapboxgl-ctrl-bottom-left > .mapboxgl-ctrl:has(> .mapboxgl-ctrl-logo) {
+    display: none !important;
 }
 
 
@@ -3863,6 +3905,99 @@ body.no-dirbutton .g-directions {
     padding: 7px 12px;
 }
 
+/* --- what the sheet holds when it is open ----------------------------------
+
+   OFF EVERYWHERE BUT A PHONE, like the grabber and the wordmark above. On a
+   desktop this column is a sidebar and the same eleven categories are the
+   legend panel further down it; two copies of one list in one column is one
+   list too many, and the sidebar has no detents to reveal a second state. */
+.g-browse,
+.g-shelf-title {
+    display: none;
+}
+
+/* A SECTION HEAD, at the size a section head is on a phone.
+   ---------------------------------------------------------------------------
+   20px semibold, which is what every native sheet uses for the band above a
+   group and what the sheet was missing: four rows and a grid with no words
+   between them is a form, not a page. The negative letter-spacing is the same
+   optical correction the panel titles carry — a display size set at its metric
+   tracking reads loose. */
+.g-browse-title {
+    margin: 0;
+    color: var(--g-text);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+}
+
+/* TWO COLUMNS, and it is the shape doing the work.
+   ---------------------------------------------------------------------------
+   A grid of coloured discs is the reason you can find Coffee on Apple's sheet
+   without reading it: the eye lands on the hue and the word confirms it. The
+   same eleven as a column of rows — which is exactly what the legend panel is —
+   reads as a table of contents, and takes 600px to say what this says in 320. */
+.g-browse-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.g-browse-tile {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 54px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: var(--g-radius-sm);
+    background: var(--g-fill);
+    color: var(--g-text);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.25;
+    /* A button centres its label; a tile does not. */
+    text-align: left;
+    cursor: pointer;
+}
+
+.g-browse-tile:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* The pressed one, which is the same state the legend row carries and has to
+   look like a selection rather than a hover: this is a toggle you turn off
+   again, and on a touch screen there is no hover to distinguish it from. */
+.g-browse-tile[aria-pressed="true"] {
+    background: var(--g-highlight-soft);
+    box-shadow: inset 0 0 0 1.5px var(--g-highlight);
+}
+
+/* The disc, in the colour of the pins this tile drops. --tint is written by
+   main.js from map-images.js's own table, and the ink inside it is chosen by
+   contrast against that tint rather than assumed white — see renderBrowse. */
+.g-browse-disc {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--tint, var(--g-blue));
+}
+
+.g-browse-glyph {
+    width: 18px;
+    height: 18px;
+}
+
+.g-browse-name {
+    min-width: 0;
+}
+
 /* --- the sheet's head ------------------------------------------------------
 
    OFF EVERYWHERE BUT A PHONE, both of them. Above the phone breakpoint the
@@ -4492,6 +4627,50 @@ body.no-dirbutton .g-directions {
         margin: 12px 0 0;
         padding: 0;
         overflow: visible;
+    }
+
+    /* AND THE SHEET GETS A FRONT PAGE.
+       ------------------------------------------------------------------
+       Only at the open detents, and that is the whole design: collapsed,
+       this is a wordmark and a field and nothing else, which is the shape
+       the reference has and the one a map wants when you are looking at
+       the map. Pulled up, it is a page — a heading, eleven ways in by
+       category, a heading, the four places this campus is actually walked
+       to. The grid is the campus answer to Find Nearby and it was already
+       in the app, behind a menu item, as the legend. */
+    .g-topleft[data-detent="half"] .g-browse,
+    .g-topleft[data-detent="full"] .g-browse {
+        display: block;
+        margin-top: 18px;
+    }
+
+    .g-topleft[data-detent="half"] .g-browse-grid,
+    .g-topleft[data-detent="full"] .g-browse-grid {
+        margin-top: 10px;
+    }
+
+    .g-topleft[data-detent="half"] .g-shelf-title,
+    .g-topleft[data-detent="full"] .g-shelf-title {
+        display: block;
+        margin-top: 22px;
+    }
+
+    /* ...and it gets out of the way the moment there is an answer.
+       ------------------------------------------------------------------
+       The same two conditions that hide the wordmark, for the same reason:
+       a front page is what you look at while you have not asked anything.
+       Once there is a list of matches or a card for a place, the sheet is
+       showing you the thing you asked for and everything above it is
+       furniture. Written as `:has()` rather than a class main.js toggles,
+       so no path can open a card and forget to say so. */
+    .g-search:has(#place-results:not(.hidden)) .g-browse,
+    .g-search:has(#place-results:not(.hidden)) .g-shelf-title,
+    .g-topleft:has(> .g-panel:not(.hidden)) .g-browse,
+    .g-topleft:has(> .g-panel:not(.hidden)) .g-shelf-title,
+    /* No shelf, no heading for it. renderShortcuts hides the row when the
+       suggestion list holds the same names. */
+    .g-search:has(#place-shortcuts.hidden) .g-shelf-title {
+        display: none;
     }
 
     .g-topleft[data-detent="half"] .g-shortcuts .g-shortcut,

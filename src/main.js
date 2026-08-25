@@ -25,6 +25,7 @@ import { mapboxRefusal, MAPBOX_HOST } from './basemap-problem.js';
 import {
   loadAmenityIcons, routePin, liftedOffset, ROUTE_PIN_W, PIN_BASE_W, AMENITY_KINDS, pinInk,
   pinColour,
+  glyphInk,
 } from './map-images.js';
 import { buildingCard, pinCard } from './building-popup.js';
 import {
@@ -4818,6 +4819,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   const layersMenu = document.getElementById('layers-menu');
   // legendPanel is declared up with the side panel — campusPadding measures it.
   const legendList = document.getElementById('legend-list');
+  // Up here with the legend rather than down with the shelf it sits above,
+  // because renderLegend renders both and runs at module level — declared with
+  // the shortcuts it would still be in the temporal dead zone at first call.
+  const browseGrid = document.getElementById('browse-grid');
   const legendClose = document.getElementById('legend-close');
   const legendOpen = document.getElementById('layers-legend');
   const debugLegend = document.getElementById('debug-legend');
@@ -5203,6 +5208,74 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       return li;
     }));
     paintIcons(legendList);
+    // One call site for both shapes of the same list, so a category cannot be
+    // live in the sidebar and dead in the sheet.
+    renderBrowse();
+  }
+
+  /**
+   * The same eleven, as the grid the phone sheet opens onto.
+   *
+   * WHY A SECOND RENDERER for one list. The legend is a column of rows with a
+   * count under each name — "6 buildings · 22 zones" — which is what it is for:
+   * a key you read down. Pulled open on a phone the sheet is not a key, it is
+   * the front page, and a front page asks a different question. Apple's is a
+   * grid of coloured discs and one word each, and that shape is the reason you
+   * can find Coffee on it without reading anything.
+   *
+   * So: same data, same press, same pressed state, different shape. Not a
+   * variant of `renderLegend` behind a flag — the two disagree about almost
+   * every element they build, and the one thing they must agree on is what a
+   * press does, which is `selectCategory` in both.
+   *
+   * THE DISC WEARS THE PIN'S OWN COLOUR. `pinColour` is what map-images.js
+   * paints the markers this row drops with, so pressing Restrooms puts teal
+   * pins on the map from a teal tile, and Emergency phones yellow ones from a
+   * yellow tile. Read from there rather than restated here, because a second
+   * table of eleven hues is a second table to drift.
+   */
+  function renderBrowse() {
+    if (!browseGrid) return;
+    browseGrid.replaceChildren(...CATEGORIES.map((category) => {
+      const tile = document.createElement('button');
+      tile.type = 'button';
+      tile.className = 'g-browse-tile';
+      tile.dataset.id = category.id;
+      tile.setAttribute('aria-pressed', String(activeCategory === category.id));
+      // Same reason the legend's rows are: both files are still in flight when
+      // this first runs, and a tile that answers "Nothing found" reads as
+      // broken rather than as early.
+      tile.disabled = !legendReady;
+      tile.title = category.legend;
+
+      const disc = document.createElement('span');
+      disc.className = 'g-browse-disc';
+      // `icon` is the disc a category with no pictogram draws its own pins
+      // with; `kinds[0]` is the pictogram for one that has them. Every category
+      // has at least one of the two — see src/categories.js — and pinColour
+      // falls back to the family blue for anything that somehow has neither.
+      const tint = pinColour(category.icon ?? category.kinds?.[0]);
+      disc.style.setProperty('--tint', tint);
+      // White on most of them and near-black on the yellow, decided by contrast
+      // rather than by eye — the same call map-images.js makes for the glyph
+      // inside the pin, from the same function, so a tile and the pins it drops
+      // cannot end up with different ink on the same hue.
+      disc.style.color = glyphInk(tint);
+
+      const glyph = document.createElement('span');
+      glyph.className = 'g-icon g-browse-glyph';
+      glyph.dataset.icon = category.glyph;
+      disc.append(glyph);
+
+      const name = document.createElement('span');
+      name.className = 'g-browse-name';
+      name.textContent = category.label;
+
+      tile.append(disc, name);
+      tile.addEventListener('click', () => selectCategory(category.id));
+      return tile;
+    }));
+    paintIcons(browseGrid);
   }
 
   /** The pressed state alone, for the paths that already redrew everything else. */
@@ -5210,6 +5283,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     for (const li of legendList.children) {
       const row = li.firstElementChild;
       row?.setAttribute('aria-pressed', String(row.dataset.id === activeCategory));
+    }
+    for (const tile of browseGrid?.children ?? []) {
+      tile.setAttribute('aria-pressed', String(tile.dataset.id === activeCategory));
     }
   }
 

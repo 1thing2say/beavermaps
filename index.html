@@ -254,6 +254,43 @@
                         <span class="g-icon" data-icon="directions"></span>
                     </button>
                 </div>
+                <!-- WHAT THE SHEET HOLDS WHEN IT IS PULLED OPEN.
+                     ==================================================
+                     Dragging a sheet up is a request for more of it, and
+                     for a while the answer was four rounded rows and a
+                     lot of empty material. This is the rest of the
+                     answer, and it is the same move Apple makes on their
+                     home sheet: a field you can type into, and under it
+                     a grid of the things people ask for by category
+                     rather than by name.
+
+                     Ours writes itself out of src/categories.js — my campus's
+                     own printed key, the eleven rows the legend panel
+                     already lists. Restrooms, parking, food, bus stops.
+                     That list is the campus answer to Find Nearby, and
+                     it was already in the app behind a menu item.
+
+                     Empty in the markup and filled by main.js once
+                     amenities.json and places.json have landed, for the
+                     reason the shelf below is: a tile that answers
+                     "nothing found" reads as broken rather than as
+                     early. Phone-only — above the breakpoint the same
+                     eleven are the legend panel down the sidebar, and
+                     two copies of one list in one column is one list
+                     too many. -->
+                <div id="sheet-browse" class="g-browse">
+                    <h2 class="g-browse-title">Find nearby</h2>
+                    <div id="browse-grid" class="g-browse-grid" role="group"
+                        aria-label="Find nearby"></div>
+                </div>
+
+                <!-- ...and a heading for the shelf below, which only has one
+                     when the sheet is open. Collapsed, the shelf appears under
+                     a focused field where it is obviously a list of
+                     suggestions; open, it is a section of a page and a section
+                     of a page is titled. -->
+                <h2 id="shelf-title" class="g-browse-title g-shelf-title">Places you go</h2>
+
                 <!-- The shortcuts row: what sits under the field when nothing
                      has been typed into it.
 
