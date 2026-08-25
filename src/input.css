@@ -2633,6 +2633,42 @@ body.navigating .app-chrome {
     color: var(--g-text-dim) !important;
 }
 
+/* ...and the mark that goes with the notice, under the provider it belongs to.
+   ---------------------------------------------------------------------------
+   Google's Map Tiles API supplies the copyright STRING and nothing else — the
+   text in the corner is theirs verbatim, fetched per viewport, and it is left
+   exactly as served. This puts their mark in front of it, which is what the
+   line is missing: "Map data ©2026 Google" as bare grey text is a footnote,
+   where every other map on a phone shows whose map it is.
+
+   A ::before rather than markup, so the licence string is never touched. The
+   attribution element's contents are Mapbox's — it writes them from the
+   source's `attribution` property — and reaching in to prepend an <img> would
+   mean either editing that string in src/google-tiles.js (mixing a mark into a
+   legal notice) or writing into a node another library owns and rewrites.
+
+   `inline-block` and an em-relative size so it flows and wraps with the text it
+   leads, and shrinks with it in the phone block below. 0.95em rather than 1em
+   is an optical match, not a mistake: the glyph fills its own box top to bottom
+   where a capital G reaches about three quarters of an em, so a mark set to the
+   text's em-size stands visibly taller than the letters beside it.
+
+   Scoped to the Google provider for the same reason the Mapbox wordmark is
+   hidden there — see that rule above. Under Mapbox this line credits Mapbox and
+   OpenStreetMap, and their marks are not this one. */
+[data-provider="google"] .mapboxgl-ctrl-attrib-inner::before {
+    content: "";
+    display: inline-block;
+    width: 0.95em;
+    height: 0.95em;
+    margin-right: 0.36em;
+    /* Sits the mark on the text baseline. A replaced box aligns on its bottom
+       edge by default, which puts the whole glyph above the baseline and the
+       line looks like the G is floating over the words. */
+    vertical-align: -0.13em;
+    background: url('/src/google-g.svg') center / contain no-repeat;
+}
+
 
 
 /* Turn-by-turn keeps the locate button and drops the rest: zoom and a scale bar
