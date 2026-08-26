@@ -109,11 +109,22 @@ export function snapTo({ height, velocity, detents, from }) {
  * @param {() => boolean} parts.enabled whether the sheet is a sheet right now
  *                                  (it is a sidebar above the phone breakpoint)
  */
-export function createSheet({ el, grip, enabled }) {
+export function createSheet({ el, grip, enabled, onSettle }) {
   /** The name of the detent the sheet is resting at. */
   let detent = 'rest';
   /** The live drag, or null. */
   let drag = null;
+  /**
+   * The height the sheet is HEADING FOR, or null while it is content-sized.
+   *
+   * Not the height it has. `apply` writes the inline height and the stylesheet
+   * animates towards it over 240ms, so for a quarter of a second after a card
+   * opens `getBoundingClientRect()` answers a question nobody asked — where the
+   * sheet is passing through. Anything deciding what the sheet is covering
+   * needs where it is going: a camera that framed the map around the in-flight
+   * height would settle a quarter of a sheet too low. See `top`.
+   */
+  let settling = null;
 
   /**
    * The three heights, measured now.
@@ -189,10 +200,19 @@ export function createSheet({ el, grip, enabled }) {
    * before it arrived.
    */
   function apply(name, heights = measure()) {
+    const was = detent;
     detent = name;
     el.dataset.detent = name;
     el.style.height = name === 'rest' ? '' : `${heights[name]}px`;
+    // At rest there is nothing to head for: the height is cleared, the sheet is
+    // content-sized again, and a cleared height does not animate — `auto` is
+    // not an interpolable length, so the box is already its resting size on
+    // this frame and measuring it directly is right.
+    settling = name === 'rest' ? null : heights[name];
     grip.setAttribute('aria-expanded', String(name !== 'rest'));
+    // Only on a real change, so a refit for a rotation that lands on the same
+    // detent does not read as the sheet having moved.
+    if (name !== was) onSettle?.(name);
   }
 
   /** The next detent up, wrapping back to rest at the top. See the grabber. */
@@ -352,6 +372,7 @@ export function createSheet({ el, grip, enabled }) {
       // stylesheet's own rules are the only ones in play there.
       el.style.height = '';
       delete el.dataset.detent;
+      settling = null;
       return;
     }
     apply(detent);
@@ -374,5 +395,27 @@ export function createSheet({ el, grip, enabled }) {
     apply(name, heights);
   }
 
-  return { refit, atLeast, apply: (name) => apply(name), get detent() { return detent; } };
+  /**
+   * Where the sheet's top edge is settling, in viewport pixels, or null when
+   * this column is a sidebar rather than a sheet.
+   *
+   * The bottom edge is measured and the top is derived from it, rather than the
+   * other way round, because the bottom edge is the one that does not move: the
+   * sheet is anchored there — offset by the safe area and by the keyboard — and
+   * grows upward. So this answers correctly in the middle of the 240ms the
+   * height is animating, which is exactly when it is asked.
+   */
+  function top() {
+    if (!enabled()) return null;
+    const box = el.getBoundingClientRect();
+    return settling === null ? box.top : box.bottom - settling;
+  }
+
+  return {
+    refit,
+    atLeast,
+    apply: (name) => apply(name),
+    get detent() { return detent; },
+    get top() { return top(); },
+  };
 }

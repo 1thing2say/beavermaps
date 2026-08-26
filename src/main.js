@@ -2859,7 +2859,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       onStart: (coords, name) => { clearSelection(); placeStart(coords, name); },
       onEnd: (coords, name) => { clearSelection(); setDestination(coords, name); },
       onClose: clearSelection,
-    }));
+    // The pin, kept in view. A tap in the bottom third of a phone screen is the
+    // case: the card opens as a sheet reaching half the viewport and settles
+    // over the thing that was tapped.
+    }), null, { at: hit.coords });
   }
 
   /** Straight-line feet from wherever the user is measuring from. */
@@ -2917,11 +2920,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * move the map when what you asked for is already on screen, and a gratuitous
    * flyTo throws away wherever the user had panned to.
    *
-   * "On screen" is tested in screen pixels against the padded rectangle, not
-   * with map.getBounds().contains(). getBounds() is the whole canvas including
-   * the strip the panel is floating over, so the three bus stops — which sit at
-   * the far west edge, behind the panel — counted as visible and the map never
-   * moved to show them.
+   * "On screen" means where somebody can see it rather than where the canvas
+   * ends — see `inView`, and the three bus stops it was written for.
    */
   function frameCategory() {
     if (categoryHits.length) { frame(categoryHits.map((hit) => hit.coords)); return; }
@@ -2941,20 +2941,129 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   function frame(points, { maxZoom = 18 } = {}) {
     if (points.length < 1) return;
 
-    const pad = campusPadding();
-    const canvas = map.getCanvas();
-    const [w, h] = [canvas.clientWidth, canvas.clientHeight];
-    const onScreen = (coords) => {
-      const p = map.project(coords);
-      return p.x >= pad.left && p.x <= w - pad.right && p.y >= pad.top && p.y <= h - pad.bottom;
-    };
-    if (points.every(onScreen)) return;
+    const pad = viewPadding();
+    if (points.every((coords) => inView(coords, pad))) return;
 
     const bounds = points.reduce(
       (acc, coords) => acc.extend(coords),
       new mapboxgl.LngLatBounds(points[0], points[0]),
     );
     map.fitBounds(bounds, { padding: pad, maxZoom, duration: 700 });
+  }
+
+  /**
+   * campusPadding, told where the sheet is GOING rather than where it is.
+   *
+   * campusPadding measures the cards that are open, which is right for a
+   * sidebar — a sidebar's width changes the instant a card arrives — and half a
+   * frame late for a sheet. On a phone a card opening does two more things: the
+   * stack asks the sheet for at least the half detent, and the stylesheet then
+   * animates the height over 240ms. Measure during that and the answer is
+   * wherever the top edge happened to be passing, so the camera settles a
+   * fraction of a sheet too low and the thing it was framing ends up behind the
+   * glass.
+   *
+   * So the sheet is asked instead of measured. See `top` in src/sheet.js.
+   */
+  function viewPadding() {
+    const pad = campusPadding();
+    const top = sheet.top;
+    if (top === null) return pad;
+
+    const canvas = map.getCanvas();
+    const bottom = canvas.getBoundingClientRect().bottom - top + FIT_MARGIN;
+    // Same guard campusPadding makes for the same reason: Mapbox throws if the
+    // padding does not leave a canvas behind, and a sheet pulled to full on a
+    // short screen can ask for more than there is.
+    if (bottom + FIT_MARGIN >= canvas.clientHeight) return pad;
+    return { ...pad, bottom };
+  }
+
+  /**
+   * Is this point somewhere it can be read?
+   *
+   * In SCREEN PIXELS against the padded rectangle, not with
+   * map.getBounds().contains(). Bounds are the whole canvas, the strip behind
+   * the sheet and the strip behind the sidebar included, so a point can be
+   * inside them and behind a pane of glass — which is how the three bus stops
+   * at the west edge once counted as visible while nobody could see them.
+   */
+  function inView(coords, pad = viewPadding()) {
+    const canvas = map.getCanvas();
+    const p = map.project(coords);
+    return p.x >= pad.left && p.x <= canvas.clientWidth - pad.right
+      && p.y >= pad.top && p.y <= canvas.clientHeight - pad.bottom;
+  }
+
+  /**
+   * The zoom a tap on something is worth, when the camera is moving anyway.
+   *
+   * The same 17 the search box, the directory and the destination pin already
+   * fly to, so choosing a thing lands at one scale however you chose it. A
+   * FLOOR, never a set: somebody already at 18.5 looking at a doorway asked for
+   * that, and a tap that pulled them back out to 17 would be the map arguing.
+   */
+  const REVEAL_ZOOM = 17;
+
+  /**
+   * The point the map is currently about, so the sheet can ask for it back.
+   *
+   * Held rather than derived because the sheet moves long after the tap that
+   * opened it: a card opens, and some seconds later a finger drags the sheet up
+   * over the very thing the card is describing. See the onSettle wired into
+   * createSheet.
+   */
+  let focusPoint = null;
+
+  /**
+   * Put a point where it can be seen — and only when it cannot.
+   *
+   * THE COMPLAINT THIS ANSWERS: tap a pin near the bottom of a phone screen and
+   * the card that opens is a sheet climbing to half the viewport, which lands on
+   * top of the pin you tapped. The map answered the question by covering the
+   * answer.
+   *
+   * The visible map is not the canvas — it is the canvas less whatever the
+   * chrome is standing on, which is exactly what viewPadding computes, so this
+   * tests the point against that rectangle in screen pixels rather than against
+   * map.getBounds(). Bounds are the whole canvas including the strip behind the
+   * sheet, which is the same mistake `frame` documents.
+   *
+   * ONLY WHEN IT CANNOT, because a camera that recentres on every tap is a
+   * camera that walks across the campus a tap at a time and throws away wherever
+   * somebody had panned to. Google does not move the map for something already
+   * in front of you; neither does this.
+   *
+   * @param {number[]} coords     lng/lat to keep in view
+   * @param {number} options.zoom the least zoom to end at; 0 leaves it alone
+   */
+  function revealPoint(coords, { zoom = 0 } = {}) {
+    // Navigation owns the camera outright — it is easing to the walker's
+    // position several times a second, and a reveal would fight it.
+    if (!coords || navActive) return;
+
+    const pad = viewPadding();
+    const to = Math.max(map.getZoom(), zoom);
+
+    if (inView(coords, pad) && to === map.getZoom()) {
+      // Nothing to reveal, but the chrome may still have changed shape under a
+      // camera that was framed around the old one. Only when it actually did:
+      // an easeTo to the padding already in force is a 300ms animation to where
+      // the map already is, and it would interrupt a pan somebody was in the
+      // middle of.
+      const now = map.getPadding();
+      const moved = ['top', 'bottom', 'left', 'right']
+        .some((side) => Math.abs((now[side] ?? 0) - pad[side]) >= 1);
+      if (moved) map.easeTo({ padding: pad, duration: 300 });
+      return;
+    }
+
+    // Centred in the PADDED box, which is what carrying the padding into the
+    // move buys: Mapbox puts the centre at the middle of the rectangle left
+    // over, so the point lands in the middle of the map you can see rather than
+    // in the middle of the map that exists — the second of which is behind the
+    // sheet on a phone.
+    map.easeTo({ center: coords, zoom: to, padding: pad, duration: 500 });
   }
 
   /**
@@ -3029,7 +3138,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // The pins own the camera, not the outline: the pins ARE the answer and the
     // outlined ground is context for it, and two fitBounds in one gesture is a
     // flight that lands somewhere neither of them asked for.
-    frameCategory();
+    //
+    // Next frame, for the reason showPlaceCard states: renderCategoryList has
+    // just shown the results panel, and on a phone that panel is a sheet whose
+    // height nothing has decided yet — the stack is told by a MutationObserver
+    // and observers do not run until this task ends. Framing now frames the map
+    // around the sheet as it was, and the nearest few pins — the ones the list
+    // is sorted to put first — land underneath it.
+    requestAnimationFrame(frameCategory);
     playCategorySwap();
   }
 
@@ -3338,6 +3454,16 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     el: document.getElementById('top-left'),
     grip: document.getElementById('sheet-grip'),
     enabled: () => phone.matches,
+    // A sheet dragged up covers more map, and what it covers first is the
+    // middle-bottom of the screen — which is exactly where a reveal has just
+    // put the thing the card is about. So the point asks for itself back
+    // whenever the sheet changes what there is to see.
+    //
+    // No zoom on this path: the finger is adjusting the sheet, not choosing
+    // anything, and a scale change nobody asked for reads as the map lurching.
+    // Collapsing moves nothing either — the visible rectangle only grows, so
+    // the point is still inside it and revealPoint leaves the camera alone.
+    onSettle: () => revealPoint(focusPoint),
   });
   sheet.refit();
 
@@ -3406,7 +3532,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }, ms + 20));
   }
 
-  function showPlaceCard(card, flyover = null) {
+  function showPlaceCard(card, flyover = null, { at = null, zoom = REVEAL_ZOOM } = {}) {
     // Swapped in one step, and in this order, because the incoming card may
     // already hold a live flyover of its own: tearing down after adopting would
     // destroy the one just built, and adopting before tearing down would leak
@@ -3432,14 +3558,28 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       placePanel.classList.remove('is-entering');
       void placePanel.offsetHeight;
       placePanel.classList.add('is-entering');
-      map.easeTo({ padding: campusPadding(), duration: 300 });
     }
+
+    // THE CAMERA, once, and after the sheet has decided how tall it is going to
+    // be. Next frame rather than now: the stack notices this panel through a
+    // MutationObserver, which does not run until the current task has finished,
+    // and it is the stack that asks the sheet to open. Read the sheet on this
+    // line and it is still the height it was before the card existed.
+    //
+    // A frame is enough — the detent is applied synchronously once the observer
+    // runs, and `sheet.top` answers with where it is going rather than where it
+    // is — so the map starts moving on the same frame the sheet starts growing
+    // and the two arrive together.
+    focusPoint = at ?? focusPoint;
+    if (at) requestAnimationFrame(() => revealPoint(at, { zoom }));
+    else if (!was) map.easeTo({ padding: campusPadding(), duration: 300 });
   }
 
   function closePlaceCard() {
     if (placePanel.classList.contains('hidden')) return;
     activeFlyover?.destroy();
     activeFlyover = null;
+    focusPoint = null;
     placePanel.classList.add('hidden');
     placePanel.classList.remove('is-entering');
     afterExit(placePanel, () => placePanel.replaceChildren());
@@ -3599,7 +3739,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // map to set a start point".
       onEnd: (coords, name) => { clearSelection(); setDestination(coords, name); },
       onClose: clearSelection,
-    }), flyover);
+    // `anchor` is the pole of inaccessibility — the point furthest INSIDE the
+    // footprint, which is where the label is set — so it is a better middle
+    // than the entrance node hanging off one edge. Same choice openBuilding
+    // used to make on its own; it goes through here now.
+    }), flyover, { at: props.anchor ?? props.entrance });
     highlightBuilding(props.officialName);
   }
 
@@ -3682,25 +3826,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /**
    * Open a building from the list rather than from the map.
    *
-   * The card is the same one a tap on the footprint opens; the difference is
-   * that the thing you just chose may be off screen entirely, so this also
-   * takes the camera there. `anchor` is the pole of inaccessibility the label
-   * is set at — the point furthest inside the footprint — which is a better
-   * centre than the entrance node hanging off one edge of it.
+   * The card is the same one a tap on the footprint opens, and the camera is
+   * the same camera: showBuildingCard reveals what it is about, whether that
+   * turned out to be off screen entirely (which is the list's case) or behind
+   * the sheet (which is the tap's).
+   *
+   * This used to fly here itself, reading the padding immediately after the
+   * card went up — half a frame before the sheet had decided how tall it was
+   * going to be. See viewPadding.
    */
   function openBuilding(props) {
     clearSelection();
     showBuildingCard(props);
-    const centre = props.anchor ?? props.entrance;
-    if (!centre) return;
-    map.easeTo({
-      center: centre,
-      zoom: Math.max(map.getZoom(), 17),
-      // Read AFTER the card is up, so the campus is framed around the column
-      // the card has just made taller rather than the one it replaced.
-      padding: campusPadding(),
-      duration: 700,
-    });
   }
 
   /** Re-route from the existing start to a newly chosen destination. */
@@ -6215,7 +6352,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         onEnd: (coords) => { clearSelection(); setDestination(coords, 'Dropped pin'); },
         onClose: clearSelection,
       },
-    ));
+    // Kept in view, but NOT zoomed. A long press is a deliberate gesture at a
+    // particular spot on the ground, and zooming would pull that ground out
+    // from under the finger that just chose it. The pin still gets lifted clear
+    // of the sheet if the sheet lands on it.
+    ), null, { at: snapped, zoom: 0 });
   }
 
   function beginPress(e) {
