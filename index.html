@@ -5,6 +5,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>beavermaps</title>
+    <!-- THE TAB ICON. Three links for two reasons.
+
+         favicon.ico first because it is the one an .ico is for: the request a
+         browser makes for /favicon.ico on its own, with no markup in front of
+         it — a bookmark, a history row, a link preview. It is built from
+         src/logo.png by scripts/build-favicon.mjs and holds that file
+         unresampled; see the header of that script for why it holds one size.
+
+         Then the same mark twice, because the mark has ink. It is black on
+         transparent, and half of the browsers that will draw it draw it on a
+         dark tab strip, where black ink on nothing is nothing. logo-dark.png is
+         the same 32px drawing in white, and it is already what .g-navbar-mark
+         swaps to under a dark theme — this is that swap, for the tab.
+
+         `prefers-color-scheme` rather than `data-theme` here, and it is the one
+         place in this app where those two are allowed to disagree: the tab
+         strip belongs to the browser, so what matters is the browser's
+         appearance, not which theme somebody picked inside the page. -->
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="icon" type="image/png" sizes="32x32" href="/src/logo.png"
+          media="(prefers-color-scheme: light)">
+    <link rel="icon" type="image/png" sizes="32x32" href="/src/logo-dark.png"
+          media="(prefers-color-scheme: dark)">
     <!-- mapbox-gl.css is imported by src/main.js from the installed package, so
          it always matches the library version rather than a pinned CDN copy. -->
     <link href="/src/input.css" rel="stylesheet">
