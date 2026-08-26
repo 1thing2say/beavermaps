@@ -88,13 +88,29 @@ console.log(`favicon.ico          ${width}x${height}  ${dir.length + png.length}
 // 180 square, which is the size an iPhone at 3x asks for, and the one every
 // smaller ask is scaled down from.
 //
-// FLAT, AND FULL BLEED. No rounded corners and no shadow: iOS masks the tile
-// to its own superellipse, and corners drawn here would be rounded twice and
-// leave a pale rim inside the mask. No transparency either — iOS composites a
+// PAINTED GROUND, ROUNDED THE WAY APPLE ROUNDS IT.
+//
+// The ground is painted rather than left transparent because iOS composites a
 // web clip's alpha against BLACK, which would take a black-ink mark with it.
-// So the ground is painted, and the ground is white: this is src/logo.png, the
-// light-theme file, and a home screen gets one icon with no way to ask for the
-// dark one.
+// And it is white because this is src/logo.png, the light-theme drawing, and a
+// home screen picks its icon once at install with no way to ask for the dark
+// one later.
+//
+// The corners are cut, which is not what you would guess from the fact that
+// iOS masks the tile itself. maps.apple.com ships its own 180 pre-rounded —
+// alpha 0 in the corners, the straight edge starting 41px in — and the reason
+// is that the mask is only iOS's to apply. Anything else that finds this file
+// draws it as it is, and an unrounded one is a white rectangle sitting on the
+// wallpaper. On iOS the two roundings coincide and the second is a no-op; the
+// only alpha in the file is outside the mask, where iOS discards it anyway.
+//
+// The corner is FITTED, not chosen. A plain superellipse over the whole tile is
+// the usual guess and it is wrong in a way you can see: it is tangent to each
+// side at one point, so the flat part of every edge is half-transparent. The
+// shape is a rectangle with a smoothed corner — straight edges, and inside a
+// corner square of side MASK_R a superellipse of exponent MASK_N. Both numbers
+// were solved against the alpha channel of maps.apple.com's own
+// maps-app-icon-180x180.png, and reproduce it to a mean of 0.6 in 255.
 //
 // SCALED BY 5, NOT BY 180/32. 5.625 source pixels per icon pixel is the exact
 // case the .ico above refuses to touch — every sixth row of a drawing with no
@@ -108,11 +124,17 @@ console.log(`favicon.ico          ${width}x${height}  ${dir.length + png.length}
 // fine in a navbar, where it is one item in a row, and visible on a tile, where
 // it is the only thing there. Centring the drawn pixels puts the margin evenly
 // around it. At this scale that leaves the ink 78% of the tile tall, which
-// clears the superellipse everywhere (checked against the mask, not eyeballed).
+// clears the corner everywhere — checked against the fitted mask below, and
+// against masks rounder than it, rather than eyeballed.
 
 const TILE = 180;
 const SCALE = 5;
 const GROUND = [0xff, 0xff, 0xff];
+const MASK_R = TILE * 0.328;
+const MASK_N = 2.7;
+// Samples per axis inside each pixel when working out how much of it the mask
+// covers. 4 is 16 samples, which is enough to keep the curve from stepping.
+const MASK_SAMPLES = 4;
 
 const mark = decode(png);
 const box = inkBox(mark);
@@ -124,8 +146,11 @@ if (inkW > TILE || inkH > TILE) throw new Error(`the mark is ${inkW}x${inkH} at 
 const originX = Math.round(TILE / 2 - (box.left * SCALE + inkW / 2));
 const originY = Math.round(TILE / 2 - (box.top * SCALE + inkH / 2));
 
-const tile = Buffer.alloc(TILE * TILE * 3);
-for (let i = 0; i < tile.length; i += 3) tile.set(GROUND, i);
+const tile = Buffer.alloc(TILE * TILE * 4);
+for (let i = 0; i < tile.length; i += 4) {
+  tile.set(GROUND, i);
+  tile[i + 3] = 0xff;
+}
 
 for (let y = 0; y < TILE; y++) {
   const sy = Math.floor((y - originY) / SCALE);
@@ -136,13 +161,23 @@ for (let y = 0; y < TILE; y++) {
     const s = (sy * mark.width + sx) * 4;
     const a = mark.pixels[s + 3] / 255;
     if (a === 0) continue;
-    const d = (y * TILE + x) * 3;
+    const d = (y * TILE + x) * 4;
     // Over white. The mark is hard-edged, so this only ever runs at a === 1,
     // but a redrawn logo with a soft edge should land on the ground, not on
     // whatever the alpha channel happened to be multiplied into.
     for (let c = 0; c < 3; c++) {
       tile[d + c] = Math.round(mark.pixels[s + c] * a + GROUND[c] * (1 - a));
     }
+  }
+}
+
+// The corner, last, so it cuts the finished tile rather than the ground it was
+// painted on.
+for (let y = 0; y < TILE; y++) {
+  for (let x = 0; x < TILE; x++) {
+    const covered = coverage(x, y);
+    if (covered === 1) continue;
+    tile[(y * TILE + x) * 4 + 3] = Math.round(covered * 0xff);
   }
 }
 
@@ -209,21 +244,43 @@ function paeth(a, b, c) {
   return pb <= pc ? b : c;
 }
 
-// Colour type 2, RGB with no alpha channel at all, so there is nothing for iOS
-// to composite against black. Every row is written with filter 0: the tile is
-// flat blocks of one colour and deflate has an easy time of it either way.
-function encode(w, h, rgb) {
-  const stride = w * 3;
+// How much of the pixel at x,y falls inside the mask, from 0 to 1. Sampled on a
+// grid rather than solved, because the answer only has to be good to a 255th
+// and this runs 32400 times once.
+function coverage(x, y) {
+  let inside = 0;
+  for (let sy = 0; sy < MASK_SAMPLES; sy++) {
+    for (let sx = 0; sx < MASK_SAMPLES; sx++) {
+      // Distance to the nearer edge on each axis, so one corner's arithmetic
+      // does for all four.
+      const px = x + (sx + 0.5) / MASK_SAMPLES;
+      const py = y + (sy + 0.5) / MASK_SAMPLES;
+      const dx = Math.min(px, TILE - px);
+      const dy = Math.min(py, TILE - py);
+      if (dx >= MASK_R || dy >= MASK_R) { inside++; continue; }
+      const u = (MASK_R - dx) / MASK_R;
+      const v = (MASK_R - dy) / MASK_R;
+      if (u ** MASK_N + v ** MASK_N <= 1) inside++;
+    }
+  }
+  return inside / (MASK_SAMPLES * MASK_SAMPLES);
+}
+
+// Colour type 6, because the corners have to be cut out of something. Every row
+// is written with filter 0: the tile is flat blocks of one colour and deflate
+// has an easy time of it either way.
+function encode(w, h, rgba) {
+  const stride = w * 4;
   const raw = Buffer.alloc(h * (stride + 1));
   for (let y = 0; y < h; y++) {
     raw[y * (stride + 1)] = 0;
-    rgb.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
+    rgba.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
   }
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0);
   ihdr.writeUInt32BE(h, 4);
   ihdr.writeUInt8(8, 8);   // bit depth
-  ihdr.writeUInt8(2, 9);   // colour type: truecolour
+  ihdr.writeUInt8(6, 9);   // colour type: truecolour with alpha
   ihdr.writeUInt8(0, 10);  // compression
   ihdr.writeUInt8(0, 11);  // filter method
   ihdr.writeUInt8(0, 12);  // no interlace
