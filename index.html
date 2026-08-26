@@ -10,7 +10,7 @@
          favicon.ico first because it is the one an .ico is for: the request a
          browser makes for /favicon.ico on its own, with no markup in front of
          it — a bookmark, a history row, a link preview. It is built from
-         src/logo.png by scripts/build-favicon.mjs and holds that file
+         src/logo.png by scripts/build-icons.mjs and holds that file
          unresampled; see the header of that script for why it holds one size.
 
          Then the same mark twice, because the mark has ink. It is black on
@@ -28,6 +28,16 @@
           media="(prefers-color-scheme: light)">
     <link rel="icon" type="image/png" sizes="32x32" href="/src/logo-dark.png"
           media="(prefers-color-scheme: dark)">
+    <!-- THE HOME SCREEN ICON. Not the same problem as the tab, and not solved
+         the same way. Told to Add to Home Screen without this, iOS takes a
+         screenshot of the page and uses that — a thumbnail of a map, which at
+         60px is every other map. This is the mark instead, painted on a white
+         ground at 180 square, built alongside the .ico by the same script.
+
+         One file, no `media`: a web clip is chosen once, when it is installed,
+         and iOS never asks again if the phone later goes dark. So it gets the
+         light drawing on a light ground, which is legible under either. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <!-- mapbox-gl.css is imported by src/main.js from the installed package, so
          it always matches the library version rather than a pinned CDN copy. -->
     <link href="/src/input.css" rel="stylesheet">
