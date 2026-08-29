@@ -776,11 +776,11 @@ So every printed building name now gets a disc, classified in `src/poi.js`:
 | `store` · `civic` · `childcare` · `parking` | blue | 1 each |
 
 **Rec. is Receiving.** It sat under `sport` for a long time on a `\brec\b` in the
-sport rule — the only abbreviation on the sheet, and it does not abbreviate what
-it looks like. my campus's directory spells it out: 519 m² of loading dock in the
+sport rule — the only abbreviation on my campus's sheet, and it does not abbreviate
+what it looks like. Their directory spells it out: 519 m² of loading dock in the
 service corner between the Ranch House and the police office. It is `works` now,
-which is the one classification here a reader could check against the ground and
-find wrong.
+which was the one classification here a reader could check against the ground
+and find wrong.
 
 The classification lives in the app rather than in `build-labels.mjs` because it
 is presentation, not data — `labels.json` stays exactly what my campus's cartographer
@@ -791,49 +791,77 @@ Arts Center** is a kitchen that contains the word "Arts", and **Arts & Sci** is 
 general teaching building that does too. One label, "Closed", gets no disc — it
 names a fenced-off area, not a place, and it is the only name allowed to opt out.
 
-#### The same marks in the sheet
+#### Browse buildings
 
-The discs answered the map and left the sheet alone, which is the half of the
-app somebody is reading rather than looking at. Searching "center" gave nine
-grey lines; the shelf of places you go was four names in a row; the directory
-was thirty rows sharing one generic building glyph, with the colour doing all
-the work — and five of the ten classes on this campus are blue.
+The sheet answered two questions and a visitor arrives with a third. The search
+field answers "where is X", and needs you to know what X is called. Find Nearby
+answers "where is the nearest one of these" off my campus's printed key — which is
+restrooms, phones, bike racks and bus stops, so it is infrastructure rather than
+buildings. Neither will tell somebody who has never been here that this college
+has a gallery.
 
-So every row of every list in the sheet now carries the mark its place already
-has on the map: **the same pictogram, in the same hue, in a squircle**. The
-classification is `src/place-kind.js`, which is only a join — the colour and the
-drawing come from `map-images.js` and the building classes from `poi.js`, so a
-row and the disc over its own footprint cannot say different things.
+So the front page of the sheet gained a second grid: **one tile per class of
+building, two to a row, each tile the whole of that class's colour.** Pressing
+one outlines every building in the class and lists them, which is the same pair
+of answers a legend row gives.
 
-A row's name is not always a building name, so the join tries five sources and
-takes the first that answers:
-
-| # | source | example |
+| tile | colour | holds |
 | --- | --- | --- |
-| 1 | the directory, by any name a building answers to | "CTE - Career Technical Education" → the CTE building's class |
-| 2 | my campus's printed key, by label, in either number | "Emergency telephones" → the yellow phone, not the car park holding five of them |
-| 3 | the things my campus lists that are not buildings | "Myrtle Parking Lot East" → the blue P; "Tennis Courts" → green |
-| 4 | `poi.js`'s own rules, on the row's own name | "Cafeteria" → orange, wherever it happens to sit |
-| 5 | the building holding it | "Design Hub" → whatever CTE is |
+| Library | blue | 2 |
+| Food | orange | 1 |
+| Sport | green | 5 |
+| Arts | purple | 2 |
+| Parking · Bookstore · Childcare · Police | blue | 1 each |
+| Operations | grey | 5 |
+| Campus buildings | blue | 14 |
 
-Anything left is `campus`, which on a college campus is a true statement. Of the
-120 names in my campus's directory, 56 land there and 64 carry something more specific.
+The count is on the tile, and it is not decoration: four of the ten classes hold
+exactly one building, and "Bookstore · 1 building" is already most of an answer.
+The catch-all is last — `campus` is what a building is when nothing more
+specific is true of it, so leading with it would put the least informative tile
+under the thumb.
 
-**Round means a pin; a squircle means a place.** Two marks in this sheet stay
-round — the category list's rows and the Find Nearby tiles — and both stand in
-for markers that are on the map right now: press Restrooms and teal pins land,
-and the rows underneath tell you which is which. The squircle is not standing in
-for anything. It is the place itself, in a list.
+Everything about a tile except its label and its position comes from somewhere
+that already existed: the classes are `poi.js`'s, the hue is `pinColour`'s, and
+the pictogram is the one `map-images.js` paints on that building out on the map.
+`src/building-kinds.js` is only the grid's own decisions. Six of the ten wear
+the same family blue, which is what the map says — Google spends one blue on
+everything civic and institutional — and at tile size that sharing is more
+visible than it is at disc size. The glyph, the label and the count carry the
+rest; inventing six new hues here would be a second palette to drift.
 
-The corner is Apple's, and it is measured rather than guessed. CSS spells a
-corner as `corner-shape: superellipse(k)`, drawing `xⁿ + yⁿ = 1` with `n = 2ᵏ`,
-so `round` is `superellipse(1)` and the familiar squircle is `superellipse(2)`.
-Neither is what iOS actually draws. Least-squares fitting the alpha channel of
-maps.apple.com's own `maps-app-icon-180x180.png` gives a corner box of 32.8% of
-the side at `n = 2.7` — `log₂ 2.7 = 1.433` — which reproduces their silhouette to
-a mean of 0.6 in 255. Rendering the CSS shape at 180px and differencing it
-against `public/apple-touch-icon.png`, which was cut with the same two numbers,
-comes out at 0.18 in 255. The two are the same corner.
+**The tile is the colour, and the Find Nearby tile above it is not.** That is
+the same distinction the marks on this map draw everywhere: a Find Nearby row
+stands in for the pins it is about to drop, so its tile is chrome and its disc
+is one of those pins shown early. A building class drops nothing — the buildings
+are already on the map with their own discs on them, and a second marker over
+each would be one answer printed twice. There is nothing for a small shape to
+stand in for, so the colour is the whole tile.
+
+The corner is `corner-shape: superellipse(1.433)`, which is the exponent fitted
+to maps.apple.com's own app icon — see `scripts/build-icons.mjs` — at a 16px
+radius rather than a percentage, because a percentage on a box that is not
+square resolves per axis and bends the corner into an ellipse.
+
+##### The camera bug this uncovered
+
+Pressing a tile from the fully drawn-up sheet threw the map to z11 and showed
+the interstate. It was not new — every Find Nearby press had done it since the
+detents landed — and it had two halves.
+
+`onFront` asked the sheet for `atLeast('half')` so an opening panel would be
+readable, which from `full` is a no-op. `full` is the viewport less a strip of
+map, so the answer was framed into **17 pixels** of canvas. The sheet now
+settles AT the reading height rather than merely reaching up to it: `atMost` is
+the mirror `sheet.js` was missing.
+
+Under that, `viewPadding` only checked that *some* canvas was left over, which
+is what Mapbox needs to avoid throwing and not what a person needs to see a
+campus. It has a floor now — `MIN_VIEW`, 18% of the canvas height. Measured on a
+402×874 phone with a results panel open, the sheet leaves 39% at `half`, 29% at
+`rest` and 1.9% at `full`; nothing lands in between, so the value is a wide
+choice. It is deliberately low, because the fallback is not better than a small
+strip: framing against the whole canvas centres the answer behind the sheet.
 
 #### One icon language, not two
 
@@ -1110,7 +1138,7 @@ mapper/
 │   ├── highlight.js        # Which buildings and car parks a legend row outlines
 │   ├── pin-select.js       # The spring a tapped pin grows with, measured off Apple Maps
 │   ├── poi.js              # Which disc each building name earns
-│   ├── place-kind.js       # …and which mark a row of a list in the sheet earns
+│   ├── building-kinds.js   # The browse-buildings grid — one tile per class
 │   ├── g-icons.js          # Button and chip glyphs, drawn as SVG
 │   ├── map-images.js       # Amenity pictograms and the route pin, drawn as SVG
 │   ├── provider.js         # Mapbox/Google toggle — who draws the ground

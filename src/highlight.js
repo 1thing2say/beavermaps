@@ -241,6 +241,33 @@ export function highlightFor(category, { areas = [], amenities, places } = {}) {
   };
 }
 
+/**
+ * The areas one class of BUILDING covers, in the shape highlightFor returns.
+ *
+ * A different question from the one above, and simpler for it. A legend row
+ * asks "which ground holds these objects", so it has to place every phone and
+ * bike rack and then work out what it landed on. A building class asks "which
+ * of these shapes ARE this", which the classifier answers by name — so there
+ * are never any loose points, and `counts.outside` is always 0.
+ *
+ * `classify` is handed in rather than imported, which is what keeps this file
+ * free of everything but geometry. main.js and the tests both pass poi.js's
+ * poiFor, so there is one classification in play and no way to disagree.
+ */
+export function highlightForKind(kind, { areas = [], classify } = {}) {
+  const indices = [];
+  for (let i = 0; i < areas.length; i += 1) {
+    const area = areas[i];
+    if (area.kind !== 'building' || !area.name) continue;
+    if (classify(area.name) === kind) indices.push(i);
+  }
+  return {
+    indices,
+    points: [],
+    counts: { buildings: indices.length, zones: 0, outside: 0 },
+  };
+}
+
 /** The outlined areas as something a geojson source will take. */
 export function areaCollection(areas, indices) {
   return {

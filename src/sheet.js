@@ -396,6 +396,28 @@ export function createSheet({ el, grip, enabled, onSettle }) {
   }
 
   /**
+   * ...and the other way, which the sheet had no way of being asked.
+   *
+   * A panel opening asks for `atLeast('half')` so its contents are readable.
+   * From `full` that was a no-op, and `full` is the viewport less a strip of
+   * map — so a list opened from a fully-drawn-up sheet had 110px of canvas
+   * above it, and the camera dutifully fitted five buildings into 110px. The
+   * result was a regional view of Sacramento with the answer sitting on top of
+   * it. The two calls together mean "settle at the reading height", from
+   * whichever side the sheet happens to be on.
+   *
+   * Guarded the same way `atLeast` is, and for the same reason: at `rest` the
+   * sheet is content-sized, so a rest that is already taller than `half` — a
+   * long card on a short screen — must not be shrunk into its own contents.
+   */
+  function atMost(name) {
+    if (!enabled()) return;
+    const heights = measure();
+    if (heights[detent] <= heights[name]) return;
+    apply(name, heights);
+  }
+
+  /**
    * Where the sheet's top edge is settling, in viewport pixels, or null when
    * this column is a sidebar rather than a sheet.
    *
@@ -414,6 +436,7 @@ export function createSheet({ el, grip, enabled, onSettle }) {
   return {
     refit,
     atLeast,
+    atMost,
     apply: (name) => apply(name),
     get detent() { return detent; },
     get top() { return top(); },

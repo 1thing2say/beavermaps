@@ -317,6 +317,33 @@
                         aria-label="Find nearby"></div>
                 </div>
 
+                <!-- ...and the third question, which is the one somebody who has
+                     never been here actually arrives with: WHAT IS ON THIS
+                     CAMPUS.
+
+                     The field above answers "where is X" and needs you to know
+                     what X is called. Find nearby answers "where is the nearest
+                     one of these" off my campus's printed key, which is restrooms,
+                     phones, bike racks and bus stops — infrastructure, not
+                     buildings. Neither of them will tell a visitor that this
+                     college has a gallery.
+
+                     One tile per class of building, in that class's own colour:
+                     the same ten src/poi.js already paints beside the building
+                     names on the map, so this is a way IN to something the map
+                     is saying rather than a second scheme over the top of it.
+                     Pressing one outlines every building in the class and lists
+                     them, which is the same pair of answers a legend row gives.
+
+                     Empty in the markup and filled by main.js when
+                     directory.json lands, and phone-only, both for the same
+                     reasons as the grid above it. -->
+                <div id="sheet-kinds" class="g-browse">
+                    <h2 class="g-browse-title">Browse buildings</h2>
+                    <div id="kinds-grid" class="g-kind-grid" role="group"
+                        aria-label="Browse buildings"></div>
+                </div>
+
                 <!-- ...and a heading for the shelf below, which only has one
                      when the sheet is open. Collapsed, the shelf appears under
                      a focused field where it is obviously a list of

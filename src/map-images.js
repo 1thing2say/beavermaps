@@ -349,6 +349,24 @@ export const GLYPH_DARK = '#202124';
 export const glyphInk = (colour) =>
   (contrast(colour, '#ffffff') >= 3 ? '#ffffff' : GLYPH_DARK);
 
+/**
+ * ...and the ink for TYPE on the same colour, which is a different question.
+ *
+ * glyphInk is answering WCAG's 3:1 for a non-text graphic. That is the right
+ * bar for a pictogram and the wrong one for a word: normal-size text wants
+ * 4.5:1, and three of the hues in this file sit between the two — white gives
+ * 3.09 on the food orange, 3.08 on the sport green and 3.25 on the arts purple.
+ * Legible as a bicycle, not legible as "Sport". Nothing was drawing type on
+ * these until the browse-buildings grid did; see .g-kind in src/input.css.
+ *
+ * Whichever ink has MORE contrast rather than whichever clears a bar. On every
+ * hue here that lands at 4.96 or better — the test pins it — and a hue added
+ * later that leaves both short still gets the better of the two, which is an
+ * honest failure rather than a silent one.
+ */
+export const textInk = (colour) =>
+  (contrast(colour, '#ffffff') >= contrast(colour, GLYPH_DARK) ? '#ffffff' : GLYPH_DARK);
+
 function glyphBody(kind, scale) {
   const glyph = GLYPHS[kind] ?? '<circle cx="12" cy="12" r="3.4"/>';
   const ink = glyphInk(pinColour(kind));

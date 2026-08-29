@@ -27,6 +27,7 @@ import {
   pinColour,
   glyphInk,
   glyphSvg,
+  textInk,
 } from './map-images.js';
 import { buildingCard, pinCard } from './building-popup.js';
 import {
@@ -44,11 +45,13 @@ import { googleGround } from './google-tiles.js';
 import { canFlyOver, framing, footprintExtent, roofOf, massOf } from './flyover.js';
 import { createFlyover } from './flyover-view.js';
 import { spin } from './spinner.js';
-import { paintIcons, icon } from './g-icons.js';
+import { paintIcons } from './g-icons.js';
 import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
-import { placeIndex } from './place-kind.js';
 import {
-  withPoiIcons, withParkingMarks, withAmenityNames, poiFor, POI_LABEL_KINDS,
+  BUILDING_KINDS, BUILDING_KIND_BY_ID, kindRow, groupBuildings,
+} from './building-kinds.js';
+import {
+  withPoiIcons, withParkingMarks, withAmenityNames, poiFor, POI_CLASSES, POI_LABEL_KINDS,
   AMENITY_ZOOM, AMENITY_ZOOM_DEFAULT,
 } from './poi.js';
 import { ringOf, centreOf, trimToCampus } from './campus-clip.js';
@@ -65,6 +68,7 @@ import { FONTS, SATELLITE, palette, styleKey, underPreset, followsClock, toward 
 import {
   buildAreas,
   highlightFor,
+  highlightForKind,
   areaCollection,
   pointCollection,
   extentOf,
@@ -137,6 +141,24 @@ const CAMPUS_BOUNDS = [
 
 // Breathing room around the campus when it is framed, in px.
 const FIT_MARGIN = 40;
+
+/**
+ * The least of the canvas a framed answer may be squeezed into, as a fraction
+ * of its height.
+ *
+ * Measured on a 402x874 phone with a results panel open: the sheet leaves 39%
+ * of the canvas at `half`, 29% at `rest` — where `rest` is content-sized, so it
+ * is the taller list that makes it the smaller strip — and 1.9% at `full`. That
+ * last one is 17 pixels, and it is what fitBounds was being asked to frame five
+ * buildings into.
+ *
+ * So the line goes well below the two good numbers and well above the bad one.
+ * Nothing lands between 0.019 and 0.29, which makes this a wide choice rather
+ * than a fitted one — and it wants to be low, because the fallback is not
+ * better: framing against the whole canvas centres the answer behind the sheet.
+ * A small strip is worth using; a 17px one is not. See viewPadding.
+ */
+const MIN_VIEW = 0.18;
 
 // The line everything of ours stops at. Same polygon the mask is cut from, so
 // the ground cover and the linework end together rather than a metre apart.
@@ -339,11 +361,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let campusPlaces = null;
   let campusLabels = null;
   let campusDirectory = null;
-  // ...and the join between a row's printed name and the mark its place already
-  // wears on the map. Built empty and rebuilt as the two files it reads land —
-  // see refreshPlaceKinds — so a search made in the first second of the app
-  // still answers, with fewer of its five sources available.
-  let kindOf = placeIndex();
   // Which building the outline in the directory layers belongs to. There was a
   // second variable beside it holding the open card, back when the card was a
   // Mapbox popup that had to be kept and removed; the card is the contents of
@@ -2046,6 +2063,22 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let categoryHits = [];
 
   /**
+   * ...and the same pair for the building-type grid, which is the other thing
+   * the results panel can be showing.
+   *
+   * Deliberately NOT folded into activeCategory. The two answer with different
+   * machinery — a legend row drops pins and filters the amenity layer, a
+   * building class outlines ground and touches no layer at all — and the one
+   * thing they have to agree about is that only one of them can be on screen,
+   * which is a line of code in each rather than a shared variable that would
+   * have to carry a tag saying which kind of thing it held.
+   */
+  let activeKind = null;
+  let kindHits = [];
+  /** Every directory building, grouped by class. Rebuilt when the file lands. */
+  let kindGroups = new Map();
+
+  /**
    * The hovered row's category, which the map draws in place of the selection
    * for exactly as long as the pointer is on the row.
    *
@@ -2930,6 +2963,69 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
    * "On screen" means where somebody can see it rather than where the canvas
    * ends — see `inView`, and the three bus stops it was written for.
    */
+  /**
+   * The buildings of one class, in the panel a legend row uses.
+   *
+   * The same panel on purpose: there is one place on this screen where "here is
+   * what you asked for" appears, and a second one would be a second thing to
+   * dismiss. It is also why selecting either kind of row clears the other.
+   *
+   * A row opens the BUILDING CARD rather than setting a destination, which is
+   * where this list differs from the category one above it. A defibrillator is
+   * a point you walk to and nothing else; a building has a card with what is
+   * inside it, an aerial view and its own Directions button — offering only
+   * "route me there" would be answering a narrower question than the one a
+   * browse grid was pressed to ask.
+   */
+  function renderKindList(kind) {
+    categoryTitle.textContent = kind.label;
+    const held = POI_CLASSES[kind.id];
+    categoryCount.textContent = kindHits.length
+      ? `${kindHits.length} building${kindHits.length === 1 ? '' : 's'} · ${held}`
+      : `Nothing found · ${held}`;
+
+    const tint = pinColour(kind.id);
+    categoryList.replaceChildren(...kindHits.map(({ props, feet }) => {
+      const li = document.createElement('li');
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'g-row';
+
+      // The class's own pictogram, in the class's own hue — the same drawing
+      // that is on the map over each of these footprints. Every row in this
+      // list is the same class, so the disc is saying what the LIST is rather
+      // than telling the rows apart, which is exactly what the category list
+      // above does with its own glyph.
+      const disc = document.createElement('span');
+      disc.className = 'g-row-disc';
+      disc.style.color = tint;
+      disc.style.background = `color-mix(in srgb, ${tint} 18%, transparent)`;
+      disc.innerHTML = glyphSvg(kind.id);
+      row.append(disc);
+
+      const text = document.createElement('span');
+      text.className = 'g-row-text';
+      const name = document.createElement('span');
+      name.className = 'g-row-name';
+      name.textContent = props.name;
+      const sub = document.createElement('span');
+      sub.className = 'g-row-sub';
+      sub.textContent = buildingSub(props);
+      text.append(name, sub);
+      row.append(text);
+
+      const dist = document.createElement('span');
+      dist.className = 'g-row-dist';
+      dist.textContent = niceFeet(feet);
+      row.append(dist);
+
+      row.addEventListener('click', () => openBuilding(props));
+      li.append(row);
+      return li;
+    }));
+    categoryPanel.classList.remove('hidden');
+  }
+
   function frameCategory() {
     if (categoryHits.length) { frame(categoryHits.map((hit) => hit.coords)); return; }
     // No pins does not mean nothing to show. A category whose source file
@@ -2979,10 +3075,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     const canvas = map.getCanvas();
     const bottom = canvas.getBoundingClientRect().bottom - top + FIT_MARGIN;
-    // Same guard campusPadding makes for the same reason: Mapbox throws if the
-    // padding does not leave a canvas behind, and a sheet pulled to full on a
-    // short screen can ask for more than there is.
-    if (bottom + FIT_MARGIN >= canvas.clientHeight) return pad;
+    // A strip has to be big enough to see a campus in, not merely bigger than
+    // nothing. The guard here used to be the one campusPadding makes — leave
+    // SOME canvas, because Mapbox throws when the padding eats all of it — and
+    // it let a sheet at `full` through with 110px to spare, into which fitBounds
+    // duly squeezed the whole athletics field: z11, forty miles of Sacramento,
+    // and the five buildings you asked about as a smudge under the glass.
+    //
+    // The sheet is settled at `half` before a panel opens now (see onFront), so
+    // this should not be reached by the path that produced it. It stays because
+    // it is the floor rather than the fix: a short screen, a rotation, a card
+    // that grows after the sheet has settled — any of them can put the top edge
+    // somewhere nothing planned for, and the honest answer there is to frame
+    // against the whole canvas and let the sheet cover part of the result.
+    if (canvas.clientHeight - bottom - pad.top < canvas.clientHeight * MIN_VIEW) return pad;
     return { ...pad, bottom };
   }
 
@@ -3092,6 +3198,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Pressing the pressed chip is how you get back to the whole map.
     if (activeCategory === id) { clearCategory(); return; }
 
+    // One answer at a time. The results panel below is shared and the outline
+    // is a single source, so a legend row arriving while a building class is
+    // up has to take both off it first.
+    if (activeKind) clearKind();
+
     activeCategory = id;
 
     // The hover that led here is being promoted to a selection, so the preview
@@ -3167,7 +3278,77 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     playCategoryClear();
   }
 
-  categoryClose.addEventListener('click', clearCategory);
+  /**
+   * The buildings of one class, outlined and listed.
+   *
+   * Deliberately thinner than selectCategory. That one has pins to drop, a pin
+   * layer to filter and a swap animation to run between two sets of markers;
+   * this has none of those, because the buildings it is about are ALREADY on
+   * the map with their own discs on them. Adding a second marker over each
+   * would be the same answer printed twice, in two shapes. What the press adds
+   * is the outline — which of the shapes down there are the ones you asked
+   * about — and the list.
+   */
+  function selectKind(id) {
+    const kind = BUILDING_KIND_BY_ID.get(id);
+    if (!kind || !campusDirectory) return;
+
+    if (activeKind === id) { clearKind(); return; }
+    if (activeCategory) clearCategory();
+
+    activeKind = id;
+    kindHits = (kindGroups.get(id) ?? [])
+      // `anchor` is the pole of inaccessibility, which is where the label sits
+      // and is a better middle than an entrance node hanging off one edge. Same
+      // point showBuildingCard flies to, so the distance printed on a row and
+      // the place the row takes you are the same place.
+      .map((props) => ({ props, feet: feetFrom(props.anchor ?? props.entrance) }))
+      .sort((a, b) => a.feet - b.feet);
+
+    // Same reason the legend row has it: on a phone the sheet this was pressed
+    // from covers the campus it is about.
+    if (phone.matches) toggleSheet(legendPanel, legendOpen, false);
+
+    stickyRow = kindRow(id);
+    paintHighlight();
+    syncLegendRows();
+
+    renderKindList(kind);
+    // Next frame, for the reason frameCategory is: the panel that just opened
+    // is a sheet on a phone and nothing has measured it yet.
+    requestAnimationFrame(frameKind);
+  }
+
+  function clearKind() {
+    activeKind = null;
+    kindHits = [];
+    stickyRow = null;
+    paintHighlight();
+    syncLegendRows();
+    categoryPanel.classList.add('hidden');
+    categoryList.replaceChildren();
+  }
+
+  /**
+   * The extent of what is outlined, rather than of a set of points.
+   *
+   * frameCategory frames the PINS because the pins are that answer; here the
+   * ground is, so it frames the same rectangle the outline covers. maxZoom
+   * matches the legend row's for the same reason — one building on its own
+   * would otherwise fill the screen at z20 and lose the campus around it.
+   */
+  function frameKind() {
+    const highlight = legendHighlights.get(kindRow(activeKind));
+    if (highlight?.indices.length) frame(extentOf(legendAreas, highlight), { maxZoom: 17 });
+  }
+
+  /** Whichever of the two the results panel is showing. */
+  function clearResults() {
+    if (activeKind) clearKind();
+    if (activeCategory) clearCategory();
+  }
+
+  categoryClose.addEventListener('click', clearResults);
 
   /**
    * The printed map's own labels.
@@ -3495,14 +3676,27 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     enabled: () => phone.matches,
     panels: [
       { el: placePanel, dismiss: closePlaceCard },
-      { el: categoryPanel, dismiss: clearCategory },
+      { el: categoryPanel, dismiss: clearResults },
       { el: sidePanel, dismiss: () => toggleRoutePanel(false) },
       { el: legendPanel, dismiss: () => toggleLegendPanel(false) },
     ],
     // A panel that arrives while the sheet is collapsed is a panel nobody can
     // read. A floor rather than a set, so one opening over a sheet already
     // pulled to full does not knock it back down.
-    onFront: (panel) => { if (panel) sheet.atLeast('half'); },
+    // SETTLE AT THE READING HEIGHT, from either side.
+    //
+    // This was `atLeast` alone, which is only half an instruction: it raised a
+    // resting sheet so the panel could be read and did nothing at all to one
+    // that was already at `full`. `full` is the viewport less a strip of map,
+    // so opening a list from the fully drawn-up front page left about 110px of
+    // canvas — and the camera, told to frame five buildings inside it, flew out
+    // to z11 and showed the interstate. Both grids on the front page did it,
+    // and it looked like the map had lost the campus.
+    onFront: (panel) => {
+      if (!panel) return;
+      sheet.atLeast('half');
+      sheet.atMost('half');
+    },
   });
 
   const refitSheet = () => { sheet.refit(); sheetStack.refit(); };
@@ -3771,45 +3965,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return `${Math.round(props.area_m2 * 10.7639).toLocaleString()} sq ft`;
   }
 
-  /** Rebuild the row-mark lookup over whatever has arrived. */
-  function refreshPlaceKinds() {
-    kindOf = placeIndex({ directory: campusDirectory, amenities: campusAmenities });
-  }
-
-  /**
-   * The mark for one row of a list: the pictogram and hue this campus already
-   * uses for that place, in a squircle.
-   *
-   * Both halves come from map-images.js — the same table the markers on the map
-   * are rasterised from — so a row and the disc over its footprint cannot end
-   * up saying different things about the same building. What the row is comes
-   * from src/place-kind.js. See .g-squircle in src/input.css for the shape, and
-   * for why this one is not round when the category list's disc beside it is.
-   */
-  function placeSquircle(name) {
-    const kind = kindOf(name);
-    const tint = pinColour(kind);
-    const box = document.createElement('span');
-    box.className = 'g-squircle';
-    box.style.setProperty('--tint', tint);
-    // White on nine of the ten hues and near-black on the yellow, decided by
-    // contrast rather than by eye — the same call the rasterised markers make,
-    // from the same function.
-    box.style.color = glyphInk(tint);
-    box.innerHTML = glyphSvg(kind);
-    return box;
-  }
-
-  /** The one row in an endpoint list that is not a place: where you are. */
-  function hereSquircle() {
-    const box = document.createElement('span');
-    box.className = 'g-squircle';
-    // The puck's own blue, off .user-dot in the stylesheet.
-    box.style.setProperty('--tint', '#1a73e8');
-    box.innerHTML = icon('navigate');
-    return box;
-  }
-
   /**
    * The directory, listed at the foot of the debug menu.
    *
@@ -3838,20 +3993,18 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       row.type = 'button';
       row.className = 'g-row';
 
-      // The building's own mark, which is the pictogram AND the hue now.
-      //
-      // This used to be one generic building glyph in a tinted circle, with a
-      // note saying the colour was what told the rows apart. It was, and it was
-      // doing it alone: five of the ten classes on this campus are blue, so a
-      // third of the list was the same drawing in the same colour. The glyph
-      // was not redrawn to fix that — map-images.js already had ten, one per
-      // class, painted beside these same names on the map.
-      //
-      // `kindOf` rather than poiFor directly: this is a directory row, so the
-      // first of its five sources answers and the rest never run, but there is
-      // no reason for this list to classify a building differently from the
-      // list in the sheet that holds the same buildings.
-      row.append(placeSquircle(props.name));
+      // One glyph, coloured by what the building IS — the same hue
+      // map-images.js paints its POI marker on the map, so the row and the disc
+      // over the footprint are visibly the same answer. poiFor returns null for
+      // the sheet's "Closed" areas, which never reach a directory row, but the
+      // fallback keeps a missing classification a grey disc rather than a throw.
+      const disc = document.createElement('span');
+      disc.className = 'g-row-disc';
+      disc.dataset.icon = 'building';
+      const hue = pinColour(poiFor(props.name) ?? 'campus');
+      disc.style.color = hue;
+      disc.style.background = `color-mix(in srgb, ${hue} 18%, transparent)`;
+      row.append(disc);
 
       const text = document.createElement('span');
       text.className = 'g-row-text';
@@ -3868,8 +4021,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       li.append(row);
       return li;
     }));
-    // No paintIcons here any more: these rows carry their pictogram inline,
-    // from map-images.js, rather than a `data-icon` name for g-icons to fill.
+    paintIcons(buildingsList);
   }
 
   /**
@@ -5043,6 +5195,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   // because renderLegend renders both and runs at module level — declared with
   // the shortcuts it would still be in the temporal dead zone at first call.
   const browseGrid = document.getElementById('browse-grid');
+  const kindsGrid = document.getElementById('kinds-grid');
   const legendClose = document.getElementById('legend-close');
   const legendOpen = document.getElementById('layers-legend');
   const debugLegend = document.getElementById('debug-legend');
@@ -5498,6 +5651,70 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     paintIcons(browseGrid);
   }
 
+  /**
+   * The building-type grid: ten blocks of colour, two to a row.
+   *
+   * THE TILE IS THE COLOUR. The Find Nearby tile above it is a grey card with a
+   * coloured disc on it, and that is right for what it is — pressing it drops
+   * pins, and the disc is one of those pins shown early. This grid drops
+   * nothing. It is the classification itself, so there is no marker for a small
+   * shape to stand in for and no reason to spend two thirds of the tile on grey.
+   *
+   * The count is not decoration either. Four of these classes hold exactly one
+   * building on this campus, and a tile that says so is a tile somebody can
+   * decide about before pressing it — "Bookstore · 1 building" is an answer
+   * already, and the press is only for where it is.
+   *
+   * Written from src/building-kinds.js, coloured by pinColour and drawn with
+   * map-images.js's own pictogram for the class, which is the same drawing on
+   * the same footprints out on the map.
+   */
+  function renderKinds() {
+    if (!kindsGrid) return;
+    kindsGrid.replaceChildren(...BUILDING_KINDS.map((kind) => {
+      const tile = document.createElement('button');
+      tile.type = 'button';
+      tile.className = 'g-kind';
+      tile.dataset.id = kind.id;
+      tile.setAttribute('aria-pressed', String(activeKind === kind.id));
+      // Same gate as the row above: the directory is what the counts and the
+      // outlines are read from, and a tile that answers "Nothing found" before
+      // it has landed reads as broken rather than as early.
+      tile.disabled = !campusDirectory;
+      tile.title = POI_CLASSES[kind.id];
+
+      const tint = pinColour(kind.id);
+      tile.style.setProperty('--tint', tint);
+      // textInk, not glyphInk. A marker on the map carries a pictogram and
+      // WCAG's bar for one of those is 3:1; a tile carries a WORD, and the bar
+      // for that is 4.5. Three of these hues sit between the two — food, sport
+      // and arts all give white about 3.1 — so the pictogram rule would have
+      // put "Sport" in white on green and called it legible. The glyph takes
+      // the same ink as the label rather than its own: two inks on one tile
+      // reads as a bug, and at 4.96 the darker one is fine for both.
+      tile.style.color = textInk(tint);
+
+      const glyph = document.createElement('span');
+      glyph.className = 'g-kind-glyph';
+      glyph.innerHTML = glyphSvg(kind.id);
+
+      const text = document.createElement('span');
+      text.className = 'g-kind-text';
+      const name = document.createElement('span');
+      name.className = 'g-kind-name';
+      name.textContent = kind.label;
+      const count = document.createElement('span');
+      count.className = 'g-kind-count';
+      const n = kindGroups.get(kind.id)?.length ?? 0;
+      count.textContent = campusDirectory ? `${n} building${n === 1 ? '' : 's'}` : '…';
+      text.append(name, count);
+
+      tile.append(glyph, text);
+      tile.addEventListener('click', () => selectKind(kind.id));
+      return tile;
+    }));
+  }
+
   /** The pressed state alone, for the paths that already redrew everything else. */
   function syncLegendRows() {
     for (const li of legendList.children) {
@@ -5506,6 +5723,13 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     }
     for (const tile of browseGrid?.children ?? []) {
       tile.setAttribute('aria-pressed', String(tile.dataset.id === activeCategory));
+    }
+    // The building grid is synced from HERE rather than from its own selection
+    // path, so every route that already redrew the pressed state — clearing a
+    // category, dismissing the panel, pressing a legend row — un-presses a
+    // building tile too without having to learn that it exists.
+    for (const tile of kindsGrid?.children ?? []) {
+      tile.setAttribute('aria-pressed', String(tile.dataset.id === activeKind));
     }
   }
 
@@ -5606,10 +5830,26 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         places: campusPlaces,
       }));
     }
+    // The building classes, into the same table under namespaced keys — see
+    // kindRow, and the `parking` collision it exists for. One table because
+    // paintHighlight reads one variable: whatever stickyRow names is what is
+    // outlined, and it should not have to know which family the row came from.
+    for (const kind of BUILDING_KINDS) {
+      legendHighlights.set(kindRow(kind.id), highlightForKind(kind.id, {
+        areas: legendAreas,
+        classify: poiFor,
+      }));
+    }
+    kindGroups = groupBuildings(campusDirectory, poiFor);
     renderLegend();
+    renderKinds();
   }
 
   renderLegend();
+  // Disabled and countless until directory.json lands, for the same reason the
+  // legend's rows are: ten tiles that all read "0 buildings" is a grid that
+  // looks broken rather than early.
+  renderKinds();
 
   map.on('load', async () => {
     // From here on the sky is followed rather than sampled once. See
@@ -5769,9 +6009,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // withAmenityNames — the other eighty said the icon's own meaning, in
       // type, four times over on a single building.
       campusAmenities = withAmenityNames(data);
-      // my campus's printed key is one of the five things a row's mark is looked up
-      // in, so it is only complete once this file is here.
-      refreshPlaceKinds();
       addLampLayers();
       addAmenityLayer();
       enableCategories();
@@ -5793,10 +6030,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     const directoryReady = fetchOverlay('directory').then((data) => {
       campusDirectory = data;
-      // Before anything below renders a row: three of the five sources a mark
-      // is looked up in are in this file, and the directory list underneath
-      // draws one per building.
-      refreshPlaceKinds();
       // The cold-start half of the suggestion order is read off this file, so
       // the ranking is only complete once it is here.
       refreshPopularity();
@@ -6550,14 +6783,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'g-shortcut';
-      // Four names in a scrolling strip, and the strip is what you look at
-      // before you have decided to type anything — so the mark is doing more
-      // work here than in the list under it. Small, because a chip is 32px
-      // tall; the same drawing and the same hue as everywhere else.
-      chip.append(placeSquircle(entry.name));
-      const label = document.createElement('span');
-      label.textContent = entry.name;
-      chip.append(label);
+      chip.textContent = entry.name;
       // The full name for anyone who cannot see how far the label was cut.
       chip.title = entry.name;
       chip.setAttribute('aria-label', `Go to ${entry.name}`);
@@ -6709,21 +6935,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       const li = document.createElement('li');
       li.id = `place-result-${i}`;
       li.setAttribute('role', 'option');
-      // WHAT SORT OF PLACE THIS IS, before its name.
-      //
-      // The map has said so beside every building name for a while — a small
-      // coloured pictogram, which is most of what makes Google's map scannable
-      // — and this list, the one place on a phone where somebody is reading
-      // rather than looking, said nothing. Nine results for "center" were nine
-      // grey lines. See placeSquircle.
-      li.append(placeSquircle(entry.name));
-      const text = document.createElement('div');
-      text.className = 'g-result-text';
       const name = document.createElement('div');
       name.className = 'g-result-name';
       name.textContent = entry.name;
-      text.append(name);
-      li.append(text);
+      li.append(name);
       /*
        * Only worth a second line when it says something the name did not — and
        * my campus's own prose does not.
@@ -6755,7 +6970,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         const sub = document.createElement('div');
         sub.className = 'g-result-sub';
         sub.textContent = hint;
-        text.append(sub);
+        li.append(sub);
       }
       li.addEventListener('mousedown', (event) => {
         // mousedown, not click: blur would close the list first.
@@ -6878,26 +7093,17 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       list.replaceChildren(...found.map((entry, i) => {
         const li = document.createElement('li');
         li.setAttribute('role', 'option');
-        // The same mark the search box's list wears, because it is the same
-        // list — see renderResults. The one row that is not a place on this
-        // campus gets the puck instead: Google's blue and the arrow the locate
-        // button carries, which is what "Your location" already looks like
-        // everywhere else in the app.
-        li.append(entry.here ? hereSquircle() : placeSquircle(entry.name));
-        const text = document.createElement('div');
-        text.className = 'g-result-text';
         const name = document.createElement('div');
         name.className = 'g-result-name';
         name.textContent = entry.name;
-        text.append(name);
-        li.append(text);
+        li.append(name);
         const hint = entry.here ? 'Where your phone says you are'
           : (entry.points?.length > 1 ? `${entry.points.length} locations` : entry.description);
         if (hint) {
           const sub = document.createElement('div');
           sub.className = 'g-result-sub';
           sub.textContent = hint;
-          text.append(sub);
+          li.append(sub);
         }
         li.addEventListener('mousedown', (event) => {
           event.preventDefault();
