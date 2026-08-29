@@ -1,6 +1,6 @@
 # beavermaps
 
-A campus map for **my campus** — the college's own printed sheet,
+A map of **my campus** — the college's own printed sheet,
 rebuilt as the kind of map people already know how to use.
 
 Search a building, a department or a room number. Browse what is on the campus by
@@ -15,7 +15,7 @@ everything else is a campus map now.
 
 ## Demo
 
-<img src="assets/demo.png" alt="my campus's campus map on a desktop: a pill search field reading Library over a route panel showing 2 min, 490 ft and route calculated with 4 turns beside a green GO button; on the map, a blue walking route runs from the user's location puck to a red pin at the Library, past coloured category discs on every building" width="820">
+<img src="assets/demo.png" alt="The campus map on a desktop: a pill search field reading Library over a route panel showing 2 min, 490 ft and route calculated with 4 turns beside a green GO button; on the map, a blue walking route runs from the user's location puck to a red pin at the Library, past coloured category discs on every building" width="820">
 
 ...and the front page of the sheet on a phone — my campus's printed legend on top, the
 ten classes of building under it:
@@ -43,7 +43,7 @@ turn count, over my campus's own walkways. Start from your phone's GPS or from a
 point on the map.
 
 **Look right doing it.** Light, dark and follow-the-system, with the map's own
-lighting following the actual sun over Sacramento. Google or Mapbox drawing the
+lighting following the actual sun overhead. Google or Mapbox drawing the
 ground, switchable. An iOS-style bottom sheet with real detents on a phone, a
 sidebar on a desktop. Installable to the home screen with its own icon.
 

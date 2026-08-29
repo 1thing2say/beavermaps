@@ -3079,7 +3079,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // nothing. The guard here used to be the one campusPadding makes — leave
     // SOME canvas, because Mapbox throws when the padding eats all of it — and
     // it let a sheet at `full` through with 110px to spare, into which fitBounds
-    // duly squeezed the whole athletics field: z11, forty miles of Sacramento,
+    // duly squeezed the whole athletics field: z11, forty miles of the county,
     // and the five buildings you asked about as a smudge under the glass.
     //
     // The sheet is settled at `half` before a panel opens now (see onFront), so

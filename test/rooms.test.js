@@ -141,5 +141,9 @@ test('the artifact says which term it is, because it will go stale', () => {
   // on its face, or next August it is quietly wrong and nothing says so.
   assert.match(rooms.term.strm, /^\d{4}$/);
   assert.ok(rooms.term.name && rooms.term.retrieved, 'the term is not named or dated');
-  assert.match(rooms.source, /^https:\/\//);
+  // The source is NAMED rather than linked. It used to be asserted as a URL,
+  // and that URL was the college's own hostname — the single most identifying
+  // string in the repo. What the assertion is actually protecting is that the
+  // artifact says where it came from, which a name does as well as a link.
+  assert.ok(rooms.source && rooms.source.length > 8, 'the artifact does not say where it came from');
 });
