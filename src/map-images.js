@@ -359,6 +359,42 @@ function glyphBody(kind, scale) {
 }
 
 /**
+ * One pictogram as DOM markup, on the grid it was drawn on and in
+ * `currentColor`.
+ *
+ * The same drawings the map rasterises into its discs, lent to the chrome
+ * rather than redrawn for it. src/g-icons.js used to carry a single `building`
+ * mark for every row of the directory, with a note saying that ten hand-drawn
+ * glyphs "would say the same thing twice and let the two drift" — which was
+ * true of ten NEW ones. These are not new; they are the ten this map already
+ * paints beside the same names, so a row and the disc over its footprint are
+ * now the same drawing as well as the same hue.
+ *
+ * `currentColor` rather than `glyphInk`, unlike everything else in this file:
+ * a rasterised marker has to carry its own ink because it becomes a PNG, and
+ * a DOM icon inherits it, which is the convention g-icons.js already set. The
+ * caller picks the ink — with glyphInk, exported above, so the choice is still
+ * made in one place.
+ *
+ * The stroke variants keep their stroke. They were drawn that way because a
+ * filled bicycle is a blob at marker size, and a sheet row is smaller still.
+ */
+export function glyphSvg(kind) {
+  const glyph = GLYPHS[kind];
+  if (!glyph) return '';
+  const body = typeof glyph === 'string'
+    ? glyph
+    : '<g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" '
+      + `stroke-linejoin="round">${glyph.stroke}</g>`;
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%" '
+    + `fill="currentColor" aria-hidden="true" focusable="false">${body}</svg>`;
+}
+
+/** Every kind this file has a pictogram for. Exported so a test can check the
+ *  join between a classification and something that can actually be drawn. */
+export const GLYPH_KINDS = Object.keys(GLYPHS);
+
+/**
  * The resting marker: a flat disc, centred on the place.
  *
  * No tail, and that is the substantive change rather than a cosmetic one — the

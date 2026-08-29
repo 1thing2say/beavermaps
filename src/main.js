@@ -26,6 +26,7 @@ import {
   loadAmenityIcons, routePin, liftedOffset, ROUTE_PIN_W, PIN_BASE_W, AMENITY_KINDS, pinInk,
   pinColour,
   glyphInk,
+  glyphSvg,
 } from './map-images.js';
 import { buildingCard, pinCard } from './building-popup.js';
 import {
@@ -43,8 +44,9 @@ import { googleGround } from './google-tiles.js';
 import { canFlyOver, framing, footprintExtent, roofOf, massOf } from './flyover.js';
 import { createFlyover } from './flyover-view.js';
 import { spin } from './spinner.js';
-import { paintIcons } from './g-icons.js';
+import { paintIcons, icon } from './g-icons.js';
 import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
+import { placeIndex } from './place-kind.js';
 import {
   withPoiIcons, withParkingMarks, withAmenityNames, poiFor, POI_LABEL_KINDS,
   AMENITY_ZOOM, AMENITY_ZOOM_DEFAULT,
@@ -337,6 +339,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let campusPlaces = null;
   let campusLabels = null;
   let campusDirectory = null;
+  // ...and the join between a row's printed name and the mark its place already
+  // wears on the map. Built empty and rebuilt as the two files it reads land —
+  // see refreshPlaceKinds — so a search made in the first second of the app
+  // still answers, with fewer of its five sources available.
+  let kindOf = placeIndex();
   // Which building the outline in the directory layers belongs to. There was a
   // second variable beside it holding the open card, back when the card was a
   // Mapbox popup that had to be kept and removed; the card is the contents of
@@ -3764,6 +3771,45 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return `${Math.round(props.area_m2 * 10.7639).toLocaleString()} sq ft`;
   }
 
+  /** Rebuild the row-mark lookup over whatever has arrived. */
+  function refreshPlaceKinds() {
+    kindOf = placeIndex({ directory: campusDirectory, amenities: campusAmenities });
+  }
+
+  /**
+   * The mark for one row of a list: the pictogram and hue this campus already
+   * uses for that place, in a squircle.
+   *
+   * Both halves come from map-images.js — the same table the markers on the map
+   * are rasterised from — so a row and the disc over its footprint cannot end
+   * up saying different things about the same building. What the row is comes
+   * from src/place-kind.js. See .g-squircle in src/input.css for the shape, and
+   * for why this one is not round when the category list's disc beside it is.
+   */
+  function placeSquircle(name) {
+    const kind = kindOf(name);
+    const tint = pinColour(kind);
+    const box = document.createElement('span');
+    box.className = 'g-squircle';
+    box.style.setProperty('--tint', tint);
+    // White on nine of the ten hues and near-black on the yellow, decided by
+    // contrast rather than by eye — the same call the rasterised markers make,
+    // from the same function.
+    box.style.color = glyphInk(tint);
+    box.innerHTML = glyphSvg(kind);
+    return box;
+  }
+
+  /** The one row in an endpoint list that is not a place: where you are. */
+  function hereSquircle() {
+    const box = document.createElement('span');
+    box.className = 'g-squircle';
+    // The puck's own blue, off .user-dot in the stylesheet.
+    box.style.setProperty('--tint', '#1a73e8');
+    box.innerHTML = icon('navigate');
+    return box;
+  }
+
   /**
    * The directory, listed at the foot of the debug menu.
    *
@@ -3792,18 +3838,20 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       row.type = 'button';
       row.className = 'g-row';
 
-      // One glyph, coloured by what the building IS — the same hue
-      // map-images.js paints its POI marker on the map, so the row and the disc
-      // over the footprint are visibly the same answer. poiFor returns null for
-      // the sheet's "Closed" areas, which never reach a directory row, but the
-      // fallback keeps a missing classification a grey disc rather than a throw.
-      const disc = document.createElement('span');
-      disc.className = 'g-row-disc';
-      disc.dataset.icon = 'building';
-      const hue = pinColour(poiFor(props.name) ?? 'campus');
-      disc.style.color = hue;
-      disc.style.background = `color-mix(in srgb, ${hue} 18%, transparent)`;
-      row.append(disc);
+      // The building's own mark, which is the pictogram AND the hue now.
+      //
+      // This used to be one generic building glyph in a tinted circle, with a
+      // note saying the colour was what told the rows apart. It was, and it was
+      // doing it alone: five of the ten classes on this campus are blue, so a
+      // third of the list was the same drawing in the same colour. The glyph
+      // was not redrawn to fix that — map-images.js already had ten, one per
+      // class, painted beside these same names on the map.
+      //
+      // `kindOf` rather than poiFor directly: this is a directory row, so the
+      // first of its five sources answers and the rest never run, but there is
+      // no reason for this list to classify a building differently from the
+      // list in the sheet that holds the same buildings.
+      row.append(placeSquircle(props.name));
 
       const text = document.createElement('span');
       text.className = 'g-row-text';
@@ -3820,7 +3868,8 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       li.append(row);
       return li;
     }));
-    paintIcons(buildingsList);
+    // No paintIcons here any more: these rows carry their pictogram inline,
+    // from map-images.js, rather than a `data-icon` name for g-icons to fill.
   }
 
   /**
@@ -5720,6 +5769,9 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       // withAmenityNames — the other eighty said the icon's own meaning, in
       // type, four times over on a single building.
       campusAmenities = withAmenityNames(data);
+      // my campus's printed key is one of the five things a row's mark is looked up
+      // in, so it is only complete once this file is here.
+      refreshPlaceKinds();
       addLampLayers();
       addAmenityLayer();
       enableCategories();
@@ -5741,6 +5793,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
 
     const directoryReady = fetchOverlay('directory').then((data) => {
       campusDirectory = data;
+      // Before anything below renders a row: three of the five sources a mark
+      // is looked up in are in this file, and the directory list underneath
+      // draws one per building.
+      refreshPlaceKinds();
       // The cold-start half of the suggestion order is read off this file, so
       // the ranking is only complete once it is here.
       refreshPopularity();
@@ -6494,7 +6550,14 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'g-shortcut';
-      chip.textContent = entry.name;
+      // Four names in a scrolling strip, and the strip is what you look at
+      // before you have decided to type anything — so the mark is doing more
+      // work here than in the list under it. Small, because a chip is 32px
+      // tall; the same drawing and the same hue as everywhere else.
+      chip.append(placeSquircle(entry.name));
+      const label = document.createElement('span');
+      label.textContent = entry.name;
+      chip.append(label);
       // The full name for anyone who cannot see how far the label was cut.
       chip.title = entry.name;
       chip.setAttribute('aria-label', `Go to ${entry.name}`);
@@ -6646,10 +6709,21 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       const li = document.createElement('li');
       li.id = `place-result-${i}`;
       li.setAttribute('role', 'option');
+      // WHAT SORT OF PLACE THIS IS, before its name.
+      //
+      // The map has said so beside every building name for a while — a small
+      // coloured pictogram, which is most of what makes Google's map scannable
+      // — and this list, the one place on a phone where somebody is reading
+      // rather than looking, said nothing. Nine results for "center" were nine
+      // grey lines. See placeSquircle.
+      li.append(placeSquircle(entry.name));
+      const text = document.createElement('div');
+      text.className = 'g-result-text';
       const name = document.createElement('div');
       name.className = 'g-result-name';
       name.textContent = entry.name;
-      li.append(name);
+      text.append(name);
+      li.append(text);
       /*
        * Only worth a second line when it says something the name did not — and
        * my campus's own prose does not.
@@ -6681,7 +6755,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         const sub = document.createElement('div');
         sub.className = 'g-result-sub';
         sub.textContent = hint;
-        li.append(sub);
+        text.append(sub);
       }
       li.addEventListener('mousedown', (event) => {
         // mousedown, not click: blur would close the list first.
@@ -6804,17 +6878,26 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       list.replaceChildren(...found.map((entry, i) => {
         const li = document.createElement('li');
         li.setAttribute('role', 'option');
+        // The same mark the search box's list wears, because it is the same
+        // list — see renderResults. The one row that is not a place on this
+        // campus gets the puck instead: Google's blue and the arrow the locate
+        // button carries, which is what "Your location" already looks like
+        // everywhere else in the app.
+        li.append(entry.here ? hereSquircle() : placeSquircle(entry.name));
+        const text = document.createElement('div');
+        text.className = 'g-result-text';
         const name = document.createElement('div');
         name.className = 'g-result-name';
         name.textContent = entry.name;
-        li.append(name);
+        text.append(name);
+        li.append(text);
         const hint = entry.here ? 'Where your phone says you are'
           : (entry.points?.length > 1 ? `${entry.points.length} locations` : entry.description);
         if (hint) {
           const sub = document.createElement('div');
           sub.className = 'g-result-sub';
           sub.textContent = hint;
-          li.append(sub);
+          text.append(sub);
         }
         li.addEventListener('mousedown', (event) => {
           event.preventDefault();

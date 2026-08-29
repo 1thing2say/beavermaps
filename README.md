@@ -768,12 +768,19 @@ So every printed building name now gets a disc, classified in `src/poi.js`:
 | disc | colour | buildings |
 | --- | --- | --- |
 | `campus` | Google service blue | 15 — the general teaching and service buildings |
-| `sport` | green | 6 — Main Gym, Practice Gym, Pool, Adaptive PE, Rec., Kinesiology |
-| `works` | grey | 5 — Operations, Sign Shop, Auto Yard, Ranch House, Portable Village |
+| `works` | grey | 6 — Operations, Sign Shop, Auto Yard, Ranch House, Portable Village, Rec. |
+| `sport` | green | 5 — Main Gym, Practice Gym, Pool, Adaptive PE, Kinesiology |
 | `arts` | purple | 4 — Fine & Applied Arts, Gallery, Music, Theatre |
 | `food` | orange | 2 — Oak Cafe, Evangelisti Culinary Arts Center |
 | `library` | blue | 2 — Library, Learning Resource Center |
 | `store` · `civic` · `childcare` · `parking` | blue | 1 each |
+
+**Rec. is Receiving.** It sat under `sport` for a long time on a `\brec\b` in the
+sport rule — the only abbreviation on the sheet, and it does not abbreviate what
+it looks like. my campus's directory spells it out: 519 m² of loading dock in the
+service corner between the Ranch House and the police office. It is `works` now,
+which is the one classification here a reader could check against the ground and
+find wrong.
 
 The classification lives in the app rather than in `build-labels.mjs` because it
 is presentation, not data — `labels.json` stays exactly what my campus's cartographer
@@ -783,6 +790,50 @@ Two rules are order-dependent and the tests pin both: the **Evangelisti Culinary
 Arts Center** is a kitchen that contains the word "Arts", and **Arts & Sci** is a
 general teaching building that does too. One label, "Closed", gets no disc — it
 names a fenced-off area, not a place, and it is the only name allowed to opt out.
+
+#### The same marks in the sheet
+
+The discs answered the map and left the sheet alone, which is the half of the
+app somebody is reading rather than looking at. Searching "center" gave nine
+grey lines; the shelf of places you go was four names in a row; the directory
+was thirty rows sharing one generic building glyph, with the colour doing all
+the work — and five of the ten classes on this campus are blue.
+
+So every row of every list in the sheet now carries the mark its place already
+has on the map: **the same pictogram, in the same hue, in a squircle**. The
+classification is `src/place-kind.js`, which is only a join — the colour and the
+drawing come from `map-images.js` and the building classes from `poi.js`, so a
+row and the disc over its own footprint cannot say different things.
+
+A row's name is not always a building name, so the join tries five sources and
+takes the first that answers:
+
+| # | source | example |
+| --- | --- | --- |
+| 1 | the directory, by any name a building answers to | "CTE - Career Technical Education" → the CTE building's class |
+| 2 | my campus's printed key, by label, in either number | "Emergency telephones" → the yellow phone, not the car park holding five of them |
+| 3 | the things my campus lists that are not buildings | "Myrtle Parking Lot East" → the blue P; "Tennis Courts" → green |
+| 4 | `poi.js`'s own rules, on the row's own name | "Cafeteria" → orange, wherever it happens to sit |
+| 5 | the building holding it | "Design Hub" → whatever CTE is |
+
+Anything left is `campus`, which on a college campus is a true statement. Of the
+120 names in my campus's directory, 56 land there and 64 carry something more specific.
+
+**Round means a pin; a squircle means a place.** Two marks in this sheet stay
+round — the category list's rows and the Find Nearby tiles — and both stand in
+for markers that are on the map right now: press Restrooms and teal pins land,
+and the rows underneath tell you which is which. The squircle is not standing in
+for anything. It is the place itself, in a list.
+
+The corner is Apple's, and it is measured rather than guessed. CSS spells a
+corner as `corner-shape: superellipse(k)`, drawing `xⁿ + yⁿ = 1` with `n = 2ᵏ`,
+so `round` is `superellipse(1)` and the familiar squircle is `superellipse(2)`.
+Neither is what iOS actually draws. Least-squares fitting the alpha channel of
+maps.apple.com's own `maps-app-icon-180x180.png` gives a corner box of 32.8% of
+the side at `n = 2.7` — `log₂ 2.7 = 1.433` — which reproduces their silhouette to
+a mean of 0.6 in 255. Rendering the CSS shape at 180px and differencing it
+against `public/apple-touch-icon.png`, which was cut with the same two numbers,
+comes out at 0.18 in 255. The two are the same corner.
 
 #### One icon language, not two
 
@@ -1059,6 +1110,7 @@ mapper/
 │   ├── highlight.js        # Which buildings and car parks a legend row outlines
 │   ├── pin-select.js       # The spring a tapped pin grows with, measured off Apple Maps
 │   ├── poi.js              # Which disc each building name earns
+│   ├── place-kind.js       # …and which mark a row of a list in the sheet earns
 │   ├── g-icons.js          # Button and chip glyphs, drawn as SVG
 │   ├── map-images.js       # Amenity pictograms and the route pin, drawn as SVG
 │   ├── provider.js         # Mapbox/Google toggle — who draws the ground

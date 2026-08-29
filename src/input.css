@@ -1273,10 +1273,26 @@ body.navigating .app-chrome {
     box-shadow: var(--g-shadow);
 }
 
+/* A row is a mark and a two-line stack beside it now, so it is a flex line
+   rather than a block of two divs. `align-items: center` and not `start`: the
+   squircle is 30px and the stack is 34–38px, so hanging it off the top leaves
+   it visibly high on the rows that carry a subtitle and correct on the ones
+   that do not. */
 .g-results li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     padding: 8px 16px;
     cursor: pointer;
     font-size: 14px;
+}
+
+/* The stack, which has to be allowed to shrink or the name's ellipsis never
+   triggers: a flex item's min-width is auto, so a long building name pushes the
+   row wider than the sheet instead of being cut. */
+.g-result-text {
+    min-width: 0;
+    flex: 1;
 }
 
 /* A POINTER THAT EXISTS, and a cursor that has been moved.
@@ -1308,6 +1324,9 @@ body.navigating .app-chrome {
 
 .g-result-name {
     color: var(--g-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .g-result-sub {
@@ -1357,8 +1376,14 @@ body.navigating .app-chrome {
 .g-shortcut {
     flex: none;
     scroll-snap-align: start;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     height: 32px;
-    padding: 0 14px;
+    /* Tighter on the left than the right: the mark is a filled shape and reads
+       as heavier than the type beside it, so equal padding would look
+       lopsided towards the label. */
+    padding: 0 12px 0 5px;
     border: 0;
     border-radius: 16px;
     background: var(--g-fill);
@@ -1368,6 +1393,19 @@ body.navigating .app-chrome {
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
+}
+
+/* Small enough to sit inside a 32px chip with air around it, and the glyph
+   comes down with it — a 18px drawing in a 22px box is a chip that is all
+   pictogram. */
+.g-shortcut .g-squircle {
+    width: 22px;
+    height: 22px;
+}
+
+.g-shortcut .g-squircle svg {
+    width: 14px;
+    height: 14px;
 }
 
 .g-shortcut:active {
@@ -1971,6 +2009,62 @@ body.navigating .app-chrome {
 }
 
 .g-row-disc .g-icon {
+    width: 18px;
+    height: 18px;
+}
+
+/* THE SQUIRCLE: what a place looks like when it is a row rather than a pin.
+   ===========================================================================
+   Every list in the sheet used to be names in one ink. That is the same wall
+   of undifferentiated type my campus's printed sheet is — 39 building names, all the
+   same colour — and it is the exact problem the coloured discs on the map were
+   added to solve. Searching "library" and getting nine grey lines threw that
+   away at the moment somebody was reading hardest.
+
+   So a row wears the mark its place already has. The hue is pinColour's, the
+   pictogram is map-images.js's own, and the classification is src/poi.js
+   through src/place-kind.js — nothing about what a place IS is decided here.
+
+   WHY A SQUIRCLE AND NOT THE DISC BESIDE IT. Two round marks in this sheet stay
+   round — `.g-row-disc` above and `.g-browse-disc` further down — and both are
+   standing in for a pin: press Restrooms and teal pins land on the map, and the
+   rows underneath show you which of them is which. Round means "that thing, out
+   there, now". This one is not standing in for anything. It is the place
+   itself, in a list, and the shape is the difference between the two claims.
+
+   The shape also fits the box better. A round mark in a rectangle of text has
+   to be smaller than the type block beside it to look centred; a rounded square
+   fills it, which is why every OS list that has ever carried an icon per row
+   carries a rounded square.
+
+   THE CORNER IS APPLE'S, MEASURED. `corner-shape` takes a logarithmic exponent:
+   superellipse(k) draws x^n + y^n = 1 with n = 2^k, so `round` is
+   superellipse(1) and the familiar squircle is superellipse(2). Neither is what
+   iOS actually draws. Fitting the alpha channel of maps.apple.com's own
+   maps-app-icon-180x180.png by least squares gives a corner box of 32.8% of the
+   side and n = 2.7 — log2(2.7) = 1.433 — which reproduces their silhouette to a
+   mean of 0.6 in 255. The same two numbers cut public/apple-touch-icon.png; see
+   the note in scripts/build-icons.mjs.
+
+   Where `corner-shape` is not supported the radius alone still applies, which
+   is an ordinary 32.8% rounded square — the right thing to degrade to, since
+   the fitted curve and a plain arc differ by about a pixel at this size. */
+.g-squircle {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 32.8%;
+    corner-shape: superellipse(1.433);
+    background: var(--tint, var(--g-blue));
+    /* Set inline by main.js from glyphInk, which is the same contrast test the
+       rasterised markers use — so the one yellow in the palette gets dark ink
+       here for the same reason it gets it on the map. */
+    color: #fff;
+}
+
+.g-squircle svg {
     width: 18px;
     height: 18px;
 }

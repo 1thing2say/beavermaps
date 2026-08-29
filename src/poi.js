@@ -49,13 +49,20 @@ const RULES = [
   { icon: 'campus', test: /arts? (&|and) sci/i },
 
   { icon: 'arts', test: /gallery|theatre|theater|\bmusic\b|\barts\b/i },
-  { icon: 'sport', test: /\bgym\b|\bpool\b|\bPE\b|physical education|athletic|kinesiology|\brec\b/i },
+  { icon: 'sport', test: /\bgym\b|\bpool\b|\bPE\b|physical education|athletic|kinesiology|baseball|softball/i },
   { icon: 'library', test: /library|learning resource/i },
   { icon: 'store', test: /bookstore|college store/i },
   { icon: 'civic', test: /police/i },
   { icon: 'childcare', test: /child development/i },
   { icon: 'parking', test: /parking garage/i },
-  { icon: 'works', test: /operations|sign shop|auto yard|ranch house|portable village/i },
+
+  // "Rec." is the only name on this campus that abbreviates, and it does not
+  // abbreviate what it looks like. my campus's directory spells it Receiving: 519 m2
+  // of loading dock in the service corner, between the Ranch House and the
+  // police office. The sport rule above used to carry a `\brec\b` for it and
+  // painted it green, which is the one classification here that a reader could
+  // check against the ground and find wrong.
+  { icon: 'works', test: /operations|sign shop|auto yard|ranch house|portable village|receiving|^rec\.?$/i },
 ];
 
 /**
@@ -65,11 +72,25 @@ const RULES = [
  */
 const NOT_A_PLACE = /^closed$/i;
 
+/**
+ * The rule a name matches, or null when none does.
+ *
+ * The same table `poiFor` reads, WITHOUT its default. A caller that has other
+ * evidence to fall back on needs to know the difference between "this is a
+ * gallery" and "nothing here says what this is" — see src/place-kind.js, which
+ * would otherwise stop at `campus` and never reach the building a room is in.
+ */
+export function poiRule(text) {
+  const name = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!name || NOT_A_PLACE.test(name)) return null;
+  return RULES.find((rule) => rule.test.test(name))?.icon ?? null;
+}
+
 /** The disc for a printed label, or null when the label names no place. */
 export function poiFor(text) {
   const name = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!name || NOT_A_PLACE.test(name)) return null;
-  return RULES.find((rule) => rule.test.test(name))?.icon ?? 'campus';
+  return poiRule(name) ?? 'campus';
 }
 
 /** The label kinds that get a disc: my campus's two building-name kinds, and the lots. */
