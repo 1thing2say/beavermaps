@@ -94,7 +94,7 @@ for (const feature of graph.features) {
 const networkPoints = featureCollection(vertices.map((v) => point(v)));
 
 console.log(
-  `[mapper] graph ready in ${Date.now() - buildStart}ms ` +
+  `[beavermaps] graph ready in ${Date.now() - buildStart}ms ` +
   `(${network.features.length} campus + ${approach.features.length} approach segments, ` +
   `${vertices.length} vertices)`
 );
@@ -132,7 +132,7 @@ const WIRE = {
   ...Object.fromEntries(Object.entries(OVERLAYS).map(([name, data]) => [name, wireForm(data)])),
 };
 console.log(
-  `[mapper] wire forms ready in ${Date.now() - wireStart}ms (` +
+  `[beavermaps] wire forms ready in ${Date.now() - wireStart}ms (` +
   `${Math.round(Object.values(WIRE).reduce((n, w) => n + w.raw.length, 0) / 1024)} KB -> ` +
   `${Math.round(Object.values(WIRE).reduce((n, w) => n + w.gzip.length, 0) / 1024)} KB gzipped)`
 );
@@ -228,9 +228,9 @@ if (existsSync(distDir)) {
   // accepts a bare wildcard path.
   app.use((_req, res) => res.sendFile(path.join(distDir, 'index.html')));
 } else {
-  console.log('[mapper] no dist/ found — API only. Run `npm run build` to serve the app.');
+  console.log('[beavermaps] no dist/ found — API only. Run `npm run build` to serve the app.');
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[mapper] listening on http://0.0.0.0:${PORT}`);
+  console.log(`[beavermaps] listening on http://0.0.0.0:${PORT}`);
 });

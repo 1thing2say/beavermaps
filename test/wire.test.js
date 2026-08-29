@@ -141,7 +141,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { compressedStatic, wireBytes } from '../server/wire.js';
 
-const DIST = mkdtempSync(path.join(tmpdir(), 'mapper-dist-'));
+const DIST = mkdtempSync(path.join(tmpdir(), 'beavermaps-dist-'));
 mkdirSync(path.join(DIST, 'assets'));
 const BIG = 'const x = "' + 'a'.repeat(5000) + '";\n';
 writeFileSync(path.join(DIST, 'assets', 'app-abc123.js'), BIG);

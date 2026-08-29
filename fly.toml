@@ -1,6 +1,6 @@
 # Rename `app` to something globally unique before the first deploy, or just
 # let `fly launch` rewrite this file for you.
-app = "mapper"
+app = "beavermaps"
 primary_region = "dfw"
 
 [build]

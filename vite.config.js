@@ -68,7 +68,7 @@ const LAN_HOST = `${hostname().replace(/\.local$/i, '')}.local`.toLowerCase();
  */
 function devCompression() {
   return {
-    name: 'mapper-dev-compression',
+    name: 'beavermaps-dev-compression',
     apply: 'serve',
     configureServer(server) {
       const gzip = compression({

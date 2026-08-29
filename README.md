@@ -1,49 +1,81 @@
-# Custom Map Router
+# beavermaps
 
-An interactive web app that routes across a **custom road network** instead of
-public roads. Click a start and end point on the map and it snaps them to the
-nearest intersection, finds the shortest path through a hand-defined grid, and
-draws the route with a live distance readout.
+A campus map for **my campus** — the college's own printed sheet,
+rebuilt as the kind of map people already know how to use.
 
-The trick is separating what you *see* from what you *route on*: Mapbox renders a
-normal basemap, but the pathfinding runs over a private network defined in
-`src/paths.json`, so the same idea works for trails, indoor mall paths, a campus,
-or a video-game grid.
+Search a building, a department or a room number. Browse what is on the campus by
+what a building *is*, or find the nearest restroom, bus stop or defibrillator off
+my campus's own printed key. Tap a building for what is inside it and an aerial view of
+it. Then walk there, with turn-by-turn directions over the pavement my campus actually
+drew rather than over the public roads around it.
+
+It started as a click-two-points-and-route demo, which is where the routing
+engine and the "what you see is not what you route on" idea come from. Almost
+everything else is a campus map now.
 
 ## Demo
 
-Search a destination or drop a start (green) and end (red) point; the route
-snaps to the network and the panel shows the walking distance and turn count:
+<img src="assets/demo.png" alt="my campus's campus map on a desktop: a pill search field reading Library over a route panel showing 2 min, 490 ft and route calculated with 4 turns beside a green GO button; on the map, a blue walking route runs from the user's location puck to a red pin at the Library, past coloured category discs on every building" width="820">
 
-<img src="assets/demo.png" alt="my campus's campus map: a Google-Maps-style interface with a pill search field reading Library, a strip of category chips for Restrooms, Parking, Food and drink, Bus stops and Bike racks, a blue walking route drawn from a green pin to a red one, and a panel reading 666 ft, route calculated, 7 turns" width="720">
+...and the front page of the sheet on a phone — my campus's printed legend on top, the
+ten classes of building under it:
 
-## How it works
+<img src="assets/sheet.png" alt="The bottom sheet on a phone, pulled open: the beavermaps wordmark, a search field, a Find nearby grid of eleven grey tiles with coloured discs for Restrooms, Parking, Food and drink, Bus stops, Bike racks, Emergency phones, Defibrillators, Health center, Motorcycle parking, Permit machines and HomeBase, and under it a Browse buildings grid of solid coloured tiles reading Library 2 buildings, Food 1 building, Sport 5 buildings, Arts 2 buildings, Parking 1 building and Bookstore 1 building" width="300">
 
-1. **Snap the click.** A raw map click is a precise lng/lat that almost never
-   lands exactly on the network. Turf.js finds the nearest valid intersection and
-   the marker is placed there instead.
-2. **Set start, then end.** The first click sets the start (green), the second
-   sets the end (red); a third click resets.
-3. **Route.** `geojson-path-finder` treats the network as a weighted graph and
-   returns the shortest path between the two snapped nodes.
-4. **Draw + measure.** The path is rendered as a cyan line and its weight is shown
-   as the total distance. If no path connects the two points, it reports "No path
-   found."
+## What it does
+
+**Find a place.** One field over three indexes: my campus's directory of 120 named
+destinations, 33 buildings with what each one holds, and a room and course index
+for the current term — 125 rooms and 557 course sections, so "ACCT 101" and
+"Room 320" are lookups with a right answer rather than fuzzy name matches.
+
+**Browse.** Two grids on the sheet's front page. *Find nearby* is the eleven rows
+of my campus's printed legend — restrooms, parking, food, bus stops, bike racks,
+emergency phones, defibrillators — which drops pins and outlines the ground that
+holds them. *Browse buildings* is one coloured tile per class of building, for
+the visitor who cannot search for a name they have never heard.
+
+**Look at a building.** A card with what is inside it, its footprint, and — for
+the ones that have something to fly around — a real aerial view, orbited.
+
+**Walk there.** Turn-by-turn directions with a navigation banner, distance and
+turn count, over my campus's own walkways. Start from your phone's GPS or from any
+point on the map.
+
+**Look right doing it.** Light, dark and follow-the-system, with the map's own
+lighting following the actual sun over Sacramento. Google or Mapbox drawing the
+ground, switchable. An iOS-style bottom sheet with real detents on a phone, a
+sidebar on a desktop. Installable to the home screen with its own icon.
 
 ## Under the hood
 
-A quick-glance tour of the pipeline. See [`TECHNICAL_DOCS.md`](TECHNICAL_DOCS.md)
-for the deeper writeup.
+A quick-glance tour. See [`TECHNICAL_DOCS.md`](TECHNICAL_DOCS.md) for the deeper
+writeup.
 
 ### The stack
 
-- [Mapbox GL JS](https://docs.mapbox.com/mapbox-gl-js/) renders the basemap (the
-  `dark-v11` style) and draws the network and route layers.
+- [Mapbox GL JS](https://docs.mapbox.com/mapbox-gl-js/) renders the map and every
+  layer on it — my campus's traced basemap, the labels, the pins, the route.
+- [Google Map Tiles API](https://developers.google.com/maps/documentation/tile)
+  draws the ground by default; Mapbox Standard is the other half of a switch.
 - [Turf.js](https://turfjs.org/) handles the geospatial snapping.
 - [geojson-path-finder](https://github.com/perliedman/geojson-path-finder) does
-  the graph routing.
+  the graph routing, server-side, over a graph built once at boot.
+- [Express](https://expressjs.com/) serves the routing API and the overlays,
+  pre-compressed and ETagged.
 - [Vite](https://vitejs.dev/) bundles it; [Tailwind CSS](https://tailwindcss.com/)
-  styles the UI.
+  is the stylesheet's entry point.
+
+No icon package, no charting library, no UI framework. The three icon sets, the
+map pins, the app icon and the favicon are all drawn in this repo — see
+`src/map-images.js`, `src/g-icons.js`, `src/nav-icons.js` and
+`scripts/build-icons.mjs`.
+
+### What you see is not what you route on
+
+The original idea, and still the load-bearing one: Mapbox renders a normal
+basemap, and the pathfinding runs over a private network in `src/paths.json`.
+The same arrangement works for trails, indoor paths, or a video-game grid.
 
 ### The network (`src/paths.json`)
 
@@ -336,11 +368,16 @@ snapping.
 
 The chrome is modelled on Google Maps, because that is the interface everyone
 arriving at this app has already learned. The map is the page and everything
-else floats over it — a full-bleed canvas, a pill search field, a chip strip
-across the top, the layers switcher in the bottom-left corner and the map
-controls in the bottom-right. The previous layout put a 600 px map inside a
-padded card under a page heading, which spent the top third of a phone screen on
-furniture.
+else floats over it — a full-bleed canvas, a pill search field, the layers
+switcher in the bottom-left corner and the map controls in the bottom-right. The
+previous layout put a 600 px map inside a padded card under a page heading,
+which spent the top third of a phone screen on furniture.
+
+Above the phone breakpoint that floating column is a sidebar; below it, it is a
+bottom sheet with three detents and a grabber you can drag (`src/sheet.js`), and
+one panel at a time inside it (`src/sheet-stack.js`). my campus's printed key had a
+chip strip across the top for a while and it is the legend panel now — twelve
+categories in a slot four wide is a control you have to scroll to read.
 
 ### Who draws the ground (`src/provider.js`)
 
@@ -1102,7 +1139,10 @@ under the route panel — but it is quicker to add them first:
   out, `createSession` returns 403 *"Requests from referer … are blocked"*, and
   **the fallback is sticky**: the refusal writes `mapbox` to `localStorage`, so
   fixing the console afterwards does not bring Google back on that phone. Clear
-  the `mapper-provider` key, or press Google in the Layers switcher again.
+  the `mapper-provider` key, or press Google in the Layers switcher again. (The
+  `mapper-` prefix on every stored key predates the name and is kept: renaming it
+  would silently reset the theme, the provider and the skin on every phone that
+  already has this open.)
 - **Mapbox**, under the token in your account: add the same origin to its URL
   restrictions. A token without any will not notice. Note that the *style*
   endpoint serves a restricted token happily and only `/v4/…vector.pbf` refuses
@@ -1120,8 +1160,8 @@ rule has to as well.
 ## Project structure
 
 ```
-mapper/
-├── index.html              # Page shell: rail, search bar, chips, panels
+beavermaps/
+├── index.html              # Page shell: search field, sheet, panels, icon links
 ├── server/
 │   └── index.js            # Routing API; also serves the overlay GeoJSON
 ├── src/

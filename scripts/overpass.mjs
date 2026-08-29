@@ -10,7 +10,7 @@
  *     is, so those fail immediately rather than burning four attempts.
  */
 const ENDPOINT = 'https://overpass-api.de/api/interpreter';
-const UA = 'mapper-build/1.0 (campus wayfinding)';
+const UA = 'beavermaps-build/1.0 (campus wayfinding)';
 
 export async function overpass(query, { attempts = 6 } = {}) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {

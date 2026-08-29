@@ -1,7 +1,7 @@
 {
-  "name": "mapper",
+  "name": "beavermaps",
   "version": "1.0.0",
-  "description": "",
+  "description": "my campus's campus map: search, browse, building cards and walking directions over my campus's own drawn pavement.",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -18,14 +18,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/1thing2say/mapper.git"
+    "url": "git+https://github.com/1thing2say/beavermaps.git"
   },
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/1thing2say/mapper/issues"
+    "url": "https://github.com/1thing2say/beavermaps/issues"
   },
-  "homepage": "https://github.com/1thing2say/mapper#readme",
+  "homepage": "https://github.com/1thing2say/beavermaps#readme",
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.0",
     "@tailwindcss/vite": "^4.3.0",
