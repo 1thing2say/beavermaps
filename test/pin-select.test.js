@@ -456,13 +456,16 @@ test('an arriving category of pins sways in screen space', () => {
   // same animation would settle along a compass direction rather than sideways
   // once the map is rotated. Nothing catches that but looking at a rotated map
   // during the one second the pins arrive.
-  const main = readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
-  assert.match(main, /'icon-translate-anchor':\s*'viewport'/,
+  const layers = readFileSync(path.join(root, 'src', 'marker-layers.js'), 'utf8');
+  assert.match(layers, /'icon-translate-anchor':\s*'viewport'/,
     'the category pins sway with the compass rather than with the screen');
   // The entrance drives icon-translate; a layer that declares one without the
-  // anchor beside it is the bug above waiting to happen.
-  const translates = main.match(/'icon-translate':/g) ?? [];
-  const anchors = main.match(/'icon-translate-anchor':/g) ?? [];
+  // anchor beside it is the bug above waiting to happen. The entrance itself is
+  // in src/pin-choreography.js, which is where the animation moved.
+  const choreo = readFileSync(path.join(root, 'src', 'pin-choreography.js'), 'utf8');
+  const source = layers + choreo;
+  const translates = source.match(/'icon-translate':/g) ?? [];
+  const anchors = source.match(/'icon-translate-anchor':/g) ?? [];
   assert.ok(anchors.length >= 1 && translates.length >= 1);
 });
 

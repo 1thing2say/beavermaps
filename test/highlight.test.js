@@ -25,7 +25,7 @@ const basemap = load('basemap');
 const amenities = load('amenities');
 const places = {
   type: 'FeatureCollection',
-  // Same filter main.js applies on the way in: 14 of my campus's rows have no room
+  // Same filter src/main.js applies on the way in: 14 of the college's rows have no room
   // and therefore no geometry.
   features: load('places').features.filter((f) => f.geometry),
 };

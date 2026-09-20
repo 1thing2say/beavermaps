@@ -348,12 +348,12 @@ test('the landing pin gets shorter without getting narrower', () => {
 test('every label alias names a directory row that exists', () => {
   // my campus's printed sheet and its directory disagree about a few names — the
   // Health Education Complex is labelled "Health & Ed (HeEd) 710-716" on the
-  // map, because that is what is written on the building. main.js keeps a small
-  // hand-made map between them, and a hand-made map is exactly the thing that
-  // rots when the file it points into is edited.
-  const main = readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
-  const block = /const LABEL_ALIASES = new Map\(\[([\s\S]*?)\]\);/.exec(main);
-  assert.ok(block, 'LABEL_ALIASES has gone from main.js');
+  // map, because that is what is written on the building. src/cards.js keeps a
+  // small hand-made map between them, and a hand-made map is exactly the thing
+  // that rots when the file it points into is edited.
+  const cards = readFileSync(path.join(root, 'src', 'cards.js'), 'utf8');
+  const block = /const LABEL_ALIASES = new Map\(\[([\s\S]*?)\]\);/.exec(cards);
+  assert.ok(block, 'LABEL_ALIASES has gone from cards.js');
   const pairs = [...block[1].matchAll(/\['([^']+)',\s*'([^']+)'\]/g)];
   assert.ok(pairs.length > 0, 'the alias table is empty');
   const names = new Set(buildings.map((f) => f.properties.name));
@@ -371,14 +371,14 @@ test('every name printed on the sheet reaches a flyover, and the one that does n
   // the failures were all silent — a tap that lifted a pin, showed a small card
   // and offered nothing else, on names my campus's own cartographer had set.
   //
-  // Reproduced end to end from the two files main.js actually consults, and in
-  // main.js's own order: a tap asks what footprint is under the pointer first
+  // Reproduced end to end from the two files the app actually consults, and in
+  // its own order: a tap asks what footprint is under the pointer first
   // (`buildingAt`) and falls back to matching the printed word against a
   // directory row (`directoryRow`). Both, because both are load-bearing — a
   // plate is set BESIDE the building it names, so the pixel under the word is
-  // frequently not the building.
-  const main = readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
-  const block = /const LABEL_ALIASES = new Map\(\[([\s\S]*?)\]\);/.exec(main);
+  // frequently not the building. Both live in src/cards.js.
+  const cards = readFileSync(path.join(root, 'src', 'cards.js'), 'utf8');
+  const block = /const LABEL_ALIASES = new Map\(\[([\s\S]*?)\]\);/.exec(cards);
   const aliases = new Map([...block[1].matchAll(/\['([^']+)',\s*'([^']+)'\]/g)]
     .map(([, from, to]) => [from, to]));
 

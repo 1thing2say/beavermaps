@@ -6,75 +6,62 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 // mask exists to hide Mapbox's data, so fetching it would show a flash of the
 // thing it is there to remove.
 import campusBoundary from './campus-boundary.json';
-import campusLamps from './lamps.json';
 import { point, featureCollection } from '@turf/helpers';
 import { nearestPoint } from '@turf/nearest-point';
 import { distance } from '@turf/distance';
-import { niceFeet, FEET_PER_KM } from './maneuvers.js';
-import { routeSummary, reachProblem, locationProblem } from './directions.js';
-import { mapboxRefusal, MAPBOX_HOST } from './basemap-problem.js';
+import { FEET_PER_KM } from './maneuvers.js';
+import { routeSummary } from './directions.js';
 import {
-  loadAmenityIcons, routePin, liftedOffset, ROUTE_PIN_W, PIN_BASE_W, AMENITY_KINDS, pinInk,
-  pinColour,
-  glyphInk,
-  glyphSvg,
-  textInk,
+  routePin, liftedOffset, ROUTE_PIN_W, pinInk,
 } from './map-images.js';
-import { buildingCard, pinCard } from './building-popup.js';
-import {
-  mountSelectedPin, sizeExpr, sizeAt, LABEL_MAX_EM,
-  AMBIENT_SIZE, CATEGORY_SIZE, LABEL_SIZE,
-  growEase, shrinkEase, swayAt, scaleStops, GROW_MS, SHRINK_MS, SWAY_MS,
-} from './pin-select.js';
+import { pinCard } from './building-popup.js';
 import { createThemeControl, preferredTheme, applyThemeAttribute } from './theme.js';
 import { createBasemapToggle, preferredBasemap } from './basemap.js';
 import { createProviderToggle, preferredProvider } from './provider.js';
 import { createSkinControl, preferredSkin, applySkinAttribute } from './skin.js';
-import { createSheet } from './sheet.js';
-import { createSheetStack } from './sheet-stack.js';
-import { googleGround } from './google-tiles.js';
-import { canFlyOver, framing, footprintExtent, roofOf, massOf } from './flyover.js';
-import { createFlyover } from './flyover-view.js';
 import { paintIcons } from './g-icons.js';
-import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
 import {
-  BUILDING_KINDS, BUILDING_KIND_BY_ID, kindRow, groupBuildings,
 } from './building-kinds.js';
 import {
-  withPoiIcons, withParkingMarks, withAmenityNames, poiFor, POI_CLASSES, POI_LABEL_KINDS,
-  AMENITY_ZOOM, AMENITY_ZOOM_DEFAULT,
+  withPoiIcons, withParkingMarks, withAmenityNames, 
 } from './poi.js';
 import { ringOf, centreOf, trimToCampus } from './campus-clip.js';
-import { bayRake } from './bay-rake.js';
 import { createGeolocation } from './geolocation.js';
 import { createDebugMenu } from './debug.js';
-import { lightPresetAt, nextCheckMs } from './daylight.js';
+import { createLitPalette } from './lit-palette.js';
 import { createLightingControl } from './lighting.js';
-import roomsData from './rooms.json';
-import { buildRoomIndex, lookupRoom } from './rooms.js';
-import { popularity, recordVisit } from './popular.js';
-import { FONTS, SATELLITE, palette, styleKey, underPreset, followsClock } from './palette.js';
+import { FONTS, SATELLITE, styleKey } from './palette.js';
 
 import { tokenRefusal, showSetupProblem } from './setup-problem.js';
 import { CAMPUS_BOUNDS, ROUTABLE_BOUNDS } from './campus-bounds.js';
 import { createRoute } from './route-state.js';
 import { createNavigation, SIM_TICK_MS } from './navigation.js';
 import { createLongPress } from './long-press.js';
-import { sunLights, assist } from './sun-lights.js';
-import { FIT_MARGIN, paddingAround, padBelowSheet, isVisible } from './viewport.js';
+import { FIT_MARGIN, paddingAround } from './viewport.js';
 import { createStatusLine } from './status-line.js';
+import { createApi } from './api.js';
+import { createChoreography } from './pin-choreography.js';
+import { createPinState, POI_LABEL_LAYERS } from './pin-state.js';
+import { createBuildingsLighting, BUILDING_EMISSIVE } from './buildings-lighting.js';
+import { createCampusSheet, CLOSED_TEXT } from './campus-sheet.js';
+import { createMarkerLayers } from './marker-layers.js';
+import { createLabelLayers, NOTHING_SELECTED } from './label-layers.js';
+import { createRouteLayers } from './route-layers.js';
+import { createCamera } from './camera.js';
+import { createCards } from './cards.js';
+import { createGround } from './ground.js';
+import { createLegend } from './legend.js';
+import { createEndpoints, GOOGLE_RED } from './endpoints.js';
+import { createSearchBox } from './search-box.js';
+import { createLocate } from './locate.js';
+import { createShell } from './shell.js';
+import { createDebugFlags } from './debug-apply.js';
+import { createPanels } from './panels.js';
 import { spin } from './spinner.js';
 import {
-  MAX_RESULTS, normalise, buildPlaceIndex, search, popularEntries,
 } from './search-rank.js';
 
 import {
-  buildAreas,
-  highlightFor,
-  highlightForKind,
-  areaCollection,
-  pointCollection,
-  extentOf,
 } from './highlight.js';
 
 // The chrome's button glyphs are named in the markup and drawn here, before
@@ -87,37 +74,8 @@ const accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 const googleKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
 
 
-// Google's road ribbon, in pixels. Not the ground-width curve the printed sheet
-// uses: paths.json carries only `from`/`to`, so there is no per-segment width to
-// scale, and a road drawn at its true 3.3 m would vanish at campus zoom anyway.
-// Google solves this the same way — road width is a function of zoom and class,
-// never of the real carriageway.
-const NETWORK_WIDTH = [
-  'interpolate', ['exponential', 1.6], ['zoom'],
-  14, 1.2,
-  16, 3.5,
-  18, 8,
-  20, 18,
-];
 
-// Wider than the core by roughly a pixel and a half per side at every zoom,
-// which is the proportion Google holds. Drawn underneath, so only the overhang
-// shows.
-const NETWORK_CASING_WIDTH = [
-  'interpolate', ['exponential', 1.6], ['zoom'],
-  14, 2.4,
-  16, 5.6,
-  18, 11,
-  20, 23,
-];
 
-// Google's own pin colours, for the two markers the router plants. Origin green
-// and destination red is their convention as well as the one this app already
-// used; only the values move.
-const GOOGLE_GREEN = '#1e8e3e';
-const GOOGLE_RED = '#ea4335';
-
-const EMPTY = { type: 'FeatureCollection', features: [] };
 
 const CAMPUS_RING = ringOf(campusBoundary);
 
@@ -168,81 +126,21 @@ function startApp() {
   /** The label face for the look currently on screen. See FONTS. */
   const mapFont = () => FONTS[currentSkin] ?? FONTS.classic;
 
-  // ---- the sky, and the palette that follows it -------------------------
-  //
-  // These sit ABOVE the map rather than with the rest of the lighting state,
-  // and they have to: `litPalette` is what hands the constructor below its
-  // style, so every name it touches must already exist when that line runs.
-  // Declared any lower they are in the temporal dead zone at first use, which
-  // is not a warning — it is a blank page.
-  /**
-   * Which lighting preset the sky is doing over my campus, right now.
-   *
-   * Read at every apply rather than captured, and re-applied on a timer — see
-   * `watchDaylight` — because a map left open through a sunset should follow it
-   * rather than hold whatever it was loaded at.
-   */
-  const clockPreset = () => lightPresetAt(new Date(), CAMPUS_CENTRE[0], CAMPUS_CENTRE[1]);
-
-  /**
-   * The preset the CAMPUS is currently painted for.
-   *
-   * The city and the campus are lit by two different mechanisms — Standard takes
-   * a config value and relights itself, while our overlay is emissive and has to
-   * be repainted in a new colour (see `underPreset` in src/palette.js). Only the
-   * first of those was happening: setting the bench to Day made the city
-   * daylight and left the campus at whatever the clock had baked in when the
-   * style was built, which at dusk is a college sitting in shadow at noon.
-   *
-   * Kept here so the repaint fires on a CHANGE rather than on every apply, which
-   * matters twice: `syncBasemapStyle` rebuilds layers, and it calls back into
-   * applyLighting — writing this before the call is what stops that being a
-   * loop.
-   */
-  let paintedFor = null;
-
-  /**
-   * Re-light the map when the sun has moved enough to matter.
-   *
-   * A self-rescheduling timeout rather than a fixed interval, because the gap to
-   * the next possible change is knowable and is usually hours: `nextCheckMs`
-   * returns a minute near a threshold and a quarter of an hour in the middle of
-   * the afternoon. A phone should not be woken every minute to be told it is
-   * still daytime.
-   *
-   * `applyLighting` is idempotent and cheap when nothing has changed — it pushes
-   * the same config value Mapbox already holds — so this does not need to track
-   * what the last preset was.
-   */
-  let daylightTimer = null;
-  function watchDaylight() {
-    clearTimeout(daylightTimer);
-    daylightTimer = setTimeout(() => {
-      applyLighting();
-      watchDaylight();
-    }, nextCheckMs(new Date(), CAMPUS_CENTRE[0], CAMPUS_CENTRE[1]));
-  }
-
-  /**
-   * The palette, moved to the time of day.
-   *
-   * Every reader of the palette goes through here rather than calling
-   * `palette()` directly, because a campus drawn at one time of day over a city
-   * drawn at another is the bug this exists to close — see `underPreset` in
-   * src/palette.js. The bench wins when it is set, so the lighting bench still
-   * asks a whole question and gets a whole answer.
-   */
-  function litPalette() {
-    const base = palette(currentProvider, currentBasemap, currentTheme, currentSkin);
-    const preset = lightingBench && lightingBench.preset !== 'auto'
-      ? lightingBench.preset : clockPreset();
-    // ...unless nothing on the other side of the move can follow it. Google's
-    // ground is a raster and arrives already lit, so relighting ours alone is
-    // the seam rather than the fix. See `followsClock` in src/palette.js for
-    // the measurement and for what it costs.
-    if (!followsClock(currentProvider)) return base;
-    return underPreset(base, preset);
-  }
+  // The palette moved to the time of day, and the timer that keeps it there:
+  // src/lit-palette.js. Built here, above the map constructor, because
+  // `litPalette` is what hands that constructor its style.
+  const sky = createLitPalette({
+    centre: CAMPUS_CENTRE,
+    provider: () => currentProvider,
+    basemap: () => currentBasemap,
+    theme: () => currentTheme,
+    skin: () => currentSkin,
+    bench: () => lightingBench,
+    relight: () => applyLighting(),
+  });
+  const litPalette = () => sky.litPalette();
+  const clockPreset = () => sky.clockPreset();
+  const watchDaylight = () => sky.watch();
 
   let lightingBench = null;
 
@@ -299,43 +197,6 @@ function startApp() {
   let campusLabels = null;
   let campusDirectory = null;
 
-  // State variables
-  let startMarker = null;
-  let endMarker = null;
-  /**
-   * The pin a press-and-hold puts down, while its card is open.
-   *
-   * Held separately from the two route markers because it is not one of them
-   * yet: it is a place you pointed at, and it becomes a start or a destination
-   * only when a button on its card says so. At that moment it is removed and
-   * the route marker takes its position, so the two never stand on the same
-   * spot.
-   */
-  let droppedMarker = null;
-  let startPoint = null;
-  let endPoint = null;
-  let requestSeq = 0;
-  /**
-   * Whether `startPoint` is where the phone says you are, or somewhere chosen.
-   *
-   * The one bit that decides what "Directions" does on a card. A start somebody
-   * put down on purpose — "Start here" on a building, a pin they dropped — is an
-   * answer to a question the app did not ask, and overwriting it with a GPS fix
-   * would throw it away silently. A start this app adopted from the GPS is not
-   * a choice and can be replaced by a better fix without asking.
-   */
-  let startIsMine = false;
-  /**
-   * The last position the locate control reported, and when.
-   *
-   * Not a cache for its own sake: `getCurrentPosition` on a cold radio can take
-   * several seconds, and pressing Directions on a second building right after
-   * the first should not spend them again. `maximumAge` on the request itself
-   * covers the same ground inside the browser, so this is only what lets the
-   * FIXTURE and the real API be asked the same question — see currentPosition.
-   */
-  let lastFix = null;
-
   // The walk that is currently on the screen, and the turn-by-turn that
   // reads it. Ten `let`s used to stand here describing one walk between
   // them; see src/route-state.js and src/navigation.js for why that was a
@@ -357,7 +218,6 @@ function startApp() {
   /** Whether a flyover draws its own frame-rate readout. Debug menu only. */
   let showFps = false;
   let benchLights = null;
-  let benchTilt = false;
   // Whether there is a style under us to configure at all.
   //
   // NOT `map.isStyleLoaded()`, which is the obvious guard and the wrong one:
@@ -505,12 +365,13 @@ function startApp() {
       remaining: navRemaining,
       eta: navEta,
     },
-    buildings: { add: addBuildingsLayer, remove: removeBuildingsLayer },
+    // Wrapped, not passed: both are `const` arrows declared below this call.
+    buildings: { add: () => addBuildingsLayer(), remove: () => removeBuildingsLayer() },
     onStart: () => { clearLegendHighlight(); deselectPin(); },
     restCamera: () => map.fitBounds(CAMPUS_BOUNDS, {
       padding: campusPadding(), pitch: 0, bearing: 0, duration: 800,
     }),
-    releaseCameraLock: () => { if (locating) geolocateControl?.trigger(); },
+    releaseCameraLock: () => { if (locate.isLocating()) geolocateControl?.trigger(); },
     makeUserDot: () => {
       const dot = document.createElement('div');
       dot.className = 'user-dot';
@@ -550,55 +411,6 @@ function startApp() {
    */
   // The strip the app speaks in, and the spinner beside it. Which sentence
   // outranks which is src/status-line.js; this is only where its three
-  // elements are.
-  const status = createStatusLine({
-    text: instructionText,
-    message: instructionMessage,
-    busy: instructionBusy,
-    onError: showRoutePanel,
-    spinner: spin,
-  });
-  const setStatus = (sentence, isError = false) => status.set(sentence, isError);
-  const setProgress = (sentence) => status.progress(sentence);
-  const setIdleStatus = () => status.rest();
-  const setBusy = (on) => status.setBusy(on);
-
-  function resetMap() {
-    nav.end();
-
-    if (startMarker) startMarker.remove();
-    if (endMarker) endMarker.remove();
-    startPoint = null;
-    endPoint = null;
-    startIsMine = false;
-    startMarker = null;
-    endMarker = null;
-
-    route.clear();
-    requestSeq++;
-
-    if (map.getSource('calculated-route')) {
-      map.getSource('calculated-route').setData(EMPTY);
-    }
-    map.getSource('route-legs')?.setData(EMPTY);
-
-    clearSelection();
-
-    // Reset UI. The search box is cleared too: leaving a destination showing
-    // next to "Not set" is the kind of stale text people act on.
-    pendingEnd = null;
-    if (searchInput) {
-      searchInput.value = '';
-      searchClear.classList.add('hidden');
-      closeResults();
-    }
-    setIdleStatus();
-    startCoordText.value = '';
-    endCoordText.value = '';
-    setRouteSummary(null);
-    setNavButtonsEnabled(false);
-  }
-
   /**
    * Show or hide the top bar, moving the search field between the two homes.
    *
@@ -618,6 +430,21 @@ function startApp() {
   const searchHome = document.querySelector('.g-search');
   const topLeft = document.getElementById('top-left');
   let navbarShown = false;
+
+  // The strip the app speaks in, and the spinner beside it. Which sentence
+  // outranks which is src/status-line.js; this is only where its three
+  // elements are.
+  const status = createStatusLine({
+    text: instructionText,
+    message: instructionMessage,
+    busy: instructionBusy,
+    onError: () => showRoutePanel(),
+    spinner: spin,
+  });
+  const setStatus = (sentence, isError = false) => status.set(sentence, isError);
+  const setProgress = (sentence) => status.progress(sentence);
+  const setIdleStatus = () => status.rest();
+  const setBusy = (on) => status.setBusy(on);
 
   function showNavbar(on) {
     if (on === navbarShown) return;
@@ -640,7 +467,7 @@ function startApp() {
       String(!legendPanel.classList.contains('hidden')));
   });
 
-  clearBtn.addEventListener('click', resetMap);
+  clearBtn.addEventListener('click', () => resetMap());
   // Clears AND closes, which is what makes it a replacement for Clear rather
   // than a second way to do what the directions button already does. A panel
   // that hid itself and left the ribbon lying across the campus would be the
@@ -652,759 +479,49 @@ function startApp() {
   startNavBtn.addEventListener('click', () => nav.start());
   simulateBtn.addEventListener('click', () => nav.start({ simulate: true }));
 
-  // -------------------------------------------------------------------------
-  // Routing API
-  // -------------------------------------------------------------------------
-
-  /**
-   * Ask the server for a route. The graph and the maneuver derivation both live
-   * there now — this file never builds a PathFinder.
-   *
-   * Three shapes come back, because the server distinguishes three answers:
-   *
-   *   the route            it found one
-   *   null                 both ends are on the graph and nothing joins them (404)
-   *   { refused: '…' }     an end is too far from the graph to snap to (422)
-   *
-   * The last one is the server enforcing REACH_M, which this file also enforces
-   * in locateStart — and has to go on enforcing, because the browser can refuse
-   * before spending a round trip. What is new is that the server refuses too, so
-   * the rule holds for a start point that did not come from the GPS. Its
-   * sentence is the one from src/directions.js, written once and said by
-   * whichever side noticed first.
-   */
-  async function requestRoute(from, to) {
-    const response = await fetch('/api/route', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to }),
-    });
-    if (response.status === 404) return null;          // reachable, but no path
-    // 422 is "well-formed, but not a walk": an end too far from the network to
-    // snap to, or both ends in the same place. The server's own sentence is
-    // used verbatim, because it is the one that knows which. The fallback is
-    // deliberately vague — it only runs when the body could not be read at all,
-    // and a specific guess there would be a specific guess.
-    if (response.status === 422) {
-      const payload = await response.json().catch(() => null);
-      return { refused: payload?.error ?? 'Those two points do not make a walk on the campus paths.' };
-    }
-    if (!response.ok) throw new Error(`route request failed (${response.status})`);
-    return response.json();
-  }
-
-  async function fetchNetwork() {
-    const response = await fetch('/api/network');
-    if (!response.ok) throw new Error(`network request failed (${response.status})`);
-    return response.json();
-  }
-
-  /**
-   * Every vertex the router will accept — my campus's and the surrounding streets'.
-   *
-   * A separate request from the network above because the two answer different
-   * questions now. /api/network is what gets drawn, and that is my campus's linework
-   * alone: the streets around the campus are already painted by whichever
-   * provider is under us, and drawing ours over theirs is the doubled linework
-   * at the campus edge. This is what gets *snapped to*, and it has to include
-   * those streets or a click on the pavement outside lands on the far side of a
-   * car park.
-   */
-  async function fetchVertices() {
-    const response = await fetch('/api/vertices');
-    if (!response.ok) throw new Error(`vertex request failed (${response.status})`);
-    return response.json();
-  }
-
-  /** One of the draw-only overlays: buildings, basemap, amenities, places. */
-  async function fetchOverlay(name) {
-    const response = await fetch(`/api/${name}`);
-    if (!response.ok) throw new Error(`${name} request failed (${response.status})`);
-    return response.json();
-  }
+  // The four questions this app asks its own server, and what each non-200
+  // means. See src/api.js.
+  const api = createApi();
+  const fetchNetwork = () => api.network();
+  const fetchVertices = () => api.vertices();
+  const fetchOverlay = (name) => api.overlay(name);
 
   // -------------------------------------------------------------------------
-  // 3D buildings
-  // -------------------------------------------------------------------------
-
-  /**
-   * Extrude the campus footprints traced out of my campus basemap SVG by
-   * scripts/build-buildings.mjs. These replace the basemap's own `composite`
-   * building tiles, which do not cover this campus in any useful detail.
-   *
-   * Heights are placeholders, not survey data — see the generator. `min_height`
-   * is absent from every feature, so the base coalesces to 0.
-   */
-  function addBuildingsLayer() {
-    const colors = litPalette();
-
-    // The theme toggle no longer rebuilds the style, so an existing layer has
-    // to be recoloured in place rather than left on the old palette.
-    if (map.getLayer('campus-buildings')) {
-      map.setPaintProperty('campus-buildings', 'fill-extrusion-color', colors.building);
-      return;
-    }
-    if (!campusBuildings) return; // still in flight; addNetworkLayers re-runs
-
-    if (!map.getSource('campus-buildings')) {
-      map.addSource('campus-buildings', { type: 'geojson', data: campusBuildings });
-    }
-    map.addLayer({
-      id: 'campus-buildings',
-      source: 'campus-buildings',
-      type: 'fill-extrusion',
-      slot: 'middle',
-      // Extrusion is genuinely expensive to fill. Never draw it zoomed out.
-      minzoom: 15,
-      // Only what has mass. The pool is a footprint with a height of zero —
-      // it is a hole in the ground, and src/landcover.json already draws the
-      // water in it — so extruding it would put a slab of building colour over
-      // the thing the footprint exists to name. It stays in the source, where
-      // the directory, the card and the flyover all still find it.
-      filter: ['>', ['get', 'height'], 0],
-      paint: {
-        'fill-extrusion-color': colors.building,
-        'fill-extrusion-height': ['get', 'height'],
-        'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0],
-        // SOLID, where it was 0.85. A translucent building is a building you
-        // can see the pavement through, which was survivable while these were
-        // unlit slabs and is not now: the shadow one casts lands on ground that
-        // is also showing through the thing casting it.
-        'fill-extrusion-opacity': 1,
-        // The point of the whole exercise, stated rather than left to the
-        // default so that turning it off is a deliberate act. See sunLights.
-        'fill-extrusion-cast-shadows': true,
-        // ...and the contact shadow, which is what stops a building looking
-        // like it is hovering a foot above its own footprint. Cheap, local, and
-        // the one lighting cue that survives an overcast sky with no sun to
-        // cast anything.
-        'fill-extrusion-ambient-occlusion-intensity': 0.35,
-        'fill-extrusion-ambient-occlusion-radius': 3,
-        // The same opt-out every other layer here carries, and this was the one
-        // that missed it. Standard lights extrusions through its own model, and
-        // under the night preset that drove an authored #2f3336 to roughly
-        // #0c0d0d — the campus turned into pitch-black blocks the moment
-        // navigation started, and stayed that way.
-        //
-        // Not the flat 1 the other layers use, though. They are ground planes
-        // and want their colour rendered exactly as written; this one is the
-        // only thing on the map that is genuinely three-dimensional, and at 1
-        // every face renders identically and a building reads as a sticker.
-        // 0.75 is where the night preset stops swallowing them while the roof
-        // still sits visibly lighter than the walls.
-        //
-        // It is a compromise and it is named so the bench can question it: this
-        // number is the app's answer to "can Standard light these", and the
-        // lighting section of the debug menu exists to find out whether a
-        // better answer is reachable from `setLights` instead. See
-        // src/lighting.js.
-        'fill-extrusion-emissive-strength': BUILDING_EMISSIVE,
-      },
-    }, 'route-casing');
-
-    // A layer that did not exist a moment ago has the palette's emissive
-    // strength on it, not the bench's. Nothing else re-runs after this.
-    applyLighting();
-  }
-
-  /**
-   * The layer's own emissive strength, and the bench's starting point.
-   *
-   * One number with one explanation, in the paint spec above where the
-   * explanation belongs, read from two places rather than written in two.
-   *
-   * 0.75 was the number while NOTHING LIT THE SCENE — see sunLights below for
-   * what that turned out to mean. With a real ambient and a real sun on the
-   * map, three quarters self-lit is the setting that throws the sun away: a
-   * face that is 75% emissive barely darkens when it turns away from the light,
-   * so the walls stay the colour of the roof and the shadow the building casts
-   * lands next to a building that does not look lit. 0.2 keeps enough self-light
-   * that a building is still legible against a dark ground and lets the other
-   * 80% be shading.
-   */
-  const BUILDING_EMISSIVE = 0.2;
-
-  // The sun itself is src/sun-lights.js — a date and a place in, a light array
-  // out, and no map anywhere in it.
-
-  /**
-   * Push the lighting bench onto the map, or take it back off.
-   *
-   * Everything here is gated on the debug menu being OPEN. That is the rule the
-   * back room is built on — with the menu shut the app is exactly the app — and
-   * it matters more for this section than for the flags it sits above, because
-   * these values are plausible. A route GUI switched off is obviously a debug
-   * state; a campus at dusk just looks like a decision somebody made.
-   *
-   * Called from addNetworkLayers rather than only from the control, because
-   * every path that rebuilds the basemap — a theme change, a provider swap, a
-   * full setStyle — re-runs the builders and would otherwise put Standard's own
-   * lighting back while the bench still showed the override.
-   */
-  function applyLighting() {
-    if (!styleBuilt) return;
-
-    const colors = litPalette();
-    const bench = debugOpen ? lightingBench : null;
-
-    // The extrusions are navigation-only — see removeBuildingsLayer — and the
-    // question this bench asks is entirely about the extrusions, so it is
-    // allowed to stand them up outside a walk. `!navigating()` on the way down is
-    // what keeps that from reaching into a real one: during navigation they are
-    // the app's, and switching the bench off must not take them.
-    //
-    // addBuildingsLayer ends by calling back here, which is how a layer created
-    // during a walk gets the bench's emissive rather than the palette's. That
-    // bounce terminates at one level: the `getLayer` guard below is false on
-    // the way in and true on the way back, so the second pass paints and stops.
-    if (bench?.buildings) {
-      if (!map.getLayer('campus-buildings')) addBuildingsLayer();
-    } else if (!navigating()) {
-      removeBuildingsLayer();
-    }
-
-    // The camera, and only when the bench actually moved it. applyLighting runs
-    // on every builder pass, and an easeTo per pass is a map that drifts while
-    // you are trying to look at it. Never during navigation, which is pitched
-    // to 60 and following somebody — that camera is not the bench's to take.
-    const tilt = Boolean(bench?.tilt);
-    if (!navigating() && tilt !== benchTilt) {
-      benchTilt = tilt;
-      map.easeTo({ pitch: tilt ? 60 : 0, duration: 500 });
-    }
-
-    // Ours, and present under every provider, so this half runs even when there
-    // is no Standard style underneath to configure.
-    if (map.getLayer('campus-buildings')) {
-      map.setPaintProperty(
-        'campus-buildings',
-        'fill-extrusion-emissive-strength',
-        bench ? bench.emissive : BUILDING_EMISSIVE,
-      );
-    }
-
-    // Google's ground is a raster under a blank style: no `basemap` import to
-    // name, no lights to override. `lightPreset: null` is how palette.js says
-    // so. Skipped outright rather than left to setConfig's warning, because a
-    // bench pointed at a style that has no lighting should be quiet, not noisy.
-    paintLamps();
-
-    // The campus is emissive and cannot be relit; it has to be repainted. See
-    // `paintedFor`. Read here rather than at the point of use because the lights
-    // below need the same answer.
-    const wanted = bench && bench.preset !== 'auto' ? bench.preset : clockPreset();
-    if (wanted !== paintedFor) {
-      paintedFor = wanted;
-      syncBasemapStyle();
-    }
-
-    // NOT A RETURN, and it used to be one — `if (colors.lightPreset === null)
-    // return;` stood here, and it is the whole reason "Stand the buildings up"
-    // produced flat slabs with no shadows.
-    //
-    // The reasoning was sound for the two setConfig calls it guards: Google's
-    // ground is a raster under BLANK_STYLE, there is no `basemap` import to
-    // name, and a bench pointed at a style with no config should be quiet
-    // rather than noisy. But it returned from the WHOLE function, and the
-    // lights below are not config. `setLights` works on any style including a
-    // blank one, and a blank one is precisely the case with no lighting of its
-    // own to fall back on — so under the default provider the scene was lit by
-    // nothing at all. `getLights()` answered `[{ id: 'flat', type: 'flat' }]`,
-    // and every extrusion was a correctly-rendered unlit box.
-    if (colors.lightPreset !== null) {
-
-    // THE SKY, NOT THE INTERFACE. `colors.lightPreset` is the theme's opinion —
-    // light means day, dark means night — which is a statement about the chrome
-    // and not about the world, and it left the map in broad daylight at eleven
-    // at night. The clock's answer comes from the sun's actual elevation over
-    // this campus; see src/daylight.js for why that is arithmetic rather than a
-    // table of hours.
-    //
-    // The theme is still whatever the device or the visitor says. These are two
-    // different questions — what the interface should look like, and what the
-    // ground outside looks like — and only the second one has a right answer.
-    setConfig('lightPreset', bench && bench.preset !== 'auto' ? bench.preset : clockPreset());
-    // `default` is Standard's own default and the value the app runs at — the
-    // app never sets this key, so `auto` means putting it back rather than
-    // leaving it alone.
-    setConfig('theme', bench && bench.theme !== 'auto' ? bench.theme : 'default');
-    }
-
-    // WHICH LIGHTS, and there are two answers now.
-    //
-    // With the buildings standing the app supplies its own sun — see sunLights
-    // — because that is the only case where the lighting has to do work rather
-    // than just look right, and because under the default provider there is
-    // otherwise no light in the scene whatsoever. Flat on the ground, the
-    // captured style lighting is put back and left alone.
-    //
-    // A clone every time, not the captured array: setLights takes ownership of
-    // what it is handed, and giving away the only copy of the style's own
-    // lighting means the next revert has nothing to revert to.
-    const standing = Boolean(map.getLayer('campus-buildings'));
-    let lights = standing
-      ? sunLights(new Date(), CAMPUS_CENTRE)
-      : (benchLights ? assist(structuredClone(benchLights), wanted, currentTheme) : null);
-    if (!lights) return;
-    if (!bench?.lights) {
-      map.setLights(lights);
-      return;
-    }
-    for (const light of lights) {
-      // Standard writes both intensities as expressions over `lightPreset` and
-      // `theme` — that is the whole reason this override exists, since a preset
-      // is not separable from the number it implies. Replacing one property
-      // with a literal collapses that expression for the light being questioned
-      // and leaves its colour and direction still following the preset, which
-      // is the comparison worth seeing.
-      if (light.id === 'ambient') {
-        // Colour as well as intensity, and the colour is the one that matters:
-        // Standard's night ambient is hsl(217,100%,11%), so scaling it by any
-        // intensity leaves it black and the extrusions stay swallowed. Measured
-        // — ambient 0.5 to 1.0 at night moves a roof by about 1 L*.
-        light.properties = {
-          ...light.properties,
-          intensity: bench.ambient,
-          color: bench.ambientColor,
-        };
-      }
-      if (light.id === 'directional') {
-        light.properties = { ...light.properties, intensity: bench.directional };
-      }
-    }
-    map.setLights(lights);
-  }
-
-  /**
-   * Extrusion is for navigation only.
-   *
-   * Everywhere else in this file the layer is guarded by `navigating()`, but
-   * nothing ever took it down again — so ending a walk left the footprints
-   * standing, which on the dark theme is a campus full of black blocks over a
-   * map that is supposed to be flat.
-   */
-  function removeBuildingsLayer() {
-    if (map.getLayer('campus-buildings')) map.removeLayer('campus-buildings');
-  }
-
-  // -------------------------------------------------------------------------
-  // Campus overlay
+  // 3D buildings, and what lights them
   //
-  // Ground cover, amenity symbols and place labels, all traced out of the same
-  // my campus basemap as the buildings. Each of these is written to be safe to call
-  // repeatedly: they recolour an existing layer rather than rebuilding it, so a
-  // theme switch — which no longer reloads the style — updates in place.
+  // src/buildings-lighting.js. The bench that questions all of it stays here,
+  // because it belongs to the debug menu.
   // -------------------------------------------------------------------------
 
-  // Metres of ground per pixel is 156543.03 * cos(latitude) / 2^zoom, and at
-  // my campus's 38.65 degrees that constant is 122275. Dividing a width in metres by
-  // it, against an exponential-base-2 zoom curve, holds a line at its true
-  // ground width instead of a fixed pixel width — so the 26 m entry road stays
-  // visibly wider than the 3.3 m footpaths at every zoom.
-  const M_PER_PIXEL_AT_Z0 = 122275;
+  const buildings = createBuildingsLighting({
+    map,
+    centre: CAMPUS_CENTRE,
+    litPalette,
+    navigating,
+    clockPreset,
+    theme: () => currentTheme,
+    footprints: () => campusBuildings,
+    isStyleBuilt: () => styleBuilt,
+    bench: () => (debugOpen ? lightingBench : null),
+    standardLights: () => benchLights,
+    setConfig: (key, value) => setConfig(key, value),
+    paintLamps: () => paintLamps(),
+    repaintCampus: () => syncBasemapStyle(),
+  });
+  const addBuildingsLayer = () => buildings.add();
+  const removeBuildingsLayer = () => buildings.remove();
+  const applyLighting = () => buildings.applyLighting();
 
-  /**
-   * How wide a line off the printed sheet is drawn, in metres, before zoom.
-   *
-   * Everything takes the width my campus drew it at — except the bleachers, and that
-   * exception is what turns a stadium into a stadium.
-   *
-   * my campus's sheet draws seating as 24 hairlines 0.78 m wide: the tier lines of a
-   * technical drawing, not the mass of a stand. Apple draws the same thing as a
-   * solid bowl wrapping the pitch, and there is no bowl in this data to colour
-   * — the features are LineStrings, so they cannot even enter the fill layer.
-   * Widening them to a stand's real depth is the honest way to get from one to
-   * the other: it is the same geometry my campus published, drawn at the size the
-   * thing actually is rather than at the size a draughtsman's line is.
-   */
-  const SHEET_WIDTH = [
-    'case',
-    ['==', ['get', 'kind'], 'bleachers'], 7,
-    ['coalesce', ['get', 'width'], 1.65],
-  ];
-
-  const groundWidth = (floor) => [
-    'interpolate', ['exponential', 2], ['zoom'],
-    // The floor keeps the thinnest paths from disappearing when zoomed out,
-    // where true width would put them below a pixel.
-    14, ['max', floor, ['*', SHEET_WIDTH, 2 ** 14 / M_PER_PIXEL_AT_Z0]],
-    20, ['max', floor, ['*', SHEET_WIDTH, 2 ** 20 / M_PER_PIXEL_AT_Z0]],
-  ];
-
-  /**
-   * Colour for one of the printed sheet's classes, falling back to the colour
-   * my campus drew it in. `land` covers ground; anything else — a court marking, a bus
-   * sign, the HOME BASE badges — keeps its own paint, which is what makes the
-   * overlay still read as their map rather than a recolour of it.
-   */
-  const sheetPaint = (land, property, overrides = {}) => [
-    'match',
-    ['get', 'kind'],
-    ...Object.entries({ ...land, ...overrides }).flat(),
-    ['coalesce', ['get', property], 'transparent'],
-  ];
-
-  /**
-   * my campus's printed campus map, drawn element for element.
-   *
-   * Two layers over one source, because the sheet mixes areas with stroked line
-   * work and Mapbox will not do both in one: the fill layer takes everything
-   * with a fill, the line layer everything with a stroke, and a shape with both
-   * appears in each.
-   *
-   * The sort keys are load-bearing. A flat vector map is a painter's algorithm —
-   * bay striping over tarmac, trees over lawn — and `i` is the element's index
-   * in the original document. Without them Mapbox is free to reorder within a
-   * layer and the campus renders inside out.
-   */
-  function addBasemapLayers() {
-    const colors = litPalette();
-    const { land } = colors;
-
-    // Over imagery there is nothing to add — see SATELLITE.land.
-    if (!land) {
-      for (const id of ['campus-rake', 'campus-sheet-line', 'campus-sheet-fill']) {
-        if (map.getLayer(id)) map.removeLayer(id);
-      }
-      return;
-    }
-
-    // One kind is painted as something other than what it is called, and it is
-    // the sheet's own naming that is off rather than ours: `closed` takes the
-    // BUILDING grey rather than the one the land table holds for it. The two
-    // are near-neighbours in every look but not the same — in the classic light
-    // table it is a neutral #e4e4e4 against the buildings' warm #e8e0cd — and a
-    // closed building should sit in the row of buildings it belongs to,
-    // differing by the red over it and by nothing else.
-    //
-    // `lawn` used to be a second such override, painted in the campus GROUND
-    // colour, and that is now reversed. The argument for it was that layer 2 is
-    // four shapes totalling 519,000 m2 which the build script itself calls
-    // "open ground" — a base plate rather than planting, being whatever is left
-    // once the buildings, lots, paths and canopies are subtracted — so filling
-    // the residual with grass made the campus a park with some blocks in it.
-    //
-    // The argument was sound and the reference it was measured against was the
-    // wrong one. Apple would not paint a college green; my campus did, and my campus's
-    // sheet is what this map is a translation of. Counted over the campus body
-    // of the printed map, 39.3% of it is green — 24.4% open lawn at L 79 C 45,
-    // 9.5% tree canopy at L 47 C 37 — and the greenest thing about it is
-    // exactly that base plate. Restoring it lands us at 41.9% by day and 40.4%
-    // at night against their 39.3%, from each look's own measured values rather
-    // than from the print's ink.
-    //
-    // What the earlier note was right about survives: `land.lawn` is also the
-    // value the surrounding parkland is matched against, so the boundary
-    // between our sheet and the provider's greenspace agrees. See the seam
-    // test. The campus now runs into that parkland instead of sitting on it,
-    // which is a fair description of this campus.
-    const fillColour = sheetPaint(land, 'fill', { closed: land.building });
-    // Strokes that are ground read as ground; the rest keep my campus's ink. Building
-    // outlines follow the theme so they agree with the footprints drawn on top.
-    const lineColour = sheetPaint(
-      { walkway: land.walkway, driveway: land.driveway, offsite_road: land.offsite_road, crossing: land.crossing },
-      'stroke',
-      // The stands take the bleacher FILL rather than a building outline. They
-      // are drawn seven metres wide now — see SHEET_WIDTH — so they are a mass
-      // on the map rather than an edge, and an edge colour on a mass reads as a
-      // block of outline. Everything else keeps the pairing it had.
-      // A court's outline takes the court's own fill, which is to say it stops
-      // being an outline. The reference draws no line between a court and its
-      // surround at all — a cross-section through the twelve is 23 px of
-      // surface, a gap of apron, 23 px of surface, with no edge anywhere — and
-      // my campus's sheet carries these as stroke-only shapes in `#fff`, so left
-      // alone they came out as twelve white rectangles on bare ground.
-      {
-        building: colors.buildingLine,
-        bleachers: land.bleachers,
-        sport: colors.sportLine,
-        tennis: land.tennis,
-        tennis_apron: land.tennis_apron,
-      },
-    );
-
-    if (map.getLayer('campus-sheet-fill')) {
-      map.setPaintProperty('campus-sheet-fill', 'fill-color', fillColour);
-      map.setPaintProperty('campus-sheet-line', 'line-color', lineColour);
-      map.setPaintProperty('campus-rake', 'line-color', land.parking_stripe);
-      return;
-    }
-    if (!campusBasemap) return; // still in flight; addNetworkLayers re-runs
-
-    if (!map.getSource('campus-sheet')) {
-      map.addSource('campus-sheet', { type: 'geojson', data: campusBasemap });
-    }
-    // The bay dividers, as lines rather than as the 0.99 m bars they are drawn.
-    // Its own source because it is its own geometry — see src/bay-rake.js.
-    if (!map.getSource('campus-rake')) {
-      map.addSource('campus-rake', { type: 'geojson', data: bayRake(campusBasemap) });
-    }
-
-    // `hidden` marks the parts the app supplies itself — the label plates and
-    // the letterform-free label layer — so drawing them would double up on the
-    // real text in src/labels.json.
-    //
-    // The kinds below are hidden for the same reason, one layer up: the sheet
-    // draws its own pictogram for each of them and addAmenityLayer draws a
-    // Google-style disc over the top, so 78% of those discs were landing within
-    // 6 m of a printed icon — two icon languages stacked on one point.
-    //
-    // Safe because the coverage is exact. The sheet spends several paths per
-    // symbol (84 elements for 14 phones), and collapsing them to positions gives
-    // 14 phones, 6 defibrillators, 6 restrooms and 5 permit machines against
-    // amenities.json's 14, 6, 6 and 10. Nothing is lost; the permit machines
-    // gain five. `bus_stop` joined them when build-amenities.mjs learned to
-    // collapse the sheet's 19 sign-plate elements into the 3 stops they draw.
-    //
-    // `parking_marker` and `bike_marker` joined last. They were the two layers
-    // build-basemap.mjs could not name, and they were the black pictograms
-    // still competing with our own discs: 15 bicycle-and-P signs and, in the
-    // other, 8 P badges, 10 permit machines, a motorcycle bay and 2 drop-off
-    // symbols. Every one of those is now an amenity point drawn as a disc, so
-    // the printed artwork is redundant rather than complementary.
-    //
-    // One caveat, and it is the only thing lost here: my campus's two Student
-    // Drop-Off symbols are painted on the kerb, while the disc that replaces
-    // them sits on the routing node my campus binds that destination to, 21 m and
-    // 30 m away. The symbol moves; it does not disappear.
-    const REDRAWN = [
-      'emergency_phone', 'defibrillator', 'restroom', 'permit_machine', 'bus_stop',
-      'parking_marker', 'bike_marker',
-    ];
-    const visible = [
-      'all',
-      ['!', ['to-boolean', ['get', 'hidden']]],
-      ['match', ['get', 'kind'], REDRAWN, false, true],
-    ];
-    // The closed block keeps its FILL here and loses its stroke: it is a
-    // building, so it needs the same solid grey every other building has under
-    // it, and addClosedLayers puts the red wash, the hatch and the outline on
-    // top of that. Drawn on nothing but ground it read as a tinted patch of
-    // lawn — which is exactly what it is not.
-    const visibleLines = ['all', visible, ['!=', ['get', 'kind'], CLOSED_KIND]];
-    // Under the legend's outlines when they exist, and this is not optional.
-    // The sheet arrives from the server, so on a cold load the highlight layers
-    // are already standing when it lands; anchoring both to the network alone
-    // put the later arrival on top, and my campus's opaque building fills painted out
-    // every outline the legend drew. The sheet is ground and the outline
-    // annotates the ground, so the order is fixed rather than incidental.
-    const anchor = map.getLayer('highlight-fill') ? 'highlight-fill' : belowNetwork();
-
-    map.addLayer({
-      id: 'campus-sheet-fill',
-      type: 'fill',
-      source: 'campus-sheet',
-      slot: 'middle',
-      // Everything my campus gave a fill, PLUS the pitches — and the pitches are the
-      // exception because my campus did not give them one.
-      //
-      // Only 2 of the sheet's 22 `sport` shapes carry a fill: the stadium's
-      // track and one other. The remaining 19 are polygons drawn as white
-      // touchlines over the lawn, which is how a printed sheet says "pitch"
-      // and how a vector map says nothing at all — they never entered this
-      // layer, so the soccer, baseball, softball and tennis grounds were lawn
-      // with an outline on top while the one filled shape sat there in pitch
-      // green looking like the odd one out.
-      //
-      // The geometry is already the right shape. It only needed to be allowed
-      // in, and `sheetPaint` has had a colour waiting for it the whole time.
-      // ...and the twelve courts arrive the same way and need the same
-      // exception: stroke-only shapes that have to be let in as surfaces.
-      // ...minus the bay dividers, which are drawn by campus-rake below as
-      // lines. Left in here as well they would be the same 1,004 bars twice
-      // over, and the fill is the copy that cannot be seen at most zooms.
-      filter: ['all', visible,
-        ['!=', ['get', 'kind'], 'parking_stripe'],
-        ['any', ['has', 'fill'], ['in', ['get', 'kind'], ['literal', ['sport', 'tennis', 'tennis_apron']]]]],
-      layout: { 'fill-sort-key': ['get', 'i'] },
-      paint: {
-        'fill-color': fillColour,
-        'fill-opacity': ['coalesce', ['get', 'opacity'], 1],
-        // Same reasoning as the mask: Standard would otherwise light these
-        // through its own model, and the night preset swallows them.
-        'fill-emissive-strength': 1,
-      },
-    }, anchor);
-
-    map.addLayer({
-      id: 'campus-sheet-line',
-      type: 'line',
-      source: 'campus-sheet',
-      slot: 'middle',
-      filter: ['all', visibleLines, ['has', 'stroke']],
-      layout: { 'line-sort-key': ['get', 'i'], 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': lineColour,
-        'line-width': groundWidth(0.4),
-        'line-opacity': ['coalesce', ['get', 'opacity'], 1],
-        'line-emissive-strength': 1,
-      },
-    }, anchor);
-
-    // The rake.
-    //
-    // Butt caps, not the round ones the sheet's other strokes take: a divider
-    // is a painted bar with a square end, and a round cap would add half its
-    // own width at each end — half a metre of overhang on a 7.9 m bar, which is
-    // the difference between a bay and a bay with feet.
-    //
-    // The 1.2 px floor is the whole point of the layer. Below it a divider is
-    // sub-pixel and Mapbox can only render it as a fraction of a pixel's worth
-    // of coverage, which is what turned a rank of them into a moire; at 1.2 it
-    // is a line. Above about z18.5 the true 0.99 m is wider than the floor and
-    // the floor stops applying, so from there on this draws exactly the bar my campus
-    // drew, in exactly the place they drew it.
-    map.addLayer({
-      id: 'campus-rake',
-      type: 'line',
-      source: 'campus-rake',
-      slot: 'middle',
-      layout: { 'line-sort-key': ['get', 'i'], 'line-cap': 'butt' },
-      paint: {
-        'line-color': land.parking_stripe,
-        'line-width': groundWidth(1.2),
-        'line-emissive-strength': 1,
-      },
-    }, anchor);
-  }
-
-  // -------------------------------------------------------------------------
-  // The closed building
-  //
-  // One shape on the sheet carries `kind: "closed"` — the fenced-off block in
-  // the middle of the campus — and one label reads "Closed" over the top of it.
-  // my campus prints both in the same grey as everything else, which makes the one
-  // place on this map you cannot go look exactly like the places you can.
-  //
-  // So it keeps the grey every other building has and gains a red wash and a
-  // hard red outline over it, with the word itself in red once you are close
-  // enough for the word to be worth reading.
-  //
-  // Three passes, and it was four: a diagonal hatch sat over the wash. It went
-  // because a texture on a map whose every other shape is flat colour was the
-  // loudest thing on the campus, and it was shouting on behalf of one small
-  // block. It did not scale either — `fill-pattern` tiles in SCREEN space, so
-  // zooming out packed the stripes tighter until they were a solid red smear
-  // where a quiet tint belonged.
-  // -------------------------------------------------------------------------
-
-  const CLOSED_KIND = 'closed';
-  const CLOSED_TEXT = 'Closed';
-
-  /**
-   * One red for the marks, two for the word.
-   *
-   * The wash, hatch and outline are the same hue at three opacities, so the
-   * shape reads as one object rather than three annotations that happen to
-   * agree. The text cannot join them: it is the only part that has to stay
-   * legible as TYPE, so it takes the ramp's dark end on light ground and its
-   * light end on dark, the way pinInk does for a marker's name.
-   */
-  const CLOSED_RED = '#ea4335';
-  const CLOSED_INK = { light: '#c5221f', dark: '#f28b82' };
-
-  /**
-   * Which way the closed block actually lies, in degrees clockwise from east.
-   *
-   * my campus drew it on the diagonal and the word over it was setting horizontally,
-   * so the label crossed two of its edges and sat half on the tarmac outside.
-   * Measured off the geometry rather than typed in as a number: the shape comes
-   * from a generated artifact, and a rebuild that nudged it would leave a
-   * hard-coded angle quietly wrong.
-   *
-   * The longest edge is the one that decides it — the block is a quadrilateral,
-   * so its long side IS its grain — and longitude is scaled by cos(latitude)
-   * first, without which the angle is off by the map's own aspect.
-   */
-  function closedBearing(basemap) {
-    const shape = basemap?.features?.find((f) => f.properties.kind === CLOSED_KIND);
-    const ring = shape?.geometry?.coordinates?.[0];
-    if (!ring || ring.length < 3) return 0;
-
-    const scale = Math.cos((ring[0][1] * Math.PI) / 180);
-    let best = { length: -1, angle: 0 };
-    for (let i = 0; i < ring.length - 1; i += 1) {
-      const dx = (ring[i + 1][0] - ring[i][0]) * scale;
-      const dy = ring[i + 1][1] - ring[i][1];
-      const length = Math.hypot(dx, dy);
-      if (length <= best.length) continue;
-      // Normalised to the half-turn that reads left-to-right, so the word is
-      // never upside down whichever way round the ring was wound.
-      const east = dx >= 0 ? [dx, dy] : [-dx, -dy];
-      best = { length, angle: -(Math.atan2(east[1], east[0]) * 180) / Math.PI };
-    }
-    return best.angle;
-  }
-
-  /**
-   * The wash, the hatch and the outline. The word is a label layer — it lives
-   * with the other labels in buildLabelLayers, above the pins rather than under
-   * them.
-   *
-   * Rebuilt on every style swap and recoloured in place on a theme change, the
-   * same shape as every other builder here.
-   */
-  function addClosedLayers() {
-    if (!litPalette().land) {
-      // Over imagery the sheet is not drawn at all, so neither is this.
-      for (const id of ['campus-closed-line', 'campus-closed-fill']) {
-        if (map.getLayer(id)) map.removeLayer(id);
-      }
-      return;
-    }
-    // Nothing here is theme-dependent — one red in both looks, because a
-    // closure is not a mood — so an existing set needs no repaint.
-    if (map.getLayer('campus-closed-fill')) return;
-    if (!campusBasemap || !map.getSource('campus-sheet')) return;
-
-    const only = ['==', ['get', 'kind'], CLOSED_KIND];
-    // The wash is ground and sits with the ground: under the paths, and under
-    // the legend's outlines when they are up. The outline does not — see
-    // belowRoute, and note the two anchors are deliberately different.
-    const anchor = map.getLayer('highlight-fill') ? 'highlight-fill' : belowNetwork();
-
-    map.addLayer({
-      id: 'campus-closed-fill',
-      type: 'fill',
-      source: 'campus-sheet',
-      slot: 'middle',
-      filter: only,
-      paint: {
-        'fill-color': CLOSED_RED,
-        // A wash over the building grey, not a colour of its own. There was a
-        // hatch on top of this and it is gone: on a map whose every other shape
-        // is flat colour, a texture was the loudest thing on the campus, and it
-        // was shouting on behalf of one small block. Wash and outline say the
-        // same thing quietly, and they scale — a hatch is a fixed pixel grid, so
-        // zooming out packed it into a solid red smear.
-        'fill-opacity': 0.1,
-        'fill-emissive-strength': 1,
-      },
-    }, anchor);
-
-    map.addLayer({
-      id: 'campus-closed-line',
-      type: 'line',
-      source: 'campus-sheet',
-      slot: 'middle',
-      filter: only,
-      layout: { 'line-join': 'round' },
-      paint: {
-        'line-color': CLOSED_RED,
-        // Barely over the sheet's own 0.4. It was 1.4 and reading as a warning
-        // band: this shape is the only red on an otherwise grey-and-mint
-        // campus, so it does not need weight to be found — being red is already
-        // the whole of the emphasis, and the width was spending it twice.
-        'line-width': groundWidth(0.6),
-        // Washed rather than solid, for the same reason. Held above the paths
-        // it crosses (see belowRoute) so the boundary still reads as continuous
-        // — that is what the layer is FOR — but at an opacity where it sits in
-        // the sheet rather than on top of it.
-        'line-opacity': 0.45,
-        'line-emissive-strength': 1,
-      },
-    }, belowRoute());
-  }
+  // The printed campus sheet, drawn element for element: src/campus-sheet.js.
+  const sheetLayers = createCampusSheet({
+    map,
+    litPalette,
+    sheet: () => campusBasemap,
+    belowNetwork: () => belowNetwork(),
+    belowRoute: () => belowRoute(),
+  });
+  const addBasemapLayers = () => sheetLayers.add();
+  const addClosedLayers = () => sheetLayers.addClosed();
 
   // -------------------------------------------------------------------------
   // Legend highlight
@@ -1412,378 +529,28 @@ function startApp() {
   // The shapes one legend row is asking about: an outline over every building
   // and car park that holds the thing, and a ring on each one that stands in
   // the open. src/highlight.js does the join; this draws the answer.
-  // -------------------------------------------------------------------------
-
-  /** Everything the legend can outline. Empty until the overlays land. */
-  let legendAreas = [];
-  /** category id -> { indices, points, counts }, computed once per load. */
-  const legendHighlights = new Map();
-  /** The pressed category's outline, and the row the pointer is over. */
-  let stickyRow = null;
-  let hoverRow = null;
-  /** False until a file a category can be collected from has landed. */
-  let legendReady = false;
-
-  /**
-   * Which row the outline belongs to — and a hover is no longer one of them.
-   *
-   * Hovering used to outline whatever it pointed at. It does not any more: a
-   * hover now previews the row's PINS, which arrive over a cleared campus (see
-   * previewLegendRow). Tinting ground purple underneath them said two things
-   * about one question, and the outline was the half nobody had asked for —
-   * "where are the defibrillators" is answered by six discs, not by shading the
-   * buildings they hang in.
-   *
-   * Parking is not the exception it looks like it should be. It is the one row
-   * that names a class of the printed sheet, so it is the one row whose ground
-   * IS an answer — but its pins say the same thing better, because a lot you
-   * can read the name of beats a lot you can only see the shape of, and the
-   * permit machines have no shape on the sheet at all. Its outline survives on
-   * the PRESS, where there is room for context under a committed answer.
-   *
-   * So a hover takes the outline off rather than replacing it, which is what
-   * keeps the two answers off the map at the same time. Still undoable, which
-   * is why there were two variables to begin with: a hover never writes
-   * stickyRow, so leaving the row hands the outline straight back to the
-   * selection without the selection ever having been touched.
-   *
-   * Pointing at the row that is ALREADY selected is not a preview, though —
-   * there is nothing for it to preview that is not on screen — so that case
-   * keeps the outline rather than suppressing it. Without the second half of
-   * this test, pressing a row would hide its own outline until the pointer
-   * happened to leave, which reads as the press having half-failed.
-   */
-  const shownRow = () => (hoverRow && hoverRow !== stickyRow ? null : stickyRow);
-
-  function paintHighlight() {
-    const shown = shownRow();
-    const highlight = shown ? legendHighlights.get(shown) : null;
-
-    map.getSource('highlight-areas')?.setData(
-      highlight ? areaCollection(legendAreas, highlight.indices) : EMPTY,
-    );
-    map.getSource('highlight-points')?.setData(
-      highlight ? pointCollection(highlight.points) : EMPTY,
-    );
-  }
-
-  /**
-   * Three layers over two sources, added together and taken down never.
-   *
-   * They sit between the printed sheet and the road ribbon, which is where a
-   * ground annotation belongs: over my campus's own tarmac and lawn, under the white
-   * paths and under the route, so lighting up every car park on campus cannot
-   * bury the directions someone is following. Insertion order does it — the
-   * network layers are added after this in addNetworkLayers, and within a slot
-   * Mapbox honours the order it was given.
-   */
-  function addHighlightLayers() {
-    const colors = litPalette();
-
-    if (map.getLayer('highlight-fill')) {
-      for (const [id, property] of [
-        ['highlight-fill', 'fill-color'],
-        ['highlight-line', 'line-color'],
-        ['highlight-points', 'circle-color'],
-        ['highlight-points', 'circle-stroke-color'],
-      ]) {
-        map.setPaintProperty(id, property, colors.highlight);
-      }
-      return;
-    }
-
-    if (!map.getSource('highlight-areas')) {
-      map.addSource('highlight-areas', { type: 'geojson', data: EMPTY });
-    }
-    if (!map.getSource('highlight-points')) {
-      map.addSource('highlight-points', { type: 'geojson', data: EMPTY });
-    }
-
-    map.addLayer({
-      id: 'highlight-fill',
-      type: 'fill',
-      source: 'highlight-areas',
-      slot: 'middle',
-      paint: {
-        'fill-color': colors.highlight,
-        // A car park is fifty times the area of a building and the same wash
-        // over both reads as two different strengths of answer. Weaker on the
-        // large shape is what makes them look like one highlight.
-        'fill-opacity': ['match', ['get', 'kind'], 'zone', 0.16, 0.26],
-        'fill-emissive-strength': 1,
-      },
-    });
-    map.addLayer({
-      id: 'highlight-line',
-      type: 'line',
-      source: 'highlight-areas',
-      slot: 'middle',
-      layout: { 'line-join': 'round' },
-      paint: {
-        'line-color': colors.highlight,
-        'line-width': 2.5,
-        'line-emissive-strength': 1,
-      },
-    });
-    // The ones with no shape to outline: the bike racks bolted to a path, the
-    // three bus stops out on the perimeter. A ring on the ground under the pin
-    // that is already there, rather than a second pin competing with it.
-    map.addLayer({
-      id: 'highlight-points',
-      type: 'circle',
-      source: 'highlight-points',
-      slot: 'middle',
-      paint: {
-        'circle-color': colors.highlight,
-        'circle-opacity': 0.3,
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 4, 19, 12],
-        'circle-stroke-color': colors.highlight,
-        'circle-stroke-width': 2,
-        'circle-emissive-strength': 1,
-      },
-    });
-
-    // A style swap drops the layers with a row still selected, so what the
-    // legend thinks is showing has to be pushed back at the new ones.
-    paintHighlight();
-  }
-
-  /**
-   * A `match` from a feature's kind to the ink its name is set in.
-   *
-   * Apple tints a POI's label with the marker's own hue rather than the map's
-   * text colour, which is what lets a field of markers be read by colour before
-   * a single word of it has been. Built as an expression rather than one flat
-   * paint value because a symbol layer has one `text-color` and this map draws
-   * eight categories through it.
-   */
-  const amenityHalo = () => litPalette().labelHalo;
-  /** The ring the markers are drawn with, for the callers that have no `colors`. */
-  const pinRing = () => litPalette().pinRing;
-
-  const inkFor = (property) => {
-    // Over imagery a tint has nothing fixed to sit against — foliage, tarmac
-    // and pale roofs are all in one frame — so the names go back to the single
-    // high-contrast colour that reads over all of it. Apple's satellite mode
-    // drops the category tint for exactly the same reason.
-    if (currentBasemap === 'satellite') return SATELLITE.label;
-    return [
-      'match',
-      ['get', property],
-      ...AMENITY_KINDS.flatMap((kind) => [kind, pinInk(kind, currentTheme)]),
-      pinInk('campus', currentTheme),
-    ];
-  };
-
-  /**
-   * Amenity pictograms and the names under them.
-   *
-   * The disc itself is not theme-dependent — it carries its own colour and a
-   * white rim so it reads on lawn, paving and imagery alike — but the label is,
-   * because a third-lightness hue on a near-black ground is a smudge.
-   *
-   * The layer is added inside the promise because setStyle drops registered
-   * images along with the layers, so the icons have to be re-registered before
-   * anything can reference them.
-   */
-  /**
-   * The campus after dark: warm pools on the paths, and nothing standing in them.
-   *
-   * NO LAMP POSTS, deliberately. A post is a piece of street furniture the map
-   * does not otherwise draw, at a scale where it would be two pixels of grey,
-   * and drawing 251 of them would say "here is some clutter" rather than "this
-   * is lit". What a person actually navigates by after dark is the LIGHT — which
-   * way is bright — so the light is the thing drawn.
-   *
-   * Two circles per lamp, and both are needed. A single soft one is a smudge
-   * with no centre and reads as fog; a single hard one is a dot and reads as a
-   * marker. A wide blurred pool with a small bright core inside it is what a
-   * lamp on paving actually looks like from above, and the core is what makes
-   * the pool read as coming FROM somewhere.
-   *
-   * Positions are inferred rather than surveyed — see scripts/build-lamps.mjs,
-   * which places them along the walk network at the spacing campus lighting is
-   * designed to and refuses to put one inside a building.
-   *
-   * `circle-blur: 1` is the whole of the softness: at 1 the gradient runs from
-   * the centre to the full radius with no hard edge anywhere, which is the only
-   * way to get a falloff out of a circle layer. The alternative is a raster
-   * sprite per lamp, which is 251 textures to draw a gradient.
-   */
-  const LAMP_WARM = '#ffc266';
-  const LAMP_CORE = '#fff0d0';
-
-  function addLampLayers() {
-    if (!map.getSource('campus-lamps')) {
-      map.addSource('campus-lamps', { type: 'geojson', data: campusLamps });
-    }
-    // Under everything that carries meaning — the paths, the pins, the labels —
-    // because this is ground and not information. A pin lost inside its own
-    // glow would be the light winning an argument it should not be in.
-    const before = map.getLayer('campus-paths') ? 'campus-paths' : undefined;
-    if (!map.getLayer('campus-lamp-pool')) {
-      map.addLayer({
-        id: 'campus-lamp-pool',
-        type: 'circle',
-        source: 'campus-lamps',
-        slot: 'middle',
-        paint: {
-          'circle-color': LAMP_WARM,
-          // Metres would be truer and Mapbox does not offer them here, so the
-          // radius is interpolated over zoom to hold a roughly constant pool on
-          // the ground — about 14 m across, which is what a 4 m pole throws.
-          'circle-radius': ['interpolate', ['exponential', 2], ['zoom'],
-            14, 3, 16, 11, 18, 42, 20, 168],
-          'circle-blur': 1,
-          'circle-opacity': 0,
-          'circle-emissive-strength': 1,
-          'circle-pitch-alignment': 'map',
-        },
-      }, before);
-    }
-    if (!map.getLayer('campus-lamp-core')) {
-      map.addLayer({
-        id: 'campus-lamp-core',
-        type: 'circle',
-        source: 'campus-lamps',
-        slot: 'middle',
-        paint: {
-          'circle-color': LAMP_CORE,
-          'circle-radius': ['interpolate', ['exponential', 2], ['zoom'],
-            14, 0.6, 16, 2.2, 18, 8.4, 20, 33.6],
-          'circle-blur': 0.9,
-          'circle-opacity': 0,
-          'circle-emissive-strength': 1,
-          'circle-pitch-alignment': 'map',
-        },
-      }, before);
-    }
-    paintLamps();
-  }
-
-  /**
-   * How lit the campus is, which is the inverse of how lit the sky is.
-   *
-   * Off in daylight — a lamp pool on sunlit paving is a stain — and up through
-   * dusk to full at night. Dawn gets the same as dusk: the lights are still on,
-   * they are just about to stop mattering.
-   */
-  const LAMP_BY_PRESET = { day: 0, dawn: 0.35, dusk: 0.55, night: 1 };
-
-  function paintLamps() {
-    if (!map.getLayer('campus-lamp-pool')) return;
-    const preset = lightingBench && lightingBench.preset !== 'auto'
-      ? lightingBench.preset : clockPreset();
-    const lit = LAMP_BY_PRESET[preset] ?? 0;
-    /*
-     * The pool is weak even at full: it is a wash over ground somebody is
-     * trying to read a map on, not a light source. The core carries the
-     * brightness.
-     *
-     * AND NOT AT ALL UNTIL YOU ARE CLOSE ENOUGH FOR IT TO BE LIGHT. The whole
-     * campus frames at z14.7, and there a lamp's pool is a 3px circle: 251 of
-     * them are not a lit campus, they are 251 orange specks, and they were
-     * comfortably the busiest thing on the night map — over the buildings, the
-     * fields and the paths they are supposed to be lighting. The effect needs
-     * the pools to be big enough to read as pools, which is a walking scale.
-     *
-     * Off at the framing zoom, full by 17.5, which is roughly where a single
-     * building fills a phone. Interpolated rather than switched so that a
-     * pinch does not flash them on.
-     */
-    const byZoom = (peak) => ['interpolate', ['linear'], ['zoom'], 16, 0, 17.5, peak];
-    map.setPaintProperty('campus-lamp-pool', 'circle-opacity', byZoom(0.30 * lit));
-    map.setPaintProperty('campus-lamp-core', 'circle-opacity', byZoom(0.55 * lit));
-  }
-
-  function addAmenityLayer() {
-    if (map.getLayer('campus-amenities')) {
-      map.setPaintProperty('campus-amenities', 'text-color', inkFor('kind'));
-      map.setPaintProperty('campus-amenities', 'text-halo-color', amenityHalo());
-      // The discs are rasterised images, so a theme change cannot repaint them
-      // — they have to be drawn again. Under Standard a theme change is a
-      // config change rather than a setStyle, so nothing else clears them; the
-      // loader compares the ring it was last given and re-rasterises only when
-      // it has actually moved.
-      loadAmenityIcons(map, pinRing());
-      return;
-    }
-    if (!campusAmenities) return;
-
-    if (!map.getSource('campus-amenities')) {
-      // `generateId` is what makes one pin addressable. amenities.json carries
-      // no identifier of its own — six features all say `defibrillator` — so
-      // without this there is no filter that can hide the one that was tapped
-      // and leave the other five standing.
-      map.addSource('campus-amenities', {
-        type: 'geojson',
-        data: campusAmenities,
-        generateId: true,
-      });
-    }
-    loadAmenityIcons(map, pinRing()).then(() => {
-      // A style swap can land between the two, taking the source with it.
-      if (map.getLayer('campus-amenities') || !map.getSource('campus-amenities')) return;
-      map.addLayer({
-        id: 'campus-amenities',
-        type: 'symbol',
-        source: 'campus-amenities',
-        slot: 'middle',
-        // Below this the campus is a few hundred pixels across and 72 markers
-        // is noise rather than information.
-        minzoom: 16,
-        layout: {
-          'icon-image': ['get', 'kind'],
-          // 0.54 to 0.65 of a 26-unit disc puts it at 14 to 17 px across, which
-          // is the range Apple's own resting markers occupy. The stops live in
-          // pin-select.js because a selected pin has to start its animation at
-          // whatever size this is drawing right now.
-          'icon-size': sizeExpr(AMBIENT_SIZE),
-          // Centred, not bottom-anchored. The resting marker has no tail — it
-          // is a disc sitting ON the place rather than a balloon pointing down
-          // at one, so its middle is what goes on the coordinate.
-          'icon-anchor': 'center',
-          'icon-padding': 2,
-          // The name goes underneath, which is the Apple arrangement and the
-          // reason `text-anchor` is top: the anchor point is the coordinate, so
-          // the offset has to clear the disc's own lower half.
-          //
-          // `name`, not `label`: only an amenity whose name identifies it gets
-          // one printed, which is four of the eighty-four. The rest are the
-          // icon's own meaning set in type — see withAmenityNames in poi.js.
-          // Held to 17 on top of that, because even a real name is not worth
-          // reading when the whole campus is on screen.
-          'text-field': ['step', ['zoom'], '', 17, ['coalesce', ['get', 'name'], '']],
-          'text-font': mapFont().medium,
-          'text-size': 13,
-          // Below, then above, then right, then left — see the same four on
-          // category-pins for what the anchor names mean, which is not what
-          // they sound like.
-          'text-variable-anchor': ['top', 'bottom', 'left', 'right'],
-          'text-radial-offset': 0.85,
-          'text-justify': 'auto',
-          // Shared with the lifted marker's DOM label, so a name wraps on the
-          // same words in both states — see LABEL_MAX_EM in pin-select.js.
-          'text-max-width': LABEL_MAX_EM,
-          // Never at the cost of the marker. 84 of these sit on one campus and
-          // a good half of the names would collide at any useful zoom; the disc
-          // is the information and the word is the elaboration.
-          'text-optional': true,
-        },
-        paint: {
-          'icon-emissive-strength': 1,
-          'text-color': inkFor('kind'),
-          'text-halo-color': amenityHalo(),
-          'text-halo-width': 1.4,
-          'text-emissive-strength': 1,
-        },
-      });
-      // A style swap rebuilds this layer unfiltered, and the HTML marker of a
-      // pin that was lifted before the swap survives it — so without this the
-      // selected pin comes back small underneath its own enlarged self.
-      paintCategory();
-    }).catch((error) => console.error('amenity icons unavailable:', error));
-  }
+  // The pins, the lamps and the category answer: src/marker-layers.js.
+  const markers = createMarkerLayers({
+    map,
+    litPalette,
+    mapFont: () => mapFont(),
+    theme: () => currentTheme,
+    basemap: () => currentBasemap,
+    amenities: () => campusAmenities,
+    bench: () => lightingBench,
+    clockPreset,
+    shownCategory: () => shownCategory(),
+    shownHits: () => shownHits(),
+    amenityFilter: () => pins.amenityFilter(),
+    hiddenPin: (layer) => pins.hiddenPin(layer),
+    paintLabels: () => pins.paintLabels(),
+  });
+  const inkFor = (property) => markers.inkFor(property);
+  const addAmenityLayer = () => markers.addAmenity();
+  const addLampLayers = () => markers.addLamps();
+  const paintLamps = () => markers.paintLamps();
+  const addCategoryLayer = () => markers.addCategory();
+  const paintCategory = () => markers.paintCategory();
 
   // -------------------------------------------------------------------------
   // Categories
@@ -1802,1433 +569,99 @@ function startApp() {
   // the ambient pictogram layer and draws the category's own pins. See
   // paintCategory for why filtering the existing layer was not enough.
   // -------------------------------------------------------------------------
-
-  // categoryPanel is declared up with the route panel — campusPadding measures it.
-  const categoryTitle = document.getElementById('category-title');
-  const categoryCount = document.getElementById('category-count');
-  const categoryList = document.getElementById('category-list');
-  const categoryClose = document.getElementById('category-close');
-
-  /** The selected category's id, or null when the map is showing everything. */
-  let activeCategory = null;
-  let categoryHits = [];
-
-  /**
-   * ...and the same pair for the building-type grid, which is the other thing
-   * the results panel can be showing.
-   *
-   * Deliberately NOT folded into activeCategory. The two answer with different
-   * machinery — a legend row drops pins and filters the amenity layer, a
-   * building class outlines ground and touches no layer at all — and the one
-   * thing they have to agree about is that only one of them can be on screen,
-   * which is a line of code in each rather than a shared variable that would
-   * have to carry a tag saying which kind of thing it held.
-   */
-  let activeKind = null;
-  let kindHits = [];
-  /** Every directory building, grouped by class. Rebuilt when the file lands. */
-  let kindGroups = new Map();
-
-  /**
-   * The hovered row's category, which the map draws in place of the selection
-   * for exactly as long as the pointer is on the row.
-   *
-   * Separate from activeCategory for the same reason hoverRow is separate from
-   * stickyRow: a preview has to be undoable. Hovering never writes the
-   * selection, so leaving the row puts back the pressed category's pins — or
-   * the whole campus, if nothing was pressed.
-   */
-  let hoverCategory = null;
-  let hoverHits = [];
-
-  /**
-   * What the pin layer is actually drawing, which is the preview if there is
-   * one and the selection otherwise.
-   *
-   * Every read that is about WHAT IS ON THE MAP goes through these; the reads
-   * that are about what the user has committed to — the results list, the
-   * camera, which row shows as pressed — keep reading activeCategory directly.
-   * That split is the whole difference between a preview and a selection.
-   */
-  const shownCategory = () => hoverCategory ?? activeCategory;
-  const shownHits = () => (hoverCategory ? hoverHits : categoryHits);
-
-  /**
-   * Pins for `match` categories.
-   *
-   * Its own source rather than appending to amenities.json, because these are
-   * directory rows, not legend symbols: they carry a real name ("Myrtle Parking
-   * Lot East") and only exist while their chip is pressed. Keeping them apart
-   * means clearing a category is a setData(EMPTY), not a filter on a mixed set.
-   */
-  function addCategoryLayer() {
-    const colors = litPalette();
-
-    if (map.getLayer('category-pins')) {
-      // Same shape as the other builders: a theme change re-runs this to
-      // recolour what is already there rather than rebuilding it.
-      map.setPaintProperty('category-pins', 'text-color', inkFor('icon'));
-      map.setPaintProperty('category-pins', 'text-halo-color', colors.labelHalo);
-      return;
-    }
-    if (!map.getSource('category-pins')) {
-      map.addSource('category-pins', { type: 'geojson', data: EMPTY, generateId: true });
-    }
-
-    // Shares the amenity loader: the four discs these need are registered in
-    // map-images.js alongside the legend's own, so there is one icon family and
-    // one place it is rasterised.
-    loadAmenityIcons(map, colors.pinRing).then(() => {
-      if (map.getLayer('category-pins') || !map.getSource('category-pins')) return;
-      map.addLayer({
-        id: 'category-pins',
-        type: 'symbol',
-        source: 'category-pins',
-        slot: 'middle',
-        layout: {
-          'icon-image': ['get', 'icon'],
-          // Larger than the ambient pictograms. These are what the user just
-          // asked to see, and at the zoom the whole campus fits in, the ambient
-          // size renders them as specks against my campus's own printed symbols.
-          // Google does the same thing: a search result is a bigger pin than
-          // the POIs it lands among.
-          'icon-size': sizeExpr(CATEGORY_SIZE),
-          // Centred like the ambient discs: no tail, so the middle is the mark.
-          'icon-anchor': 'center',
-          // A category is a deliberate request to see all of them, so the pins
-          // never drop out to a collision the way the ambient pictograms do.
-          // Their names still do: `text-optional` keeps the pin when its label
-          // will not fit, which is the only sane answer for the eight HomeBases
-          // — my campus puts all of them inside the LRC, so with overlap allowed the
-          // eight names print on top of each other.
-          'icon-allow-overlap': true,
-          'text-optional': true,
-          'text-field': ['get', 'name'],
-          'text-font': mapFont().medium,
-          'text-size': 14,
-          // Under the disc if the name fits there, and if it does not, above,
-          // then right, then left. It used to be under or nowhere, and "nowhere"
-          // is what a caption does when it loses a collision — so a row of pins
-          // in a car park drew six discs and one word between them.
-          //
-          // READ THESE BACKWARDS. An anchor names the edge of the LABEL that is
-          // pinned to the point, not the side of the point the label lands on:
-          // 'top' fastens the label's top edge to the coordinate and so hangs it
-          // BELOW, 'left' fastens its left edge and so puts it to the RIGHT.
-          // This list is the order asked for — below, above, right, left —
-          // written in those terms.
-          'text-variable-anchor': ['top', 'bottom', 'left', 'right'],
-          // Replaces text-offset, which a variable anchor would apply in one
-          // fixed direction for all four positions: the same [0, 0.95] that
-          // clears the disc downwards would push the label above it a further
-          // 0.95 em up, and the side ones down past its corner.
-          // text-radial-offset is that distance along whichever direction the
-          // anchor chose, so all four clear the disc by the same gap.
-          'text-radial-offset': 0.95,
-          // Follows the anchor: a label to the left of a pin ends flush against
-          // it rather than centred on a point it is no longer under.
-          'text-justify': 'auto',
-          'text-max-width': LABEL_MAX_EM,
-        },
-        paint: {
-          // Tinted with the disc's own hue rather than set in the map's ink.
-          'text-color': inkFor('icon'),
-          'text-halo-color': colors.labelHalo,
-          'text-halo-width': 1.6,
-          'icon-emissive-strength': 1,
-          'text-emissive-strength': 1,
-          // The entrance drives this. Anchored to the VIEWPORT because the sway
-          // is a screen-space settle measured in screen pixels — left the
-          // default and it would be bearing-relative, so the same animation
-          // would swing along some compass direction on a rotated map.
-          'icon-translate': [0, 0],
-          'icon-translate-anchor': 'viewport',
-        },
-      });
-      // A style swap can land between selecting a category and this resolving.
-      paintCategory();
-    }).catch((error) => console.error('category icons unavailable:', error));
-  }
-
-  /**
-   * Push the current selection at the map: the filter and the pins.
-   *
-   * Two things narrow these layers now and they have to be combined rather than
-   * written in turn — a category that set its own filter would put back the pin
-   * a selection had just taken out, and the selected one would be drawn twice,
-   * once small underneath its own animation.
-   */
-  function paintCategory() {
-    const active = Boolean(shownCategory());
-
-    // The ambient pictograms go away entirely while a category is up, and the
-    // category draws every one of its own pins instead. Two reasons that beats
-    // narrowing the existing layer's filter: that layer is minzoom 16, so a
-    // filtered selection was invisible at the zoom the campus actually fits at;
-    // and the category's pins overlap-allow and carry names, which the ambient
-    // ones deliberately do not.
-    if (map.getLayer('campus-amenities')) {
-      map.setFilter('campus-amenities', active ? ['boolean', false] : amenityFilter());
-    }
-    if (map.getLayer('category-pins')) {
-      map.setFilter('category-pins', hiddenPin('category-pins'));
-    }
-
-    const source = map.getSource('category-pins');
-    if (!source) return;
-    source.setData(active ? {
-      type: 'FeatureCollection',
-      features: shownHits().map((hit) => ({
-        type: 'Feature',
-        properties: { icon: hit.icon, name: hit.name ?? '' },
-        geometry: { type: 'Point', coordinates: hit.coords },
-      })),
-    } : EMPTY);
-
-    // The printed label pins go with them — same rule, different layers. Here
-    // rather than at the two call sites so a style swap, which rebuilds these
-    // from scratch, restores the same state this did.
-    paintLabels();
-  }
-
-  // -------------------------------------------------------------------------
   // Clearing the map for an answer
   //
   // Pressing a chip is a question, and the map answers it by emptying itself
-  // first. Every pin on campus goes — the ambient pictograms and the 38 printed
-  // labels that carry a disc, names included — and then the category's own pins
-  // arrive on the lift's spring, so the thing you asked for is the only thing
-  // moving. Swapping the two sets in one frame, which is what this used to do,
-  // left the answer indistinguishable from the map it landed on: the restrooms
-  // appeared among forty markers that had not changed.
-  //
-  // The two halves are animated by different means, and deliberately:
-  //
-  //   OUT is opacity alone, across eight or nine layers. Opacity is a paint
-  //   property, so it costs a repaint and nothing else. Shrinking these would
-  //   mean pushing `icon-size` — a LAYOUT property — at every one of them every
-  //   frame, and re-laying out the whole printed label set to fade it is a bad
-  //   trade for a 170 ms move nobody is looking at.
-  //
-  //   IN is the real thing: size, the sideways settle, and the names. It is one
-  //   layer holding tens of features, which is what makes the per-frame layout
-  //   affordable here and not there.
+  // first. The whole sequence is src/pin-choreography.js, including the reason
+  // the two halves are animated by different means.
   // -------------------------------------------------------------------------
 
-  /** How long the campus takes to clear. Short: it is the throat-clearing. */
-  const PIN_FADE_MS = 170;
-
-  /**
-   * Where the arriving pins start, as a fraction of full size.
-   *
-   * The capture's own resting-to-settled ratio: Apple's marker is 23 px across
-   * before it is picked up and 65.9 px after. Pins that come from nothing rather
-   * than from a marker have no measured start of their own, so they borrow that
-   * one and grow through the same proportional range the lift does.
-   */
-  const ENTRANCE_START = 0.349;
-
-  /**
-   * Bumped to cancel whatever is mid-flight.
-   *
-   * Legend rows are a column and people press down it. Without this the previous
-   * run's next frame lands after the new one has set up — pins at the old
-   * opacity, or an `icon-size` from a swap that is already over.
-   *
-   * A superseded run stops asking for frames and NEVER SETTLES its promise, so
-   * the `playCategory*` that awaited it stays suspended for the life of the
-   * page. That is deliberate and it is safe, but only for a reason worth
-   * stating, because it is a reason a later edit can take away:
-   *
-   *   the suspended async frame holds the pending promise, the promise holds the
-   *   frame's continuation, and — because BOTH call sites launch these
-   *   fire-and-forget, awaiting nothing and storing nothing — no root holds
-   *   either. An unreachable cycle is a thing a mark-and-sweep collector takes,
-   *   so the pair goes at the next GC.
-   *
-   * `await playCategorySwap()` from anywhere reachable, or parking the returned
-   * promise in a variable that outlives the run, roots the cycle and turns this
-   * into one leaked frame per press. If a caller ever needs to know when the
-   * pins have landed, give the cancelled path a settle — resolve it with a
-   * `superseded` flag rather than dropping it on the floor — instead of rooting
-   * the promise as it stands.
-   */
-  let choreography = 0;
-
-  /**
-   * True while the category pins are growing in.
-   *
-   * The entrance owns `icon-size` on that layer frame by frame, and the pin
-   * hover writes the same property. Without this, a pointer resting where the
-   * pins land would snap them to full size half way through their arrival. See
-   * paintPinHover, which is the only reader.
-   */
-  let pinsArriving = false;
-
-  /** Asked each time, so a preference changed mid-session takes effect at once. */
-  const prefersStill = () =>
-    Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
-
-  /** Every layer that draws a pin, which is what a chip press has to clear. */
-  const pinLayers = () => ['campus-amenities', ...POI_LABEL_LAYERS]
-    .filter((layer) => map.getLayer(layer));
-
-  function setLayerFade(layers, value) {
-    for (const layer of layers) {
-      // A style swap can take these out from under a run in progress.
-      if (!map.getLayer(layer)) continue;
-      map.setPaintProperty(layer, 'icon-opacity', value);
-      map.setPaintProperty(layer, 'text-opacity', value);
-    }
-  }
-
-  /**
-   * What a layer is drawn at right now, so a fade can start from there.
-   *
-   * Chips get pressed in quick succession and the run underway is cancelled
-   * where it stands, which can be anywhere — pins at 0.4 through an entrance,
-   * say. Fading from a hard 1 would snap them to full first and then take them
-   * out, a flash in the one place this whole sequence exists to remove.
-   */
-  const fadeFrom = (layer) => {
-    const value = map.getPaintProperty(layer, 'icon-opacity');
-    return typeof value === 'number' ? value : 1;
-  };
-
-  /** Call `step(0..1)` once a frame for `ms`, unless something supersedes it. */
-  function overFrames(ms, step) {
-    const mine = choreography;
-    return new Promise((resolve) => {
-      const started = performance.now();
-      const tick = (now) => {
-        if (mine !== choreography) return;
-        // CLAMPED AT BOTH ENDS, and the lower one is not defensive — it is a
-        // bug that was firing on every chip press. requestAnimationFrame hands
-        // its callback the time the FRAME began, which is routinely a
-        // millisecond or two BEFORE the `performance.now()` read a moment ago
-        // in this function, so the first tick of every run arrived with a
-        // negative progress. Downstream that is `1 - p` greater than one, and
-        // Mapbox rejected the paint property outright:
-        // "icon-opacity: 1.0064705882352856 is greater than the maximum value
-        // 1", logged once per layer per press. The frame was simply dropped, so
-        // the fade started a frame late — invisible, and noisy in the console
-        // for anyone reading it for real errors.
-        const p = Math.min(Math.max((now - started) / ms, 0), 1);
-        step(p);
-        if (p < 1) requestAnimationFrame(tick);
-        else resolve();
-      };
-      requestAnimationFrame(tick);
-    });
-  }
-
-  /**
-   * The category's pins arriving, on the same curve a tapped pin is lifted on.
-   *
-   * `icon-size` stays a zoom expression the whole way rather than becoming a
-   * plain number, because `frameCategory` is flying the camera over exactly
-   * these frames — a fixed size would be drawn at the wrong scale the moment the
-   * zoom moved under it. The growth is multiplied into the table's stops instead
-   * of wrapped around the finished expression; see `scaleStops` for why that is
-   * the only form Mapbox will accept.
-   *
-   * The sway rides `icon-translate`, which is paint and therefore does not enter
-   * collision: the settle moves drawn pixels only, and the labels stay where
-   * they were placed.
-   *
-   * A PIN AND ITS NAME COME UP TOGETHER, on one opacity ramp. They did not at
-   * first — the names were held back until the growth was nearly over, on the
-   * theory that fading them in over a still-changing `icon-size` would make them
-   * flicker as the collision boxes resized. That theory was wrong twice. The
-   * icons are `icon-allow-overlap`, so they are not in the collision index at
-   * all and their size cannot dislodge a label; and the delay was not the 335 ms
-   * it looked like on paper. Stacked on the 170 ms clear-out before it and
-   * Mapbox's own 300 ms fade for a newly placed symbol after it, the names
-   * landed nearly a second behind the discs — long enough to read as a second
-   * event rather than as the same one, which is exactly the disorientation the
-   * whole sequence is meant to prevent.
-   *
-   * Every pin swings together. There is no stagger here and it would be a lie if
-   * there were: the capture is one marker, so a per-pin delay would be invented
-   * rather than measured, and Mapbox cannot vary a layout property per feature
-   * without pushing new data on every frame anyway.
-   */
-  async function playCategoryEntrance() {
-    const layer = 'category-pins';
-    if (!map.getLayer(layer)) return;
-
-    const base = sizeExpr(CATEGORY_SIZE);
-    /** How long the pins and their names take to become visible at all. */
-    const APPEAR_MS = GROW_MS * 0.3;
-
-    const settle = () => {
-      pinsArriving = false;
-      if (!map.getLayer(layer)) return;
-      map.setLayoutProperty(layer, 'icon-size', base);
-      map.setPaintProperty(layer, 'icon-translate', [0, 0]);
-      map.setPaintProperty(layer, 'icon-opacity', 1);
-      map.setPaintProperty(layer, 'text-opacity', 1);
-      // ...and hand the layer back to the hover, in case the pointer has been
-      // sitting where a pin has just landed. A no-op when nothing is hovered.
-      paintPinHover(layer);
-    };
-    if (prefersStill()) { settle(); return; }
-    pinsArriving = true;
-
-    // Frame zero, set now rather than on the first callback. `paintCategory`
-    // has already pushed the data, so a rAF's worth of delay is a rAF of pins
-    // drawn full size — the pop the animation exists to replace.
-    map.setLayoutProperty(layer, 'icon-size', sizeExpr(scaleStops(CATEGORY_SIZE, ENTRANCE_START)));
-    map.setPaintProperty(layer, 'icon-opacity', 0);
-    map.setPaintProperty(layer, 'text-opacity', 0);
-
-    // The sway outlasts the growth by 780 ms, and for all of it the size is a
-    // settled 1.0. Pushing that unchanged value at a LAYOUT property anyway is
-    // ~47 pointless symbol re-layouts, so the growth stops writing when it stops
-    // changing and the rest of the run is paint alone.
-    let growing = true;
-
-    // NO MOTION BLUR HERE, and the measurement is the reason rather than the
-    // effort — this had a working ghost trail for a while and it was taken out.
-    //
-    // The debug menu's Trail draws five copies of a moving thing a few
-    // milliseconds apart, which needs the thing to move. Built over these pins
-    // it was five extra symbol layers over the same source, correct and
-    // invisible: sampled over the trail's own 150 ms, the entrance travels
-    // 2.2 px. It is a concentric SCALE plus a 2 px settle, so every past copy of
-    // a growing disc hides behind the present one.
-    //
-    // What DOES move is the camera — 162 px over the same 150 ms framing the
-    // bike racks, 247 px framing the restrooms, two orders of magnitude past the
-    // pins. Feeding that into the ghosts was tried too and it fans the trail out
-    // to 92 px, which looks like the effect working and is a lie: when the
-    // camera moves the buildings and the roads move with it, so smearing only
-    // the pins says the pins are sliding across a map that is holding still.
-    // Camera blur is a whole-frame effect or it is nothing, and Mapbox draws to
-    // its own canvas and hands out no post-processing hook to apply one with.
-    //
-    // The other method cannot reach these either. Smear is an SVG filter on a
-    // DOM element and these are symbols rasterised into the GL canvas. So the
-    // setting drives the lifted pin, where there is 19.9 px of travel in the
-    // same window and both methods are plainly visible, and leaves the arrival
-    // alone.
-
-    await overFrames(SWAY_MS, (p) => {
-      if (!map.getLayer(layer)) return;
-      const ms = p * SWAY_MS;
-
-      if (growing) {
-        const done = ms >= GROW_MS;
-        const grown = ENTRANCE_START + (1 - ENTRANCE_START) * growEase(Math.min(ms / GROW_MS, 1));
-        map.setLayoutProperty(layer, 'icon-size', done ? base
-          : sizeExpr(scaleStops(CATEGORY_SIZE, grown)));
-        growing = !done;
-      }
-
-      // Read per frame rather than captured: `frameCategory` is flying the
-      // camera through this, and the swing is a fraction of the pin's width at
-      // whatever zoom it is actually being drawn at.
-      const width = PIN_BASE_W * sizeAt(CATEGORY_SIZE, map.getZoom());
-      map.setPaintProperty(layer, 'icon-translate', [swayAt(ms, width), 0]);
-      // One ramp for both, so the pin and its name are one object arriving.
-      const appearing = Math.min(ms / APPEAR_MS, 1);
-      map.setPaintProperty(layer, 'icon-opacity', appearing);
-      map.setPaintProperty(layer, 'text-opacity', appearing);
-
-    });
-
-    // Back to the declarative values, so a later zoom is the expression's job
-    // again and nothing is left holding a frame's worth of state.
-    settle();
-  }
-
-  /**
-   * Clear the campus, apply the new selection, then play it in.
-   *
-   * `paintCategory` is the whole of the state change and stays that way; this
-   * only decides what is on screen either side of it. So a run that is cut off
-   * part way still leaves the map correct — the filters and the data are set in
-   * one go between the two halves, never spread across the animation.
-   */
-  async function playCategorySwap() {
-    choreography += 1;
-    const clearing = pinLayers();
-    const hadPins = Boolean(map.getLayer('category-pins'));
-    const wasAt = hadPins ? fadeFrom('category-pins') : 0;
-
-    if (!prefersStill()) {
-      await overFrames(PIN_FADE_MS, (p) => {
-        setLayerFade(clearing, 1 - p);
-        if (hadPins && map.getLayer('category-pins')) {
-          // A chip pressed while another is up: its pins are the ones on screen.
-          map.setPaintProperty('category-pins', 'icon-opacity', wasAt * (1 - p));
-          map.setPaintProperty('category-pins', 'text-opacity', wasAt * (1 - p));
-        }
-      });
-    }
-
-    paintCategory();
-    // Filtered out entirely now, so their opacity is only being made ready for
-    // whenever the chip is let go of.
-    setLayerFade(clearing, 1);
-    await playCategoryEntrance();
-  }
-
-  /** The way back: the answer goes, and the campus comes up behind it. */
-  async function playCategoryClear() {
-    choreography += 1;
-    const still = prefersStill();
-
-    if (!still && map.getLayer('category-pins')) {
-      const wasAt = fadeFrom('category-pins');
-      await overFrames(PIN_FADE_MS, (p) => {
-        if (!map.getLayer('category-pins')) return;
-        map.setPaintProperty('category-pins', 'icon-opacity', wasAt * (1 - p));
-        map.setPaintProperty('category-pins', 'text-opacity', wasAt * (1 - p));
-      });
-    }
-
-    paintCategory();
-
-    const returning = pinLayers();
-    if (!still) {
-      // Longer coming back than going, because this one has to re-place forty
-      // labels rather than take them away, and a campus that snaps back on is
-      // the jolt the fade out was avoiding.
-      setLayerFade(returning, 0);
-      await overFrames(PIN_FADE_MS * 1.6, (p) => setLayerFade(returning, p));
-    }
-    setLayerFade(returning, 1);
-  }
+  const choreo = createChoreography({
+    map,
+    /** Every layer that draws a pin, which is what a chip press has to clear. */
+    pinLayers: () => ['campus-amenities', ...POI_LABEL_LAYERS]
+      .filter((layer) => map.getLayer(layer)),
+    paintCategory: () => paintCategory(),
+    paintPinHover: (layer) => paintPinHover(layer),
+  });
+  const prefersStill = () => choreo.prefersStill();
 
   // -------------------------------------------------------------------------
-  // Selecting a pin
+  // Selecting and hovering a pin
   //
-  // Tapping one lifts it: the symbol is taken out of its layer and an HTML
-  // marker takes its place at exactly the size the symbol was being drawn at,
-  // then springs up to the selected size. See src/pin-select.js for where that
-  // curve comes from — it is Apple Maps', measured off a 60 fps capture.
-  //
-  // An HTML marker rather than a bigger symbol because a symbol layer can only
-  // be resized by pushing a new `icon-size` every frame, which restyles the
-  // whole layer to move one icon and scales a 2x raster past its own resolution
-  // while it does it.
+  // Which pin is up, which is under the pointer, and what each layer may
+  // therefore draw: src/pin-state.js. What a lift MEANS is here, because a
+  // building gets a building card and a defibrillator gets two lines.
   // -------------------------------------------------------------------------
 
-  /** `{ layer, id, coords, kind, name }` for the pin that is up, or null. */
-  let selectedPin = null;
-  let selectedMarker = null;
-
-  /**
-   * The queued restore of the symbol under a marker that is shrinking away.
-   *
-   * Held so it can be cancelled. Both painters read the CURRENT selection rather
-   * than one captured when the timer was set, so a stale one was never wrong —
-   * it just re-painted every pin layer to the state they were already in. But
-   * people tap along a row of pins faster than the 190 ms this waits, and each
-   * tap was leaving another one behind: a filter rebuild and a repaint per pin
-   * layer, for an answer that had been on screen since the tap before.
-   */
-  let restorePins = null;
-
-  /** The filter that hides the lifted pin from its own layer, or null. */
-  const hiddenPin = (layer) =>
-    (selectedPin?.layer === layer ? ['!=', ['id'], selectedPin.id] : null);
-
-  /**
-   * What the ambient amenity layer is allowed to draw.
-   *
-   * Two rules combined, because setting them in turn would mean each one put
-   * back what the other had just taken out. The zoom rank thins 84 markers down
-   * to the 31 worth seeing across a whole campus (see AMENITY_ZOOM in poi.js);
-   * the second hides whichever one has been lifted into a selection.
-   *
-   * A zoom expression in a `filter` is only re-evaluated at integer zooms, which
-   * is exactly why the thresholds in that table are integers.
-   */
-  function amenityFilter() {
-    const ranked = ['>=', ['zoom'], [
-      'match',
-      ['get', 'kind'],
-      ...Object.entries(AMENITY_ZOOM).flatMap(([kind, zoom]) => [kind, zoom]),
-      AMENITY_ZOOM_DEFAULT,
-    ]];
-    const hidden = hiddenPin('campus-amenities');
-    return hidden ? ['all', ranked, hidden] : ranked;
-  }
-
-  /** Which size table a layer draws its discs from. */
-  const SIZE_TABLE = { 'category-pins': CATEGORY_SIZE, 'campus-amenities': AMBIENT_SIZE };
-
-  /** How wide that layer is drawing its icons at this zoom, in CSS pixels. */
-  const ambientWidth = (layer) => PIN_BASE_W * sizeAt(
-    SIZE_TABLE[layer] ?? LABEL_SIZE,
-    map.getZoom(),
-  );
-
-  /**
-   * The label layers that draw a pictogram, and are therefore pins.
-   *
-   * POI_LABEL_KINDS is the set poi.js gives a disc to; 38 of the 49 printed
-   * labels get one. They looked like every other marker on this map and behaved
-   * like nothing at all — `pinAt` did not know about them, so a tap fell through
-   * to the building underneath and the lift never played. At the zoom the campus
-   * fits the screen at they are most of the markers on it.
-   */
-  const POI_LABEL_LAYERS = [...POI_LABEL_KINDS].map((kind) => `campus-labels-${kind}`);
-
-  /**
-   * A label layer draws its own kind, minus whichever one has been lifted.
-   *
-   * ...and minus all of them while a chip is up, for the kinds that carry a
-   * pictogram. Those 38 are pins — `pinAt` treats them as such and they lift
-   * like any other — so leaving them on screen while a category is showing puts
-   * the answer among forty markers that did not change. The kinds with no disc
-   * stay: they are place names, not markers, and a campus that loses its own
-   * names is harder to read, not clearer.
-   */
-  const labelFilter = (kind) => {
-    if (shownCategory() && POI_LABEL_KINDS.has(kind)) return ['boolean', false];
-    // "Closed" is a building-kind label and it is drawn by campus-labels-closed
-    // instead, which is the only layer here that can be rotated onto the shape
-    // it annotates. Excluded rather than left to draw twice.
-    const mine = kind === 'building'
-      ? ['all', ['==', ['get', 'kind'], kind], ['!=', ['get', 'text'], CLOSED_TEXT]]
-      : ['==', ['get', 'kind'], kind];
-    const hidden = hiddenPin(`campus-labels-${kind}`);
-    return hidden ? ['all', mine, hidden] : mine;
-  };
-
-  /** Re-apply those filters, which is what hides and restores a lifted label. */
-  function paintLabels() {
-    for (const kind of POI_LABEL_KINDS) {
-      const id = `campus-labels-${kind}`;
-      if (map.getLayer(id)) map.setFilter(id, labelFilter(kind));
-    }
-  }
-
-  /**
-   * The pin under a click, or null.
-   *
-   * Category pins first: while a chip is up they are the layer that is meant to
-   * be answering, and the two can sit on the same coordinate.
-   */
-  function pinAt(pointer) {
-    for (const layer of ['category-pins', 'campus-amenities', ...POI_LABEL_LAYERS]) {
-      if (!map.getLayer(layer)) continue;
-      const [hit] = map.queryRenderedFeatures(pointer, { layers: [layer] });
-      if (!hit) continue;
-      return {
-        layer,
-        id: hit.id,
-        coords: hit.geometry.coordinates,
-        // A label's pictogram is in `poi`; an amenity's is its own `kind`.
-        kind: hit.properties.poi ?? hit.properties.kind ?? hit.properties.icon,
-        // A building's name is the label itself, which is what a lifted marker
-        // should be captioned with.
-        text: hit.properties.text ?? null,
-        // Amenities carry the legend's wording; a category pin carries the
-        // directory's, and drops it when the name would not identify anything.
-        name: hit.properties.name || hit.properties.label || hit.properties.text || null,
-      };
-    }
-    return null;
-  }
-
-  // -------------------------------------------------------------------------
-  // Hovering a pin
-  //
-  // A marker under the pointer springs up a little, its name changes colour,
-  // and the cursor becomes a pointer. Three signals for one fact — this is a
-  // thing you can press — because each of them is doing something the other two
-  // cannot: the cursor says it before you have looked away from what you were
-  // reading, the size says WHICH one of forty markers, and the colour survives
-  // the pin being under your own hand.
-  //
-  // The spring is the lift's own, off the same capture. A hover is not a
-  // selection, so it goes a fraction of the distance — but it is the same
-  // gesture in miniature, and a different easing here would read as a different
-  // map. That overshoot is the twitch.
-  //
-  // HOW IT IS DRAWN, because this is the part with a trap in it: `icon-size` is
-  // a LAYOUT property, and layout properties cannot read `feature-state`. So
-  // there is no per-feature hover the way there is for a fill. What there IS is
-  // `['id']`, which is legal in a layout expression — so the layer is given a
-  // size expression that names one id and scales only that one, and the
-  // expression is rewritten each frame. The `case` sits INSIDE the interpolate's
-  // outputs rather than around it, for the same reason scaleStops exists: Mapbox
-  // only accepts `['zoom']` as the direct input to a top-level interpolate.
-  //
-  // One layer at a time, always. Pushing a layout property re-lays out that
-  // layer's symbols, and the printed-label set is the expensive one — the
-  // category swap declines to animate it for exactly this reason. Hovering
-  // touches only the layer the pointer is actually over.
-  // -------------------------------------------------------------------------
-
-  /** How much bigger a hovered pin is drawn. Small: it is a hint, not a lift. */
-  const HOVER_SCALE = 1.16;
-  const HOVER_MS = 260;
-
-  /** The pin under the pointer, shaped like selectedPin so the two read alike. */
-  let hoveredPin = null;
-  /** The multiplier the hovered pin is currently drawn at. */
-  let hoverScale = 1;
-  /** Bumped to cancel a run in flight, exactly as `choreography` does. */
-  let hoverRun = 0;
-
-  /**
-   * `icon-size` for a layer, with the hovered feature — and only it — scaled.
-   *
-   * Falls back to the plain expression whenever this layer is not the hovered
-   * one, so a layer that is left goes back to being declarative rather than
-   * holding a frame's worth of state.
-   */
-  function pinSizeExpr(layer) {
-    const stops = SIZE_TABLE[layer] ?? LABEL_SIZE;
-    if (hoveredPin?.layer !== layer || hoverScale === 1) return sizeExpr(stops);
-    const mine = ['==', ['id'], hoveredPin.id];
-    return ['interpolate', ['linear'], ['zoom'], ...Object.entries(stops).flatMap(
-      ([zoom, size]) => [Number(zoom), ['case', mine, size * hoverScale, size]],
-    )];
-  }
-
-  /** ...and its `text-color`, with the hovered pin's name in the accent. */
-  function pinTextExpr(layer) {
-    const colors = litPalette();
-    const base = layer === 'campus-amenities' ? inkFor('kind')
-      : layer === 'category-pins' ? inkFor('icon')
-        : labelPaint(layer.replace('campus-labels-', ''), colors);
-    if (hoveredPin?.layer !== layer) return base;
-    return ['case', ['==', ['id'], hoveredPin.id], colors.highlight, base];
-  }
-
-  /**
-   * Push both onto one layer.
-   *
-   * `category-pins` is skipped while its entrance is playing. That animation
-   * owns the same layout property frame by frame, and a hover repaint landing in
-   * the middle of it would drop the pins to full size mid-arrival. It gets one
-   * repaint when the swap settles instead, so a pointer resting where the pins
-   * land still finds its hover.
-   */
-  function paintPinHover(layer) {
-    if (!map.getLayer(layer)) return;
-    if (layer === 'category-pins' && pinsArriving) return;
-    map.setLayoutProperty(layer, 'icon-size', pinSizeExpr(layer));
-    map.setPaintProperty(layer, 'text-color', pinTextExpr(layer));
-  }
-
-  /** Ease one layer's hover scale from where it is to `to`, then settle. */
-  function runHover(layer, to, ms, ease, run, done) {
-    if (prefersStill()) {
-      // The colour still changes — it is the signal, not the decoration — but
-      // nothing moves.
-      hoverScale = 1;
-      done?.();
-      paintPinHover(layer);
-      return;
-    }
-    const from = hoverScale;
-    const started = performance.now();
-    const step = (now) => {
-      if (run !== hoverRun) return;
-      const p = Math.min(1, (now - started) / ms);
-      hoverScale = from + (to - from) * ease(p);
-      paintPinHover(layer);
-      if (p < 1) { requestAnimationFrame(step); return; }
-      if (done) { done(); paintPinHover(layer); }
-    };
-    requestAnimationFrame(step);
-  }
-
-  /**
-   * Point at a pin, or at nothing.
-   *
-   * Three cases, and the third is the compromise. Arriving at a pin springs it
-   * up; leaving one for empty map settles it back down where it is. Moving
-   * straight from a pin in one layer to a pin in another SNAPS the first back,
-   * because one scale cannot animate two layers and the expression that grew the
-   * old feature names an id its layer is no longer about. Nobody watches the pin
-   * they just left when a new one is growing under the pointer.
-   */
-  function hoverPin(next) {
-    const prev = hoveredPin;
-    if (next?.layer === prev?.layer && next?.id === prev?.id) return;
-    hoverRun += 1;
-    const run = hoverRun;
-
-    if (prev && (!next || prev.layer !== next.layer)) {
-      if (next) {
-        hoveredPin = null;
-        hoverScale = 1;
-        paintPinHover(prev.layer);
-      } else {
-        // hoveredPin stays `prev` for the length of this, because the
-        // expression settling it back down is still the one that names it.
-        runHover(prev.layer, 1, SHRINK_MS, shrinkEase, run, () => {
-          if (run === hoverRun) hoveredPin = null;
-        });
-      }
-    }
-
-    if (!next) return;
-    hoveredPin = next;
-    hoverScale = 1;
-    runHover(next.layer, HOVER_SCALE, HOVER_MS, growEase, run);
-  }
-
-  /** Let go of whatever is hovered without animating — for a style swap. */
-  function clearHover() {
-    hoverRun += 1;
-    const was = hoveredPin;
-    hoveredPin = null;
-    hoverScale = 1;
-    if (was) paintPinHover(was.layer);
-  }
-
-  function deselectPin() {
-    if (!selectedPin) return;
-    closeBuildingCard();
-    const width = ambientWidth(selectedPin.layer);
-    selectedPin = null;
-    // The marker shrinks back before it goes, and the symbol underneath only
-    // comes back once it has: unfilter first and there are two pins for a fifth
-    // of a second, the small one sitting inside the shrinking large one.
-    const marker = selectedMarker;
-    selectedMarker = null;
-    marker?.remove(width);
-    clearTimeout(restorePins);
-    restorePins = setTimeout(() => { paintCategory(); paintLabels(); }, 190);
-  }
-
-  /**
-   * Lift a pin out of its layer.
-   *
-   * `card` is false when the caller has a better one to show. A building's
-   * pictogram is a pin like any other and lifts like one, but what belongs in
-   * the panel is the building card — the floor area, what is inside it, the
-   * entrance its Start and Destination buttons actually route from — not the
-   * two-line card a defibrillator gets. Same panel either way; the caller
-   * fills it instead, immediately after this returns.
-   */
-  function selectPin(hit, { card = true } = {}) {
-    // Tapping the pin that is already up puts it back, the way pressing a lit
-    // legend row clears the category.
-    if (selectedPin?.layer === hit.layer && selectedPin?.id === hit.id) {
-      deselectPin();
-      return;
-    }
-    deselectPin();
-    closeBuildingCard();
-
-    const from = ambientWidth(hit.layer);
-    selectedPin = hit;
-    // Filter first, so the symbol is gone by the time its replacement appears.
-    // This pair IS the restore the deselect above queued, arriving 190 ms early
-    // and with the new selection already filtered out — so drop the timer rather
-    // than let it repeat the work once the marker has finished shrinking.
-    clearTimeout(restorePins);
-    paintCategory();
-    paintLabels();
-
-    selectedMarker = mountSelectedPin({
-      map,
-      marker: mapboxgl.Marker,
-      kind: hit.kind,
-      coords: hit.coords,
-      label: hit.name,
-      // The hue the resting label was set in, so the caption crosses from it to
-      // the map's ink rather than appearing already black.
-      ink: currentBasemap === 'satellite' ? SATELLITE.label : pinInk(hit.kind, currentTheme),
-      ring: litPalette().pinRing,
-      from,
-    });
-
-    if (!card) return;
-
-    showPlaceCard(pinCard(hit, {
+  const pins = createPinState({
+    map,
+    Marker: mapboxgl.Marker,
+    litPalette,
+    inkFor,
+    // Wrapped rather than passed: `labelPaint` is a `const` arrow declared
+    // several hundred lines below this call, so handing over the binding itself
+    // reads it before it exists. eslint's no-use-before-define caught it.
+    labelPaint: (kind, colors) => labelPaint(kind, colors),
+    shownCategory: () => shownCategory(),
+    paintCategory: () => paintCategory(),
+    isArriving: () => choreo.isArriving(),
+    prefersStill,
+    closedText: CLOSED_TEXT,
+    markerInk: (kind) => (currentBasemap === 'satellite'
+      ? SATELLITE.label : pinInk(kind, currentTheme)),
+    onDeselect: () => closeBuildingCard(),
+    onLift: (hit) => showPlaceCard(pinCard(hit, {
       onStart: (coords, name) => { clearSelection(); placeStart(coords, name); },
       onEnd: (coords, name) => { clearSelection(); setDestination(coords, name); },
       onClose: clearSelection,
-    // The pin, kept in view. A tap in the bottom third of a phone screen is the
-    // case: the card opens as a sheet reaching half the viewport and settles
-    // over the thing that was tapped.
-    }), null, { at: hit.coords });
-  }
+    // The pin, kept in view. A tap in the bottom third of a phone screen is
+    // the case: the card opens as a sheet reaching half the viewport and
+    // settles over the thing that was tapped.
+    }), null, { at: hit.coords }),
+  });
 
-  /** Straight-line feet from wherever the user is measuring from. */
-  function feetFrom(coords) {
-    const from = startPoint?.geometry.coordinates ?? map.getCenter().toArray();
-    return distance(point(from), point(coords)) * FEET_PER_KM;
-  }
+  const pinAt = (pointer) => pins.pinAt(pointer);
+  const paintPinHover = (layer) => pins.paintPinHover(layer);
+  const hoverPin = (next) => pins.hoverPin(next);
+  const selectPin = (hit, options) => pins.selectPin(hit, options);
+  const deselectPin = () => pins.deselectPin();
 
-  function renderCategoryList(category) {
-    categoryTitle.textContent = category.label;
-    categoryCount.textContent = categoryHits.length
-      ? `${categoryHits.length} on campus · ${category.legend}`
-      : `Nothing found · ${category.legend}`;
+  // Where the camera goes and what it is allowed to cover: src/camera.js.
+  const camera = createCamera({
+    map,
+    LngLatBounds: mapboxgl.LngLatBounds,
+    campusPadding: () => campusPadding(),
+    sheetTop: () => sheet.top,
+    navigating,
+    isPhone: () => phone.matches,
+    categoryHits: () => legend.hits(),
+    // No pins does not mean nothing to show: a category whose source file
+    // failed to load still outlines its buildings, and the two halves
+    // degrade separately.
+    categoryExtent: () => legend.extent(),
+  });
+  const revealPoint = (coords, options) => camera.reveal(coords, options);
 
-    categoryList.replaceChildren(...categoryHits.map((hit) => {
-      const li = document.createElement('li');
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'g-row';
 
-      const disc = document.createElement('span');
-      disc.className = 'g-row-disc';
-      disc.dataset.icon = category.glyph;
-      row.append(disc);
-
-      const text = document.createElement('span');
-      text.className = 'g-row-text';
-      const name = document.createElement('span');
-      name.className = 'g-row-name';
-      name.textContent = hit.name;
-      text.append(name);
-      if (hit.sub) {
-        const sub = document.createElement('span');
-        sub.className = 'g-row-sub';
-        sub.textContent = hit.sub;
-        text.append(sub);
-      }
-      row.append(text);
-
-      const dist = document.createElement('span');
-      dist.className = 'g-row-dist';
-      dist.textContent = niceFeet(hit.feet);
-      row.append(dist);
-
-      row.addEventListener('click', () => setDestination(hit.coords, hit.name));
-      li.append(row);
-      return li;
-    }));
-    paintIcons(categoryList);
-    categoryPanel.classList.remove('hidden');
-  }
-
-  /**
-   * Frame the hits, unless they are already in front of you — Google does not
-   * move the map when what you asked for is already on screen, and a gratuitous
-   * flyTo throws away wherever the user had panned to.
-   *
-   * "On screen" means where somebody can see it rather than where the canvas
-   * ends — see `inView`, and the three bus stops it was written for.
-   */
-  /**
-   * The buildings of one class, in the panel a legend row uses.
-   *
-   * The same panel on purpose: there is one place on this screen where "here is
-   * what you asked for" appears, and a second one would be a second thing to
-   * dismiss. It is also why selecting either kind of row clears the other.
-   *
-   * A row opens the BUILDING CARD rather than setting a destination, which is
-   * where this list differs from the category one above it. A defibrillator is
-   * a point you walk to and nothing else; a building has a card with what is
-   * inside it, an aerial view and its own Directions button — offering only
-   * "route me there" would be answering a narrower question than the one a
-   * browse grid was pressed to ask.
-   */
-  function renderKindList(kind) {
-    categoryTitle.textContent = kind.label;
-    const held = POI_CLASSES[kind.id];
-    categoryCount.textContent = kindHits.length
-      ? `${kindHits.length} building${kindHits.length === 1 ? '' : 's'} · ${held}`
-      : `Nothing found · ${held}`;
-
-    const tint = pinColour(kind.id);
-    categoryList.replaceChildren(...kindHits.map(({ props, feet }) => {
-      const li = document.createElement('li');
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'g-row';
-
-      // The class's own pictogram, in the class's own hue — the same drawing
-      // that is on the map over each of these footprints. Every row in this
-      // list is the same class, so the disc is saying what the LIST is rather
-      // than telling the rows apart, which is exactly what the category list
-      // above does with its own glyph.
-      const disc = document.createElement('span');
-      disc.className = 'g-row-disc';
-      disc.style.color = tint;
-      disc.style.background = `color-mix(in srgb, ${tint} 18%, transparent)`;
-      disc.innerHTML = glyphSvg(kind.id);
-      row.append(disc);
-
-      const text = document.createElement('span');
-      text.className = 'g-row-text';
-      const name = document.createElement('span');
-      name.className = 'g-row-name';
-      name.textContent = props.name;
-      const sub = document.createElement('span');
-      sub.className = 'g-row-sub';
-      sub.textContent = buildingSub(props);
-      text.append(name, sub);
-      row.append(text);
-
-      const dist = document.createElement('span');
-      dist.className = 'g-row-dist';
-      dist.textContent = niceFeet(feet);
-      row.append(dist);
-
-      row.addEventListener('click', () => openBuilding(props));
-      li.append(row);
-      return li;
-    }));
-    categoryPanel.classList.remove('hidden');
-  }
-
-  function frameCategory() {
-    if (categoryHits.length) { frame(categoryHits.map((hit) => hit.coords)); return; }
-    // No pins does not mean nothing to show. A category whose source file
-    // failed to load still outlines its buildings — the two halves degrade
-    // separately — and a press that lit up ground somewhere off screen while
-    // the camera sat still would read as a press that did nothing.
-    const highlight = legendHighlights.get(activeCategory);
-    if (highlight) frame(extentOf(legendAreas, highlight), { maxZoom: 17 });
-  }
-
-  /**
-   * Bring a set of points into view, leaving the camera alone if they already
-   * are. Shared by the chips and by the route, which want the same behaviour for
-   * the same reason.
-   */
-  function frame(points, { maxZoom = 18 } = {}) {
-    if (points.length < 1) return;
-
-    const pad = viewPadding();
-    if (points.every((coords) => inView(coords, pad))) return;
-
-    const bounds = points.reduce(
-      (acc, coords) => acc.extend(coords),
-      new mapboxgl.LngLatBounds(points[0], points[0]),
-    );
-    map.fitBounds(bounds, { padding: pad, maxZoom, duration: 700 });
-  }
-
-  /** Which elements the padding has to clear. The arithmetic is in viewport.js. */
-  function viewPadding() {
-    const canvas = map.getCanvas();
-    return padBelowSheet({
-      pad: campusPadding(),
-      sheetTop: sheet.top,
-      canvasBottom: canvas.getBoundingClientRect().bottom,
-      canvasHeight: canvas.clientHeight,
-    });
-  }
-
-  /**
-   * Is this point somewhere it can be read?
-   *
-   * In SCREEN PIXELS against the padded rectangle, not with
-   * map.getBounds().contains(). Bounds are the whole canvas, the strip behind
-   * the sheet and the strip behind the sidebar included, so a point can be
-   * inside them and behind a pane of glass — which is how the three bus stops
-   * at the west edge once counted as visible while nobody could see them.
-   */
-  function inView(coords, pad = viewPadding()) {
-    const canvas = map.getCanvas();
-    return isVisible({
-      point: map.project(coords),
-      width: canvas.clientWidth,
-      height: canvas.clientHeight,
-      pad,
-    });
-  }
-
-  /**
-   * The zoom a tap on something is worth, when the camera is moving anyway.
-   *
-   * The same 17 the search box, the directory and the destination pin already
-   * fly to, so choosing a thing lands at one scale however you chose it. A
-   * FLOOR, never a set: somebody already at 18.5 looking at a doorway asked for
-   * that, and a tap that pulled them back out to 17 would be the map arguing.
-   */
-  const REVEAL_ZOOM = 17;
-
-  /**
-   * The point the map is currently about, so the sheet can ask for it back.
-   *
-   * Held rather than derived because the sheet moves long after the tap that
-   * opened it: a card opens, and some seconds later a finger drags the sheet up
-   * over the very thing the card is describing. See the onSettle wired into
-   * createSheet.
-   */
-  let focusPoint = null;
-
-  /**
-   * Put a point where it can be seen — and only when it cannot.
-   *
-   * THE COMPLAINT THIS ANSWERS: tap a pin near the bottom of a phone screen and
-   * the card that opens is a sheet climbing to half the viewport, which lands on
-   * top of the pin you tapped. The map answered the question by covering the
-   * answer.
-   *
-   * The visible map is not the canvas — it is the canvas less whatever the
-   * chrome is standing on, which is exactly what viewPadding computes, so this
-   * tests the point against that rectangle in screen pixels rather than against
-   * map.getBounds(). Bounds are the whole canvas including the strip behind the
-   * sheet, which is the same mistake `frame` documents.
-   *
-   * ONLY WHEN IT CANNOT, because a camera that recentres on every tap is a
-   * camera that walks across the campus a tap at a time and throws away wherever
-   * somebody had panned to. Google does not move the map for something already
-   * in front of you; neither does this.
-   *
-   * @param {number[]} coords     lng/lat to keep in view
-   * @param {number} options.zoom the least zoom to end at; 0 leaves it alone
-   */
-  function revealPoint(coords, { zoom = 0 } = {}) {
-    // Navigation owns the camera outright — it is easing to the walker's
-    // position several times a second, and a reveal would fight it.
-    if (!coords || navigating()) return;
-
-    const pad = viewPadding();
-    const to = Math.max(map.getZoom(), zoom);
-
-    if (inView(coords, pad) && to === map.getZoom()) {
-      // Nothing to reveal, but the chrome may still have changed shape under a
-      // camera that was framed around the old one. Only when it actually did:
-      // an easeTo to the padding already in force is a 300ms animation to where
-      // the map already is, and it would interrupt a pan somebody was in the
-      // middle of.
-      const now = map.getPadding();
-      const moved = ['top', 'bottom', 'left', 'right']
-        .some((side) => Math.abs((now[side] ?? 0) - pad[side]) >= 1);
-      if (moved) map.easeTo({ padding: pad, duration: 300 });
-      return;
-    }
-
-    // Centred in the PADDED box, which is what carrying the padding into the
-    // move buys: Mapbox puts the centre at the middle of the rectangle left
-    // over, so the point lands in the middle of the map you can see rather than
-    // in the middle of the map that exists — the second of which is behind the
-    // sheet on a phone.
-    map.easeTo({ center: coords, zoom: to, padding: pad, duration: 500 });
-  }
-
-  /**
-   * A category's pins, nearest first.
-   *
-   * Shared by the press and the hover preview, so the two cannot disagree about
-   * what a row means. The preview IS the answer, arriving early.
-   */
-  function hitsFor(category) {
-    return collect(category, { amenities: campusAmenities, places: campusPlaces })
-      .map((hit) => ({ ...hit, feet: feetFrom(hit.coords) }))
-      .sort((a, b) => a.feet - b.feet);
-  }
-
-  function selectCategory(id) {
-    const category = CATEGORY_BY_ID.get(id);
-    if (!category) return;
-
-    // Pressing the pressed chip is how you get back to the whole map.
-    if (activeCategory === id) { clearCategory(); return; }
-
-    // One answer at a time. The results panel below is shared and the outline
-    // is a single source, so a legend row arriving while a building class is
-    // up has to take both off it first.
-    if (activeKind) clearKind();
-
-    activeCategory = id;
-
-    // The hover that led here is being promoted to a selection, so the preview
-    // state goes now. Nothing changes on screen — these are the same pins, and
-    // shownCategory falls straight through to activeCategory — but leaving it
-    // set would arm the mouseleave that is about to happen to tear down the
-    // selection it had just become.
-    hoverCategory = null;
-    hoverHits = [];
-
-    // EVERY pin gets its name, including the six that all read "All-gender
-    // restroom". This used to print a name only where it identified one pin
-    // among the others — "Myrtle Parking Lot East" yes, six copies of one phrase
-    // no — on the grounds that repeating the icon's own meaning in type is
-    // noise.
-    //
-    // It is noise on a map you are reading and it is the answer on a map you
-    // have just questioned. Having pressed Defibrillators, the six discs are the
-    // result and the word under each is what says so; leaving them bare made the
-    // category read as a pictogram you still had to know. The names are also the
-    // point of the entrance — they arrive with the pins — and an entrance where
-    // most of the pins bring nothing looks half-finished.
-    //
-    // Collision still has the last word, because `text-optional` is set on the
-    // layer: names that cannot fit are dropped and their discs stay. That is the
-    // right place for the decision, since it depends on the zoom rather than on
-    // the wording.
-    categoryHits = hitsFor(category);
-
-    // On a phone the legend is a full-width sheet over the map, so leaving it
-    // up would mean answering "where are the restrooms" with a card covering
-    // the restrooms. The pins and the results list are the answer; the list you
-    // asked from has done its job.
-    // Plain toggleSheet, not toggleLegendPanel: frameCategory a few lines below
-    // is about to move the camera anyway, and it reads campusPadding after this
-    // has run, so the sheet is already out of the reckoning.
-    if (phone.matches) toggleSheet(legendPanel, legendOpen, false);
-
-    // The pressed row, and the outline that goes with it. A category press now
-    // answers both halves of the question it was split across: the pins say
-    // where the things are, the outline says which buildings hold them.
-    stickyRow = id;
-    paintHighlight();
-    syncLegendRows();
-
-    renderCategoryList(category);
-    // The camera and the pins move together. Framing first and animating after
-    // would read as two separate events, and the fly is 700 ms of the 1324 the
-    // pins take anyway.
-    //
-    // The pins own the camera, not the outline: the pins ARE the answer and the
-    // outlined ground is context for it, and two fitBounds in one gesture is a
-    // flight that lands somewhere neither of them asked for.
-    //
-    // Next frame, for the reason showPlaceCard states: renderCategoryList has
-    // just shown the results panel, and on a phone that panel is a sheet whose
-    // height nothing has decided yet — the stack is told by a MutationObserver
-    // and observers do not run until this task ends. Framing now frames the map
-    // around the sheet as it was, and the nearest few pins — the ones the list
-    // is sorted to put first — land underneath it.
-    requestAnimationFrame(frameCategory);
-    playCategorySwap();
-  }
-
-  function clearCategory() {
-    activeCategory = null;
-    categoryHits = [];
-    stickyRow = null;
-    paintHighlight();
-    syncLegendRows();
-    categoryPanel.classList.add('hidden');
-    categoryList.replaceChildren();
-    playCategoryClear();
-  }
-
-  /**
-   * The buildings of one class, outlined and listed.
-   *
-   * Deliberately thinner than selectCategory. That one has pins to drop, a pin
-   * layer to filter and a swap animation to run between two sets of markers;
-   * this has none of those, because the buildings it is about are ALREADY on
-   * the map with their own discs on them. Adding a second marker over each
-   * would be the same answer printed twice, in two shapes. What the press adds
-   * is the outline — which of the shapes down there are the ones you asked
-   * about — and the list.
-   */
-  function selectKind(id) {
-    const kind = BUILDING_KIND_BY_ID.get(id);
-    if (!kind || !campusDirectory) return;
-
-    if (activeKind === id) { clearKind(); return; }
-    if (activeCategory) clearCategory();
-
-    activeKind = id;
-    kindHits = (kindGroups.get(id) ?? [])
-      // `anchor` is the pole of inaccessibility, which is where the label sits
-      // and is a better middle than an entrance node hanging off one edge. Same
-      // point showBuildingCard flies to, so the distance printed on a row and
-      // the place the row takes you are the same place.
-      .map((props) => ({ props, feet: feetFrom(props.anchor ?? props.entrance) }))
-      .sort((a, b) => a.feet - b.feet);
-
-    // Same reason the legend row has it: on a phone the sheet this was pressed
-    // from covers the campus it is about.
-    if (phone.matches) toggleSheet(legendPanel, legendOpen, false);
-
-    stickyRow = kindRow(id);
-    paintHighlight();
-    syncLegendRows();
-
-    renderKindList(kind);
-    // Next frame, for the reason frameCategory is: the panel that just opened
-    // is a sheet on a phone and nothing has measured it yet.
-    requestAnimationFrame(frameKind);
-  }
-
-  function clearKind() {
-    activeKind = null;
-    kindHits = [];
-    stickyRow = null;
-    paintHighlight();
-    syncLegendRows();
-    categoryPanel.classList.add('hidden');
-    categoryList.replaceChildren();
-  }
-
-  /**
-   * The extent of what is outlined, rather than of a set of points.
-   *
-   * frameCategory frames the PINS because the pins are that answer; here the
-   * ground is, so it frames the same rectangle the outline covers. maxZoom
-   * matches the legend row's for the same reason — one building on its own
-   * would otherwise fill the screen at z20 and lose the campus around it.
-   */
-  function frameKind() {
-    const highlight = legendHighlights.get(kindRow(activeKind));
-    if (highlight?.indices.length) frame(extentOf(legendAreas, highlight), { maxZoom: 17 });
-  }
-
-  /** Whichever of the two the results panel is showing. */
-  function clearResults() {
-    if (activeKind) clearKind();
-    if (activeCategory) clearCategory();
-  }
-
-  categoryClose.addEventListener('click', clearResults);
-
-  /**
-   * The printed map's own labels.
-   *
-   * These used to come from places.json, which is my campus's destination database —
-   * names written to be unambiguous in a search box, not on a map, so the
-   * Portable Village arrived as "Manufacturing, Construction, and Transportation
-   * Division - Portable Village, Room 603B". scripts/build-labels.mjs takes what
-   * their cartographer actually set instead: "Library", "Main Gym", "STADIUM".
-   * places.json is still what search reads; it was only ever wrong for labels.
-   *
-   * One layer per kind rather than one for all four, because they differ in
-   * weight, tracking and colour — and `text-font` is a layout property that
-   * takes no data expression, so a single layer could not set Medium for area
-   * names and Regular for the rest whatever the paint said.
-   *
-   * `plate` is my campus's name for their larger building labels, kept because it is
-   * the source data's vocabulary. The dark box it refers to is not drawn any
-   * more; see addLabelLayers.
-   */
-  const LABEL_KINDS = ['area', 'plate', 'building', 'parking'];
-
-  /**
-   * my campus's hierarchy, at Google's sizes.
-   *
-   * Keeping the point size the cartographer set is right — Library is 13.1 pt
-   * against Oak Cafe's 6.6, and that ordering is real information. Using those
-   * numbers AS pixels is not: they were set for a sheet 34 inches wide, and
-   * multiplied straight through they gave a spread of 6.6 to 16 px against the
-   * 11 to 15 Google sets its own labels in. Ours were visibly the smaller map's
-   * type sitting on the bigger map's ground, which is most of what made the two
-   * halves look like two maps.
-   *
-   * So the print range is mapped onto theirs and the ordering survives the
-   * remap. Measured off the raster rather than taken from a spec: a Google road
-   * label is 11-12 px, an ordinary POI 12, a prominent one 14-15.
-   */
-  const GOOGLE_BAND = ['interpolate', ['linear'], ['get', 'pt'], 6, 11, 14.5, 16];
-
-  /**
-   * ...and a much flatter zoom ramp than print scaling implies.
-   *
-   * This is the other half of the mismatch, and the more visible one while
-   * moving: a Google label is very nearly the same size at z15 and at z19,
-   * because their type is chrome for reading the map rather than something
-   * drawn on the ground. Ours scaled 1.1x to 1.9x across that range, so the two
-   * agreed at one zoom and diverged either side of it. 0.86 to 1.1 keeps a
-   * little of the growth — labels are allowed to breathe as you zoom in — with
-   * nothing like the drift.
-   */
-  const labelSize = (scale) => [
-    'interpolate', ['linear'], ['zoom'],
-    15, ['*', GOOGLE_BAND, 0.86 * scale],
-    17, ['*', GOOGLE_BAND, 1.0 * scale],
-    19, ['*', GOOGLE_BAND, 1.1 * scale],
-  ];
-
-  /**
-   * Ink for one label kind, so the layer builder and the theme-switch path
-   * cannot drift apart — they used to set these from two separate expressions
-   * and a fourth kind would silently keep the old colour on a theme change.
-   *
-   * Google colours a label by what it names, not by its size: greenspace is
-   * green, everything built is the same cool slate, and parking is that slate
-   * lightened rather than a hue of its own.
-   */
-  /**
-   * A building name takes its POI disc's hue, the way an amenity name does.
-   *
-   * Same rule Apple applies and the same reason: a label tinted with its
-   * marker's colour is readable as a category before it is readable as a word.
-   * Only the ones that HAVE a disc, though — an area name has no marker to
-   * agree with, so those keep the map's own ink.
-   *
-   * A car park now has a disc and still keeps its own ink, which is the one
-   * place these two sets come apart. The tint is not free: it is worth paying
-   * where it separates ten categories from each other, and a car park is in a
-   * category of one. What it would cost is measured — the lot names sit on the
-   * lot, and against `land.parking` the parking blue reads 3.09:1 at night
-   * where `parkingLabel` reads 3.78:1, and by day it lands at 10.93:1, a navy
-   * so much heavier than the surrounding type that the lots would read as the
-   * loudest names on the campus. `parkingLabel` was itself placed by measuring
-   * against that surface; see the note on it in src/palette.js.
-   */
-  const POI_TINTED_KINDS = new Set(['building', 'plate']);
-
-  const labelPaint = (kind, colors) => (POI_TINTED_KINDS.has(kind)
-    ? ['case', ['has', 'poi'], inkFor('poi'), labelInk(kind, colors)]
-    : labelInk(kind, colors));
-
-  const labelInk = (kind, colors) => (
-    kind === 'area' ? colors.areaLabel
-      : kind === 'parking' ? colors.parkingLabel
-        : colors.label
-  );
-
-  /**
-   * Buildings you can tap.
-   *
-   * src/directory.json is one feature per building — footprints folded together,
-   * so tapping one of the Health Education Complex's nine shapes shows the whole
-   * complex — carrying what the sheet calls it and which of my campus's destinations
-   * are inside it.
-   *
-   * The hit layer is drawn at zero opacity rather than left out, because
-   * queryRenderedFeatures only sees layers that are actually in the style. The
-   * highlight is a second layer filtered to the selected building; a filter
-   * needs no feature ids and no promoteId, which a feature-state approach would.
-   */
-  const NOTHING_SELECTED = ['==', ['get', 'officialName'], '\u0000'];
-  // Two constants used to live here — the widths a floating card had to clear
-  // before it stopped opening underneath the route panel. The card is IN the
-  // column with the route panel now rather than over the map, so there is
-  // nothing left for it to collide with and no arithmetic to get wrong.
-
-  function addDirectoryLayers() {
-    const colors = litPalette();
-
-    if (map.getLayer('campus-directory-fill')) {
-      map.setPaintProperty('campus-directory-fill', 'fill-color', colors.route);
-      map.setPaintProperty('campus-directory-line', 'line-color', colors.route);
-      return;
-    }
-    if (!campusDirectory) return; // still in flight; addNetworkLayers re-runs
-
-    if (!map.getSource('campus-directory')) {
-      map.addSource('campus-directory', { type: 'geojson', data: campusDirectory });
-    }
-
-    map.addLayer({
-      id: 'campus-directory-hit',
-      type: 'fill',
-      source: 'campus-directory',
-      slot: 'middle',
-      paint: { 'fill-opacity': 0 },
-    });
-    map.addLayer({
-      id: 'campus-directory-fill',
-      type: 'fill',
-      source: 'campus-directory',
-      slot: 'middle',
-      filter: NOTHING_SELECTED,
-      paint: { 'fill-color': colors.route, 'fill-opacity': 0.22, 'fill-emissive-strength': 1 },
-    });
-    map.addLayer({
-      id: 'campus-directory-line',
-      type: 'line',
-      source: 'campus-directory',
-      slot: 'middle',
-      filter: NOTHING_SELECTED,
-      paint: { 'line-color': colors.route, 'line-width': 2, 'line-emissive-strength': 1 },
-    });
-  }
+  // The printed names, the directory hit-layer and the closed block's word:
+  // src/label-layers.js.
+  const labels = createLabelLayers({
+    map,
+    litPalette,
+    mapFont: () => mapFont(),
+    skin: () => currentSkin,
+    printed: () => campusLabels,
+    directory: () => campusDirectory,
+    sheet: () => campusBasemap,
+    pinRing: () => markers.pinRing(),
+    labelFilter: (kind) => pins.labelFilter(kind),
+    inkFor: (property) => markers.inkFor(property),
+    theme: () => currentTheme,
+  });
+  const addDirectoryLayers = () => labels.addDirectory();
+  const addLabelLayers = () => labels.addPrinted();
+  const labelPaint = (kind, colors) => labels.labelPaint(kind, colors);
 
   function highlightBuilding(officialName) {
     // The name used to be kept in a `selectedBuilding` variable alongside a
@@ -3266,737 +699,58 @@ function startApp() {
    * @param {HTMLElement} card
    * @param {object} [flyover] the `{ el, destroy }` this card's media came from
    */
-  /**
-   * Publish two measured heights to the stylesheet.
-   *
-   * CSS cannot measure one element from another, and the phone layout needs
-   * exactly that twice over: the credit line and Mapbox's control stack both
-   * ride directly above the bottom sheet, and the stack additionally has to
-   * know how tall it is itself before it can work out how far it is allowed to
-   * rise. Those are the only two numbers in this layout that the stylesheet
-   * cannot state, so they are written in from here and everything downstream of
-   * them stays in CSS.
-   *
-   * An observer rather than a call at each open: the sheet changes height for
-   * reasons that are not panel changes at all — a flyover arriving is the
-   * obvious one — and a credit that only moved when a card opened would be left
-   * lying over the card it had already got out of the way of.
-   *
-   * No feedback loop: `bottom` is what reads these, and moving a box does not
-   * change how tall it is.
-   */
-  const measured = new ResizeObserver((entries) => {
-    for (const entry of entries) {
-      document.documentElement.style.setProperty(
-        entry.target.dataset.heightVar, `${Math.round(entry.contentRect.height)}px`,
-      );
-    }
-  });
-  for (const [el, prop] of [
-    [document.getElementById('top-left'), '--g-sheet-h'],
-    [document.querySelector('.mapboxgl-ctrl-bottom-right'), '--g-ctrl-stack-h'],
-  ]) {
-    if (!el) continue;
-    el.dataset.heightVar = prop;
-    measured.observe(el);
-  }
-
-  /**
-   * And one more the stylesheet cannot see: where the bottom of the screen
-   * actually is while a keyboard is up.
-   *
-   * iOS does not resize the layout viewport for the keyboard — it lays the
-   * keyboard OVER the page and leaves every `bottom` in the document pointing
-   * at the same place it always did. So a bottom sheet — which on a phone is
-   * the search field, its suggestions and whatever card is open, all in one —
-   * sits underneath the keyboard the moment you touch the thing you type into.
-   * Lifting it off this is what keeps the field and its list above the keys.
-   *
-   * `window.innerHeight - height - offsetTop` rather than the height alone,
-   * because the visual viewport also moves: a pinch-zoomed or scrolled page
-   * offsets it, and only the difference between the two is the part that is
-   * covered. Clamped at zero so the pull-to-refresh rubber band, which briefly
-   * makes that difference negative, cannot push the sheet off the bottom.
-   *
-   * `scroll` as well as `resize`, because on iOS focusing a field scrolls the
-   * visual viewport without resizing it, and the sheet has to follow.
-   */
-  const viewport = window.visualViewport;
-  if (viewport) {
-    const publishKeyboard = () => {
-      const covered = window.innerHeight - viewport.height - viewport.offsetTop;
-      document.documentElement.style.setProperty(
-        '--g-kb-h', `${Math.max(0, Math.round(covered))}px`,
-      );
-    };
-    /*
-     * ...and tell the map its box may have moved under it.
-     *
-     * Mapbox sizes its canvas from the container and watches the container, and
-     * that is not the same thing as watching the VIEWPORT: on iOS a keyboard
-     * can change the layout viewport without the container's own box changing
-     * in a way the observer reports on the same frame. A canvas that has not
-     * caught up is drawn at the old size and the difference shows as a band of
-     * page background under the map — which is exactly the white strip
-     * photographed under the sheet with a keyboard up.
-     *
-     * Only on `resize`. `scroll` fires continuously while the visual viewport
-     * moves and a resize per frame would be a re-layout per frame; the box does
-     * not change on a scroll anyway.
-     */
-    const settle = () => { publishKeyboard(); map.resize(); };
-    viewport.addEventListener('resize', settle);
-    viewport.addEventListener('scroll', publishKeyboard);
-    publishKeyboard();
-  }
-
-  /**
-   * ...and make the sheet answer a finger.
-   *
-   * Everything above measures the sheet. This lets somebody move it: three
-   * detents, a drag off the grabber, a flick, and a tap for the next height.
-   * See src/sheet.js, which holds the whole gesture — nothing about it reaches
-   * back into this file, because a sheet that has to be told what is inside it
-   * is a sheet that has to be told again the next time a panel is added.
-   *
-   * `enabled` rather than a construct-on-demand, because the breakpoint can be
-   * crossed by turning a phone over. Above it the column is a sidebar with no
-   * detents, and `refit` is what takes the inline height back off so the
-   * stylesheet's own rules are the only ones in play there.
-   *
-   * Refitted on both viewports. The layout one moves on a rotation, the visual
-   * one on a keyboard — and the full detent is measured off the visual
-   * viewport, so a sheet held open while the keyboard arrives has to be
-   * re-clamped or its top ends up behind the keys.
-   */
-  const sheet = createSheet({
-    el: document.getElementById('top-left'),
-    grip: document.getElementById('sheet-grip'),
-    enabled: () => phone.matches,
-    // A sheet dragged up covers more map, and what it covers first is the
-    // middle-bottom of the screen — which is exactly where a reveal has just
-    // put the thing the card is about. So the point asks for itself back
-    // whenever the sheet changes what there is to see.
-    //
-    // No zoom on this path: the finger is adjusting the sheet, not choosing
-    // anything, and a scale change nobody asked for reads as the map lurching.
-    // Collapsing moves nothing either — the visible rectangle only grows, so
-    // the point is still inside it and revealPoint leaves the camera alone.
-    onSettle: () => revealPoint(focusPoint),
-  });
-  sheet.refit();
-
-  /**
-   * ...and make it show one thing at a time.
-   *
-   * The sheet's children are a column, which is what a sidebar is and what a
-   * phone is not: full width, a place card, a category's results and a route
-   * form all up at once is a pile with two close buttons in it and no way to
-   * tell which one the sheet is about. See src/sheet-stack.js — it keeps the
-   * order they were opened in and shows the last, so each panel's own dismiss
-   * is also the way back to the one underneath it.
-   *
-   * The closes are named here rather than found in the DOM because they are not
-   * interchangeable: clearing a category repaints a highlight and closes an
-   * animation, and closing a place card releases the flyover's WebGL canvas. A
-   * stack that synthesised a click on whatever button it found in the head
-   * would be guessing at both.
-   */
-  const sheetStack = createSheetStack({
-    el: document.getElementById('top-left'),
-    enabled: () => phone.matches,
-    panels: [
-      { el: placePanel, dismiss: closePlaceCard },
-      { el: categoryPanel, dismiss: clearResults },
-      { el: sidePanel, dismiss: () => toggleRoutePanel(false) },
-      { el: legendPanel, dismiss: () => toggleLegendPanel(false) },
-    ],
-    // A panel that arrives while the sheet is collapsed is a panel nobody can
-    // read. A floor rather than a set, so one opening over a sheet already
-    // pulled to full does not knock it back down.
-    // SETTLE AT THE READING HEIGHT, from either side.
-    //
-    // This was `atLeast` alone, which is only half an instruction: it raised a
-    // resting sheet so the panel could be read and did nothing at all to one
-    // that was already at `full`. `full` is the viewport less a strip of map,
-    // so opening a list from the fully drawn-up front page left about 110px of
-    // canvas — and the camera, told to frame five buildings inside it, flew out
-    // to z11 and showed the interstate. Both grids on the front page did it,
-    // and it looked like the map had lost the campus.
-    onFront: (panel) => {
-      if (!panel) return;
-      sheet.atLeast('half');
-      sheet.atMost('half');
+  // The sheet, the stack it lives in, and the two observers that keep the
+  // layout honest on a phone: src/shell.js.
+  const shell = createShell({
+    map,
+    panels: { placePanel, categoryPanel, sidePanel, legendPanel },
+    isPhone: () => phone.matches,
+    onSettle: () => revealPoint(camera.focus()),
+    dismiss: {
+      place: () => closePlaceCard(),
+      category: () => clearResults(),
+      route: () => toggleRoutePanel(false),
+      legend: () => toggleLegendPanel(false),
     },
   });
+  const sheet = shell.sheet;
+  const refitSheet = () => shell.refit();
 
-  const refitSheet = () => { sheet.refit(); sheetStack.refit(); };
-  phone.addEventListener('change', refitSheet);
   window.addEventListener('resize', refitSheet);
-  viewport?.addEventListener('resize', refitSheet);
+  shell.viewport?.addEventListener('resize', refitSheet);
 
-  /**
-   * Empty a surface only once it has finished leaving.
-   *
-   * A panel now FADES OUT — `display` is carried by a transition, so `.hidden`
-   * no longer takes the box away on the same frame it is set. Tearing the
-   * content out synchronously, which is what every close path used to do, means
-   * the 240ms that follows is spent watching an empty pane of glass shrink: the
-   * card appears to be deleted and then dismissed, rather than dismissed.
-   *
-   * The duration is read off the element rather than off the token, so somebody
-   * who has asked for reduced motion — where the same transitions run at 1ms —
-   * gets their content back on the next tick instead of a quarter second later.
-   *
-   * Re-checked at the end because a close is cancellable: tapping the next
-   * building inside the fade re-shows the panel with new content, and emptying
-   * it then would clear the card that just arrived.
-   */
-  const exitTimers = new WeakMap();
-
-  function afterExit(el, empty) {
-    clearTimeout(exitTimers.get(el));
-    const ms = Math.max(0, ...getComputedStyle(el).transitionDuration
-      .split(',').map((d) => Number.parseFloat(d) * 1000)
-      .filter(Number.isFinite));
-    exitTimers.set(el, setTimeout(() => {
-      if (el.classList.contains('hidden')) empty();
-    }, ms + 20));
-  }
-
-  function showPlaceCard(card, flyover = null, { at = null, zoom = REVEAL_ZOOM } = {}) {
-    // Swapped in one step, and in this order, because the incoming card may
-    // already hold a live flyover of its own: tearing down after adopting would
-    // destroy the one just built, and adopting before tearing down would leak
-    // the one going away.
-    activeFlyover?.destroy();
-    activeFlyover = flyover;
-
-    const was = !placePanel.classList.contains('hidden');
-    placePanel.replaceChildren(card);
-    placePanel.classList.remove('hidden');
-    // Only when the column's width actually changed. Swapping one card for
-    // another is a repaint, not a new obstruction, and a camera that eased on
-    // every tap would drift across the campus a tap at a time.
-    //
-    // The sheet's own arrival is on the same test and for the same reason: a
-    // card that re-slid every time you tapped the next building would read as a
-    // flinch rather than as something opening. See #place-panel.is-entering.
-    // Removed and re-added around a forced layout because the panel is one
-    // long-lived element — a class that is already there starts nothing, and
-    // relying on the close to have taken it off would make this depend on every
-    // path that hides the panel remembering to.
-    if (!was) {
-      placePanel.classList.remove('is-entering');
-      void placePanel.offsetHeight;
-      placePanel.classList.add('is-entering');
-    }
-
-    // THE CAMERA, once, and after the sheet has decided how tall it is going to
-    // be. Next frame rather than now: the stack notices this panel through a
-    // MutationObserver, which does not run until the current task has finished,
-    // and it is the stack that asks the sheet to open. Read the sheet on this
-    // line and it is still the height it was before the card existed.
-    //
-    // A frame is enough — the detent is applied synchronously once the observer
-    // runs, and `sheet.top` answers with where it is going rather than where it
-    // is — so the map starts moving on the same frame the sheet starts growing
-    // and the two arrive together.
-    focusPoint = at ?? focusPoint;
-    if (at) requestAnimationFrame(() => revealPoint(at, { zoom }));
-    else if (!was) map.easeTo({ padding: campusPadding(), duration: 300 });
-  }
-
-  function closePlaceCard() {
-    if (placePanel.classList.contains('hidden')) return;
-    activeFlyover?.destroy();
-    activeFlyover = null;
-    focusPoint = null;
-    placePanel.classList.add('hidden');
-    placePanel.classList.remove('is-entering');
-    afterExit(placePanel, () => placePanel.replaceChildren());
-    map.easeTo({ padding: campusPadding(), duration: 300 });
-  }
-
-  function closeBuildingCard() {
-    closePlaceCard();
-    highlightBuilding(null);
-  }
-
-  /**
-   * Put everything the map is currently pointing at back down.
-   *
-   * Two states, and either can exist without the other: a lifted pin with no
-   * card (the building name pins, which hand their card to the building), and a
-   * card with no lifted pin (a tap on a footprint rather than on its label).
-   * `deselectPin` cannot do both — it calls closeBuildingCard itself and would
-   * recurse — so the pairing lives here, and every "never mind" goes through it.
-   */
-  function clearSelection() {
-    deselectPin();
-    closeBuildingCard();
-    // The third thing the map can be pointing at. A tap on bare ground, a
-    // reset, and both of the dropped pin's own buttons all come through here,
-    // so none of them has to remember it separately.
-    droppedMarker?.remove();
-    droppedMarker = null;
-  }
-
-  /** The building under a click, or null. */
-  function buildingAt(pointer) {
-    if (!map.getLayer('campus-directory-hit')) return null;
-    const [hit] = map.queryRenderedFeatures(pointer, { layers: ['campus-directory-hit'] });
-    return hit?.properties ?? null;
-  }
-
-  /**
-   * A building's traced outline, by the name on its card.
-   *
-   * Read from the loaded directory rather than from the rendered feature, and
-   * the difference matters here: `queryRenderedFeatures` returns geometry
-   * clipped to the tile it was drawn in, so a footprint straddling a tile seam
-   * comes back cut — which is precisely the measurement this feeds. The source
-   * data is whole.
-   */
-  function footprintOf(name) {
-    if (!campusDirectory || !name) return null;
-    return campusDirectory.features.find((f) => f.properties?.name === name)?.geometry ?? null;
-  }
-
-  /**
-   * A directory row by name, for a tap that landed on a NAME rather than on a
-   * building.
-   *
-   * `buildingAt` asks what footprint is under the pointer, which is the right
-   * question for a tap on a building and the wrong one for a tap on its label.
-   * my campus's cartographer sets a `plate` where a name will not fit inside the shape
-   * it belongs to — Portable Village's sits in the yard beside it, Environmental
-   * Resources' out on the path — so the pixel under the word is frequently not
-   * the building, and seven of the nine plates on this campus are directory rows
-   * whose names tapped to nothing at all: a pin lifted, no card, no flyover.
-   *
-   * So the name is asked as well. It is a WEAKER question and is only ever the
-   * fallback, because two things can be under one pointer and only one of them
-   * can be the thing you touched. But a label carrying a building's exact name
-   * is that building however far the word has drifted from it.
-   */
-  /**
-   * Labels my campus's sheet spells differently from the directory's own row.
-   *
-   * Not a general fuzzy match, and deliberately not: "Science" and "Science
-   * Success Center" are two buildings, and anything loose enough to join
-   * "Health & Ed" to "Health Education Complex" is loose enough to join those.
-   * Each entry is a decision about one name, made by reading both files.
-   *
-   * The sheet's own wording is kept on the map — it is what is printed on the
-   * building and what somebody standing outside it will be looking for. This
-   * only says which row it is.
-   */
-  const LABEL_ALIASES = new Map([
-    ['Health & Ed (HeEd) 710-716', 'Health Education Complex'],
-  ]);
-
-  function directoryRow(name) {
-    if (!campusDirectory || !name) return null;
-    const want = LABEL_ALIASES.get(name.trim()) ?? name;
-    return campusDirectory.features.find((f) => f.properties?.name === want)?.properties ?? null;
-  }
-
-  function showBuildingCard(raw) {
-    // Vector tiles hand nested properties back as JSON strings.
-    const props = { ...raw };
-    for (const key of ['contents', 'facilities', 'parts', 'entrance', 'anchor']) {
-      if (typeof props[key] === 'string') {
-        try { props[key] = JSON.parse(props[key]); } catch { delete props[key]; }
-      }
-    }
-
-    // The helicopter shot, for the things that have something to fly around.
-    // `poi` is derived here rather than stored, exactly as the card's own
-    // subtitle derives it, so the disc on the map, the line under the name and
-    // the decision to show an aerial view are all one classification and cannot
-    // disagree.
-    const flyover = googleKey && canFlyOver({ ...props, poi: poiFor(props.name) })
-      ? (() => {
-        // THE FOOTPRINT, not the properties, and this is what stops the
-        // perimeter cutting through the building. A tapped feature arrives here
-        // as properties alone — `buildingAt` returns `hit.properties` — so the
-        // geometry has to be fetched back out of the source by name. Everything
-        // that reaches this function is a directory row, by all three paths
-        // into it, so the lookup finds one.
-        const extent = footprintExtent(footprintOf(props.name));
-        // The middle of the footprint if it is known, and only otherwise the
-        // anchor. Both are points inside the building, but an anchor is the
-        // point furthest INSIDE it rather than its middle, and centring a
-        // square on one puts the far wall outside the square — see `footprintExtent`.
-        const centre = extent?.centre ?? props.anchor ?? props.entrance;
-        // Span, pitch and the coarse-tile limit all come from one call, so the
-        // policy — how a place is worth framing — stays in one file.
-        const frame = framing(props.area_m2, extent);
-        return createFlyover({
-          key: googleKey, centre, name: props.name, ...frame,
-          // The ground the aerial view may draw, which is the same campus the
-          // 2D map is fenced to. Passed rather than restated: this is the walk
-          // network's own extent, and a flyover bounded by a second opinion
-          // about where my campus is would disagree with the map beside it.
-          bounds: CAMPUS_BOUNDS,
-          // The ROOF, which is a different point from the one the camera aims
-          // at: `centre` is the middle of the footprint, on the ground, and a
-          // pin dropped on that goes through the building.
-          roof: roofOf(props.name),
-          // The building's own traced outline and the two planes it stands
-          // between, for the cage. Google's tiles are one mesh with no building
-          // in them to outline, so this is the only geometry that knows where
-          // this building stops and the one touching it starts.
-          footprint: footprintOf(props.name),
-          mass: massOf(props.name),
-          fps: showFps,
-        });
-      })()
-      : null;
-
-    showPlaceCard(buildingCard(props, {
-      media: flyover?.el,
-      onStart: (coords, name) => {
-        if (startPoint && endPoint) resetMap();
-        clearSelection();
-        placeStart(coords, name);
-        setStatus(`Start set at ${name}. Now pick a destination.`);
-      },
-      // Directions from a building's card is the same question the search box
-      // and the category rows ask, so it goes through the same door — which is
-      // where the GPS is asked. This used to carry its own copy of the logic,
-      // and that copy only ever consulted the debug fixture: on a real phone
-      // the one button this card exists for answered "now press and hold the
-      // map to set a start point".
-      onEnd: (coords, name) => { clearSelection(); setDestination(coords, name); },
-      onClose: clearSelection,
-    // `anchor` is the pole of inaccessibility — the point furthest INSIDE the
-    // footprint, which is where the label is set — so it is a better middle
-    // than the entrance node hanging off one edge. Same choice openBuilding
-    // used to make on its own; it goes through here now.
-    }), flyover, { at: props.anchor ?? props.entrance });
-    highlightBuilding(props.officialName);
-  }
-
-  /**
-   * What one directory row says under the name.
-   *
-   * In the order it is worth knowing. What is INSIDE a building is the thing
-   * someone scanning a campus directory is actually after — nine destinations
-   * in the Student Center is why you would open it — so that wins. Failing
-   * that, the name my campus's own database uses, but only where it differs from the
-   * one printed on the map, since "Gym · Gym" is a row that says one thing
-   * twice. Failing both, the footprint, which every building has.
-   */
-  function buildingSub(props) {
-    const inside = props.contents?.length ?? 0;
-    if (inside) return `${inside} destination${inside === 1 ? '' : 's'} inside`;
-    if (props.officialName && props.officialName !== props.name) return props.officialName;
-    return `${Math.round(props.area_m2 * 10.7639).toLocaleString()} sq ft`;
-  }
-
-  /**
-   * The directory, listed at the foot of the debug menu.
-   *
-   * Straight off src/directory.json, which is the same file the footprints on
-   * the map are tapped through — so a row and the building it names hand the
-   * SAME properties object to showBuildingCard, and the card cannot disagree
-   * with itself depending on how it was opened. That is most of why this list
-   * is worth keeping once it is out of the sidebar: a row that is missing, or
-   * whose subtitle reads wrong, is directory.json saying so.
-   *
-   * Alphabetical. There is no better order available: distance would need a
-   * start point that has not been set yet on the screen where this list is most
-   * useful, and "importance" is a judgment this file has no column for.
-   */
-  function renderBuildings() {
-    if (!campusDirectory) return;
-    const rows = campusDirectory.features
-      .map((feature) => feature.properties)
-      .filter((props) => props.name)
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    buildingsCount.textContent = `${rows.length} on campus`;
-    buildingsList.replaceChildren(...rows.map((props) => {
-      const li = document.createElement('li');
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'g-row';
-
-      // One glyph, coloured by what the building IS — the same hue
-      // map-images.js paints its POI marker on the map, so the row and the disc
-      // over the footprint are visibly the same answer. poiFor returns null for
-      // the sheet's "Closed" areas, which never reach a directory row, but the
-      // fallback keeps a missing classification a grey disc rather than a throw.
-      const disc = document.createElement('span');
-      disc.className = 'g-row-disc';
-      disc.dataset.icon = 'building';
-      const hue = pinColour(poiFor(props.name) ?? 'campus');
-      disc.style.color = hue;
-      disc.style.background = `color-mix(in srgb, ${hue} 18%, transparent)`;
-      row.append(disc);
-
-      const text = document.createElement('span');
-      text.className = 'g-row-text';
-      const name = document.createElement('span');
-      name.className = 'g-row-name';
-      name.textContent = props.name;
-      const sub = document.createElement('span');
-      sub.className = 'g-row-sub';
-      sub.textContent = buildingSub(props);
-      text.append(name, sub);
-      row.append(text);
-
-      row.addEventListener('click', () => openBuilding(props));
-      li.append(row);
-      return li;
-    }));
-    paintIcons(buildingsList);
-  }
-
-  /**
-   * Open a building from the list rather than from the map.
-   *
-   * The card is the same one a tap on the footprint opens, and the camera is
-   * the same camera: showBuildingCard reveals what it is about, whether that
-   * turned out to be off screen entirely (which is the list's case) or behind
-   * the sheet (which is the tap's).
-   *
-   * This used to fly here itself, reading the padding immediately after the
-   * card went up — half a frame before the sheet had decided how tall it was
-   * going to be. See viewPadding.
-   */
-  function openBuilding(props) {
-    clearSelection();
-    showBuildingCard(props);
-  }
-
-  /** Re-route from the existing start to a newly chosen destination. */
-  async function rerouteTo(coords, name) {
-    if (endMarker) endMarker.remove();
-    endMarker = null;
-    endPoint = null;
-    await placeEnd(coords, name);
-  }
-
-  function addLabelLayers() {
-    const colors = litPalette();
-
-    if (map.getLayer('campus-labels-building')) {
-      for (const kind of LABEL_KINDS) {
-        map.setPaintProperty(`campus-labels-${kind}`, 'text-color', labelPaint(kind, colors));
-        map.setPaintProperty(`campus-labels-${kind}`, 'text-halo-color', colors.labelHalo);
-      }
-      // Not in the loop above: the closed label is not one of LABEL_KINDS and
-      // its red comes from its own two-value ramp rather than from the palette.
-      if (map.getLayer('campus-labels-closed')) {
-        map.setPaintProperty('campus-labels-closed', 'text-color',
-          CLOSED_INK[currentTheme === 'dark' ? 'dark' : 'light']);
-        map.setPaintProperty('campus-labels-closed', 'text-halo-color', colors.labelHalo);
-      }
-      return;
-    }
-    if (!campusLabels) return;
-
-    if (!map.getSource('campus-labels')) {
-      // `generateId` for the same reason the amenity source has it: a lifted pin
-      // has to hide the symbol it came out of, and `['!=', ['id'], n]` is the
-      // only way to name one feature of a layer. labels.json carries no ids.
-      map.addSource('campus-labels', { type: 'geojson', data: campusLabels, generateId: true });
-    }
-
-    // The building names carry a POI disc now, so their images have to be
-    // registered before a layer can reference one — same reason addAmenityLayer
-    // waits, and the same loader, because they are one icon family.
-    loadAmenityIcons(map, pinRing())
-      .then(() => buildLabelLayers())
-      .catch((error) => console.error('label icons unavailable:', error));
-  }
-
-  function buildLabelLayers() {
-    // A style swap can land between the loader resolving and this running, and
-    // the palette can have changed under it — so both are re-read here.
-    if (map.getLayer('campus-labels-building') || !map.getSource('campus-labels')) return;
-    const colors = litPalette();
-
-    const common = {
-      type: 'symbol',
-      source: 'campus-labels',
-      slot: 'middle',
-      /*
-       * 14, and it used to be 15 for a reason that turned out to be answered
-       * elsewhere: "below this the campus is a few hundred pixels wide and the
-       * labels are stacked on top of each other". They are not stacked — these
-       * are symbol layers without `icon-allow-overlap`, so Mapbox's collision
-       * index thins them, and `sortKey` above decides which survive: my campus's own
-       * type hierarchy, biggest names first. Zooming out drops the small fry
-       * and keeps the Library.
-       *
-       * What forced the change is where a phone actually lands. The map fits
-       * the campus bounds, and on a 390x660 screen that is z14.71 — under the
-       * old gate by a third of a level, so the app opened on a campus with
-       * nothing named on it at all. Not a blank map exactly: lamps, paths and
-       * building shapes, and not one word to say what any of them were.
-       *
-       * The amenities keep their own 16 and should: 72 markers is the case the
-       * old comment was really describing, and none of them is what you open a
-       * campus map to find.
-       */
-      minzoom: 14,
-    };
-    // Bigger type wins a collision, which is my campus's own hierarchy again.
-    const sortKey = ['-', 0, ['get', 'pt']];
-
-    /**
-     * A disc at the point with the name set to its right, which is how Google
-     * draws a POI and the reason their map is scannable — colour carries the
-     * category, so you find the gym without reading 39 building names.
-     *
-     * `['get', 'poi']` evaluates to null for a feature that has none, and a
-     * null icon-image simply draws no icon; the `case`s around the text put
-     * that label back to plain centred type rather than leaving it offset into
-     * empty space. Only "Closed" takes that path today — it names a fenced-off
-     * area, not a place.
-     */
-    const poiLayout = {
-      'icon-image': ['get', 'poi'],
-      'icon-size': sizeExpr(LABEL_SIZE),
-      // Centred on the coordinate: the resting marker is a disc, not a balloon,
-      // so nothing about it points downward at a spot below itself.
-      'icon-anchor': 'center',
-      'text-anchor': ['case', ['has', 'poi'], 'top', 'center'],
-      'text-justify': 'center',
-      // BENEATH the disc, which is Apple's arrangement and a straightforwardly
-      // easier one to hit than Google's. Their name sits beside the head, and
-      // the lift that wants is a fixed ~12.5 px while `text-offset` has no unit
-      // but ems — whatever size my campus happened to set that particular name at, so
-      // one value could not be right for both the 11 px labels and the 16 px
-      // ones. Underneath, the offset only has to clear the disc's lower half,
-      // and a bigger name genuinely should stand further off a bigger disc, so
-      // the em is the unit this actually wants.
-      'text-offset': ['case', ['has', 'poi'], ['literal', [0, 0.9]], ['literal', [0, 0]]],
-      // A disc makes each symbol wider, and width is what the collision solver
-      // charges for: at the default view, adding them dropped 5 of the 21
-      // building names that used to place. Trimming the default 2 px of padding
-      // off both halves is what buys those back — measured, not guessed.
-      'icon-padding': 0,
-      'text-padding': 1,
-    };
-
-    for (const kind of LABEL_KINDS) {
-      const area = kind === 'area';
-      // `plate` is my campus's kind for their larger building names. The dark box it
-      // is named after is gone — Google sets every label as plain haloed text —
-      // so what survives is the weight and size those names already carried.
-      const major = kind === 'plate';
-      map.addLayer({
-        ...common,
-        id: `campus-labels-${kind}`,
-        filter: labelFilter(kind),
-        layout: {
-          // Sentence case under Apple, my campus's own capitals everywhere else. The
-          // string is derived at load rather than edited into labels.json —
-          // see titleCase in src/poi.js for why, and for why the naive rule is
-          // safe on these five names.
-          'text-field': area && currentSkin === 'apple'
-            ? ['coalesce', ['get', 'title'], ['get', 'text']]
-            : ['get', 'text'],
-          // Google's own hierarchy is set in weight, not colour: area names in
-          // Medium, major buildings in Medium, everything else Regular. Bold
-          // appears nowhere on their map at these sizes.
-          'text-font': area || major ? mapFont().medium : mapFont().regular,
-          'text-size': labelSize(area ? 0.95 : 1),
-          // 8 ems is where the sheet breaks its own labels, so the printed ones
-          // keep their original line breaks. The names added from my campus's database
-          // have no printed breaks to reproduce and carry a width fitted to the
-          // footprint instead — see build-labels.mjs.
-          'text-max-width': ['coalesce', ['get', 'maxWidth'], 8],
-          // 1.2 rather than 1.05: Google's lines sit further apart than my campus's
-          // print setting, which is most of why their multi-line names read as
-          // labels rather than as blocks of text.
-          'text-line-height': 1.2,
-          // my campus letterspaces its area capitals hard. Google tracks theirs only
-          // slightly, so this is halved rather than dropped — losing it entirely
-          // would make BASEBALL FIELD read as a building name.
-          //
-          // Apple tracks nothing. The reason the halving is safe to drop there
-          // is that the case change above already does the separating: "Tennis
-          // Courts" cannot be mistaken for a building name the way an untracked
-          // TENNIS COURTS could.
-          'text-letter-spacing': area && currentSkin !== 'apple' ? 0.07 : 0,
-          'symbol-sort-key': sortKey,
-          ...(POI_LABEL_KINDS.has(kind) ? poiLayout : {}),
-        },
-        paint: {
-          'text-color': labelPaint(kind, colors),
-          'text-halo-color': colors.labelHalo,
-          // Standard's night preset would otherwise light the discs through its
-          // own model and swallow them, the way it does the sheet.
-          'icon-emissive-strength': 1,
-          // Google's halo is a thin, slightly blurred casing rather than the
-          // hard 1.4px outline a print sheet uses — enough to lift type off
-          // mint lawn without the letters growing a visible white shell.
-          'text-halo-width': 1.1,
-          'text-halo-blur': 0.5,
-          'text-emissive-strength': 1,
-        },
-      });
-    }
-
-    /**
-     * "Closed", set on the block's own diagonal and in the red the shape is
-     * drawn in.
-     *
-     * Its own layer rather than a `case` inside the building names, and for one
-     * reason that could not be expressed there: `text-rotation-alignment` is a
-     * LAYOUT property of the whole layer, not a per-feature one. This word has
-     * to stay glued to the shape when the map is turned, and the other 39 names
-     * have to stay upright — so they cannot share a layer, whatever else they
-     * have in common.
-     *
-     * Deliberately the quietest label on the map. The wash and the outline are
-     * what say the block is shut, and they say it at every zoom; the word only
-     * names what the colour already meant, so it is fine print rather than a
-     * headline. At the zoom the whole campus fits, a red shape reads instantly
-     * and a 12px word across it is just clutter over one small building.
-     *
-     * `symbol-placement: point` with map-aligned rotation, not `line` placement
-     * along the edge: the word belongs in the middle of the block saying what
-     * the block is, not run along its boundary like a street name.
-     */
-    map.addLayer({
-      ...common,
-      id: 'campus-labels-closed',
-      // Well past the 15 the other labels start at, and past the 16 the ambient
-      // pictograms wait for. By here the block is a large shape on screen with
-      // room inside it for a word, which is the only condition under which this
-      // one is worth drawing.
-      minzoom: 17.5,
-      filter: ['==', ['get', 'text'], CLOSED_TEXT],
-      layout: {
-        'text-field': ['get', 'text'],
-        // Regular, not the medium the building names use, and smaller than all
-        // of them: this is an annotation on a shape, not the name of a place.
-        'text-font': mapFont().regular,
-        'text-size': labelSize(0.8),
-        'text-letter-spacing': 0.06,
-        'text-rotation-alignment': 'map',
-        'text-rotate': closedBearing(campusBasemap),
-        // Collidable like everything else. It was overlap-allowed on the
-        // grounds that a warning must never be dropped, which was the wrong
-        // reading: the red is the warning and it cannot be dropped, so the word
-        // is free to give way to a name that has nowhere else to go.
-      },
-      paint: {
-        'text-color': CLOSED_INK[currentTheme === 'dark' ? 'dark' : 'light'],
-        'text-halo-color': colors.labelHalo,
-        'text-halo-width': 1.1,
-        'text-halo-blur': 0.5,
-        'text-emissive-strength': 1,
-      },
-    });
-  }
+  // The panel, and everything that goes in it: src/cards.js.
+  const cards = createCards({
+    map,
+    placePanel,
+    buildingsList,
+    buildingsCount,
+    camera,
+    directory: () => campusDirectory,
+    highlightBuilding: (name) => highlightBuilding(name),
+    campusPadding: () => campusPadding(),
+    googleKey,
+    hasRoute: () => endpoints.hasRoute(),
+    resetMap: () => resetMap(),
+    setStatus: (sentence) => setStatus(sentence),
+    deselectPin: () => pins.deselectPin(),
+    removeDroppedMarker: () => { droppedMarker?.remove(); droppedMarker = null; },
+    placeStart: (coords, name) => placeStart(coords, name),
+    setDestination: (coords, name) => setDestination(coords, name),
+    showFps: () => showFps,
+    setFlyover: (view) => { activeFlyover = view; },
+    activeFlyover: () => activeFlyover,
+  });
+  const showPlaceCard = (card, flyover, options) => cards.showPlace(card, flyover, options);
+  const closePlaceCard = () => cards.closePlace();
+  const closeBuildingCard = () => cards.closeBuilding();
+  const showBuildingCard = (raw) => cards.showBuilding(raw);
+  const renderBuildings = () => cards.renderBuildings();
+  const afterExit = (el, empty) => cards.afterExit(el, empty);
+  const clearSelection = () => cards.clearSelection();
+  const buildingAt = (pointer) => cards.buildingAt(pointer);
+  const directoryRow = (name) => cards.directoryRow(name);
+  const buildingSub = (props) => cards.buildingSub(props);
 
   // ---------------------------------------------------------------------------
   // Map layers
@@ -4004,146 +758,23 @@ function startApp() {
   // map.setStyle() discards every custom source and layer, so this has to be
   // idempotent and has to restore the current data — it runs on every theme
   // switch, not just at startup.
-  // ---------------------------------------------------------------------------
-
-  function paintLegs() {
-    map.getSource('route-legs')?.setData(
-      route.legs(startPoint?.geometry.coordinates, endPoint?.geometry.coordinates),
-    );
-  }
-
-  /**
-   * Take Mapbox's own data out of the campus, so inside the boundary the map is
-   * ours and outside it is theirs.
-   *
-   * This needs two mechanisms, because neither one covers everything:
-   *
-   *   - `clip` removes basemap features inside the polygon, but only of the
-   *     types it is told about, and the type list it understands is model,
-   *     symbol and fill-extrusion. That is Mapbox's 3D buildings, their
-   *     landmark models and every label — but not roads.
-   *   - Roads, footpaths and parking aisles are plain `line` layers, which clip
-   *     cannot touch at all. Those have to be painted over.
-   *
-   * The boundary is OSM's own `amenity=college` way, which is the polygon
-   * Mapbox draws the campus from, so the cut lands exactly on their edge.
-   */
-  function addCampusMask() {
-    const colors = litPalette();
-
-    if (!map.getSource('campus-boundary')) {
-      map.addSource('campus-boundary', { type: 'geojson', data: campusBoundary });
-    }
-
-    // Nothing to clip when Google draws the ground: the style under us is
-    // blank, so there is no `basemap` import for `clip-layer-scope` to name and
-    // no Mapbox symbols or models to remove. Skipped rather than left to no-op,
-    // because a clip layer sitting above the Google raster is one scope-matching
-    // change away from punching a hole in the ground it is meant to leave alone.
-    if (currentProvider !== 'google' && !map.getLayer('campus-clip')) {
-      try {
-        map.addLayer({
-          id: 'campus-clip',
-          type: 'clip',
-          source: 'campus-boundary',
-          layout: {
-            // `model` and `symbol` are the only values this accepts — passing
-            // `fill-extrusion` is rejected outright. That is enough: Standard
-            // draws its buildings and landmarks as batched models, and every
-            // label is a symbol, so both are covered.
-            'clip-layer-types': ['model', 'symbol'],
-            // Scoping this to the basemap is not optional. Our markers are
-            // symbols too, so an unscoped clip would delete exactly the data
-            // this is meant to reveal.
-            'clip-layer-scope': ['basemap'],
-          },
-        });
-      } catch (error) {
-        // Isolated on purpose. A clip failure must not take the fill mask down
-        // with it, or a version bump that changes this property silently leaves
-        // Mapbox's roads showing through the campus.
-        console.error('campus clip unavailable:', error.message);
-      }
-    }
-
-    if (colors.mask === null) {
-      if (map.getLayer('campus-mask')) map.removeLayer('campus-mask');
-      return;
-    }
-
-    if (map.getLayer('campus-mask')) {
-      map.setPaintProperty('campus-mask', 'fill-color', colors.mask);
-      return;
-    }
-    map.addLayer({
-      id: 'campus-mask',
-      type: 'fill',
-      source: 'campus-boundary',
-      // `middle` sits above the basemap's polygons and lines and below its 3D
-      // and labels — the only slot that covers roads without burying our own
-      // work or Mapbox's place names outside the campus.
-      slot: 'middle',
-      paint: {
-        'fill-color': colors.mask,
-        // Standard lights every fill through its own lighting model, and under
-        // the night preset that drove the mask almost black: raising the
-        // authored colour threefold moved the rendered pixel by a tenth. This
-        // opts the mask out of the lighting entirely so it renders as written,
-        // which is what a flat ground plane wants anyway.
-        'fill-emissive-strength': 1,
-      },
-      // Re-added after a basemap swap, this would otherwise land on top of the
-      // network it is supposed to sit under.
-    }, belowNetwork());
-  }
-
-  /**
-   * One Standard configuration property, best-effort.
-   *
-   * Standard's schema is Mapbox's to change, and a key it no longer recognises
-   * throws rather than being ignored. A missing colour is a cosmetic loss; an
-   * exception here would take down every layer added after it, so this swallows
-   * and reports instead.
-   */
-  function setConfig(key, value) {
-    try {
-      map.setConfigProperty('basemap', key, value);
-    } catch (error) {
-      console.warn(`basemap config "${key}" unavailable:`, error.message ?? error);
-    }
-  }
-
-  /**
-   * The layer a campus overlay must be inserted below to stay under the road
-   * ribbon. The casing is the lower of the two network layers, so anchoring to
-   * `network-lines` would slip the ground cover between casing and core and
-   * paint out the casing entirely.
-   */
-  function belowNetwork() {
-    for (const id of ['network-casing', 'network-lines']) {
-      if (map.getLayer(id)) return id;
-    }
-    return undefined;
-  }
-
-  /**
-   * The layer to insert below to sit OVER the paths but still under the route.
-   *
-   * The closed block's outline is the one campus edge that wants this. my campus's
-   * walkways run straight across the shape and, drawn under them, the boundary
-   * came apart into four red segments with white paths laid over the gaps —
-   * which reads as a shape you can walk through, the opposite of what the red
-   * is there to say.
-   *
-   * Under the route regardless, for the reason the highlight is: nothing on
-   * this map gets to bury the directions somebody is following.
-   */
-  function belowRoute() {
-    for (const id of ['route-legs', 'route-casing', 'route-line']) {
-      if (map.getLayer(id)) return id;
-    }
-    return undefined;
-  }
+  // The ribbon, the network linework, the campus mask and the three little
+  // helpers that decide what goes under what: src/route-layers.js.
+  const routeLayers = createRouteLayers({
+    map,
+    litPalette,
+    provider: () => currentProvider,
+    boundary: campusBoundary,
+    network: () => customNetwork,
+    route,
+    from: () => endpoints.start()?.geometry.coordinates,
+    to: () => endpoints.end()?.geometry.coordinates,
+  });
+  const paintLegs = () => routeLayers.paintLegs();
+  const addCampusMask = () => routeLayers.addMask();
+  const setConfig = (key, value) => routeLayers.setConfig(key, value);
+  const belowNetwork = () => routeLayers.belowNetwork();
+  const belowRoute = () => routeLayers.belowRoute();
 
   function addNetworkLayers() {
     const colors = litPalette();
@@ -4177,127 +808,7 @@ function startApp() {
     // Above the sheet it annotates, below the network added further down.
     addHighlightLayers();
 
-    if (!map.getSource('custom-network')) {
-      map.addSource('custom-network', { type: 'geojson', data: customNetwork ?? EMPTY });
-    }
-    if (!map.getSource('calculated-route')) {
-      map.addSource('calculated-route', { type: 'geojson', data: route.feature() });
-    }
-    if (!map.getSource('route-legs')) {
-      map.addSource('route-legs', {
-        type: 'geojson',
-        data: route.legs(startPoint?.geometry.coordinates, endPoint?.geometry.coordinates),
-      });
-    }
-
-    // The network is drawn the way Google draws a road: one source, two line
-    // layers, the wider casing underneath. Added casing-first so insertion
-    // order alone puts it below — both live in `middle`, and within a slot
-    // Mapbox honours the order layers were added in.
-    //
-    // Round joins and caps on both. A square cap on the casing leaves a grey
-    // nub sticking past the end of the white core at every dead end, which is
-    // the tell that a network was drawn as two lines rather than as roads.
-    if (!map.getLayer('network-casing')) {
-      map.addLayer({
-        id: 'network-casing',
-        type: 'line',
-        source: 'custom-network',
-        slot: 'middle',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': colors.networkCasing,
-          'line-width': NETWORK_CASING_WIDTH,
-          // Gone at overview zooms, because the reference has no casing there
-          // at all. A cut across a campus path on Apple at z16 is two pixels of
-          // one flat tone with nothing but antialiasing at its edges; the
-          // casing only appears once a path is wide enough to have edges worth
-          // drawing, which is the same threshold the network itself inverts at.
-          //
-          // This is what made our campus read as a fractured surface where
-          // theirs reads as blocks on a field. The casing is L 20.5 against
-          // ground at L 31.7 — eleven points under it — so at the opening view
-          // every footpath was a black seam, and there are a lot of footpaths.
-          // The core stays: at L 28.4 on L 31.7 it is a three-point mark, which
-          // is about the weight Apple's light path carries the other way up.
-          'line-opacity': ['interpolate', ['linear'], ['zoom'], 16.2, 0, 16.8, 1],
-          // Same reasoning as the mask and the sheet: without this the night
-          // preset drags both halves of the ribbon toward the ground colour and
-          // the casing stops separating anything.
-          'line-emissive-strength': 1,
-        },
-      });
-    } else {
-      map.setPaintProperty('network-casing', 'line-color', colors.networkCasing);
-    }
-
-    if (!map.getLayer('network-lines')) {
-      map.addLayer({
-        id: 'network-lines',
-        type: 'line',
-        source: 'custom-network',
-        // Every custom layer goes in `middle`, above the mask that hides
-        // Mapbox's linework and below their labels, so place names outside the
-        // campus stay readable over the top of nothing of ours.
-        slot: 'middle',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': colors.network,
-          'line-width': NETWORK_WIDTH,
-          'line-emissive-strength': 1,
-        },
-      });
-    } else {
-      map.setPaintProperty('network-lines', 'line-color', colors.network);
-    }
-
-    // Dark casing under the route so it stays readable against pale buildings.
-    // Dotted, in the route's own blue: a round cap on a zero-length dash draws
-    // a circle, so `[0, 2]` is a row of dots rather than a dashed line. That is
-    // the convention for "walk this bit yourself" on every map that has one.
-    if (!map.getLayer('route-legs')) {
-      map.addLayer({
-        id: 'route-legs',
-        type: 'line',
-        source: 'route-legs',
-        slot: 'middle',
-        layout: { 'line-cap': 'round' },
-        paint: {
-          'line-color': colors.route,
-          'line-width': 5,
-          'line-dasharray': [0, 2],
-          'line-emissive-strength': 1,
-        },
-      });
-    } else {
-      map.setPaintProperty('route-legs', 'line-color', colors.route);
-    }
-
-    if (!map.getLayer('route-casing')) {
-      map.addLayer({
-        id: 'route-casing',
-        type: 'line',
-        source: 'calculated-route',
-        slot: 'middle',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': colors.casing, 'line-width': 12, 'line-opacity': 0.9 }
-      });
-    } else {
-      map.setPaintProperty('route-casing', 'line-color', colors.casing);
-    }
-
-    if (!map.getLayer('route-line')) {
-      map.addLayer({
-        id: 'route-line',
-        type: 'line',
-        source: 'calculated-route',
-        slot: 'middle',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': colors.route, 'line-width': 6 }
-      });
-    } else {
-      map.setPaintProperty('route-line', 'line-color', colors.route);
-    }
+    routeLayers.addNetworkAndRoute();
 
     // After the route layers rather than after the sheet it belongs to, and
     // only because of where its OUTLINE goes: belowRoute has to have a route
@@ -4327,189 +838,75 @@ function startApp() {
 
   // -------------------------------------------------------------------------
 
-  /**
-   * When Mapbox itself refuses.
-   *
-   * Google's half of the switch has always said why it failed; this half drew a
-   * black rectangle. See src/basemap-problem.js for the asymmetry that made
-   * that seem reasonable, and for what the two statuses mean.
-   *
-   * SAID ONCE PER STATUS. There is one of these events per refused tile and the
-   * renderer keeps asking as the camera moves — 29 for two camera moves, on a
-   * phone-sized viewport — so an unguarded setStatus would rewrite the same
-   * sentence into the panel several times a second for as long as the map was
-   * touched. The set is never cleared: nothing a visitor can do from inside the
-   * page changes a token's URL restrictions, so a second telling would be a
-   * second telling of something they already know.
-   */
-  const refusals = new Set();
-  map.on('error', (e) => {
-    const status = e.error?.status;
-    // `url` rather than the event's sourceId: our own sources fetch from this
-    // origin and a 403 from one of those would be a different problem with a
-    // different fix, and would be a lie in this sentence.
-    let host = null;
-    try { host = new URL(e.error.url).host; } catch { /* not an AJAXError */ }
-    if (host !== MAPBOX_HOST || refusals.has(status)) return;
-    const problem = mapboxRefusal(status, window.location.origin);
-    if (!problem) return;
-    refusals.add(status);
-    setStatus(problem, true);
-  });
-
-  // Mapbox Standard hides its layers behind a style package, so when something
-  // looks wrong the only way to ask what the map actually built is from the
-  // console. Dev builds only — Vite strips this branch from production.
-  if (import.meta.env.DEV) {
-    window.map = map;
-    // Mapbox reports bad layer specs through this event rather than by throwing,
-    // and the message is the only thing that says *which* property it rejected.
-    // Status and URL as well as the message, because the message is empty on
-    // exactly the errors that matter most — an AJAXError carries its cause in
-    // `status`, and a bare `console.error('map error:', '')` was how a wall of
-    // 403s managed to look like nothing at all.
-    map.on('error', (e) => console.error(
-      'map error:', e.error?.message || e.error?.status || e, e.error?.url ?? '',
-    ));
-  }
-
-  // Which provider the layers currently on the map were built for. Compared
-  // against the live value when a session resolves, so a toggle back to Mapbox
-  // during the round trip cannot land Google's tiles on the Mapbox style.
-  let groundGeneration = 0;
-  // Assigned below, once the DOM refs are in hand. Declared here because the
-  // failure path in addGoogleGround has to be able to put the button back.
+  // Assigned once the DOM refs are in hand; the ground's failure path has to be
+  // able to put this button back.
   let providerControl = null;
 
+  // The two ends of a walk, and every way either of them can be chosen:
+  // src/endpoints.js.
   /**
-   * Put Google's raster underneath everything, when Google is the provider.
+   * The pin a press-and-hold puts down, while its card is open.
    *
-   * Asynchronous because the tiles cannot be requested until a session token
-   * has been minted, which means this resolves well after style.load has
-   * returned and our own layers already exist. Hence the explicit `beforeId`:
-   * the raster has to go to the *bottom* whenever it arrives, not on top of the
-   * campus it is supposed to sit under.
+   * Held separately from the two route markers because it is not one of them
+   * yet: it is a place you pointed at, and it becomes a start or a destination
+   * only when a button on its card says so. At that moment it is removed and
+   * the route marker takes its position, so the two never stand on the same
+   * spot.
    */
-  async function addGoogleGround() {
-    if (currentProvider !== 'google') return;
-    const generation = ++groundGeneration;
+  let droppedMarker = null;
 
-    // Only while THIS request is the current one. A toggle away and back mints
-    // a second session, and the first one resolving must not take the spinner
-    // off a request that is still in flight — hence the generation check in the
-    // finally rather than an unconditional clear.
-    providerControl?.busy(true);
-    try {
-      const source = await googleGround({
-        key: googleKey,
-        basemap: currentBasemap,
-        theme: currentTheme,
-        // The raster has to wear the same look as the campus drawn on top of
-        // it, or the mask edge becomes a seam between two design languages —
-        // the same reason the theme is passed, one axis further out.
-        skin: currentSkin,
-        bounds: CAMPUS_BOUNDS,
-      });
-
-      // The style may have been swapped out from under this request. The
-      // generation counter is the whole check: it is bumped by every setStyle,
-      // and this only ever runs from style.load, so the style is initialised by
-      // definition.
-      //
-      // Explicitly NOT map.isStyleLoaded(). That reports whether the style is
-      // *idle* — it returns false while any source cache is still loading, any
-      // image is in flight, or any pattern is pending. The campus sheet is ~2 MB
-      // of GeoJSON fetched over the network, so by the time a session token has
-      // been minted it is reliably still false, and gating on it meant this
-      // returned silently and the ground was never added. No error, no layer.
-      if (generation !== groundGeneration || currentProvider !== 'google') return;
-      if (map.getLayer('google-basemap')) return;
-
-      if (!map.getSource('google-tiles')) map.addSource('google-tiles', source);
-      // Bottom of the stack, whoever else got there first. Our own layers were
-      // added synchronously back in style.load, so there is normally something
-      // to go under; the optional chain covers the case where there is not.
-      map.addLayer(
-        { id: 'google-basemap', type: 'raster', source: 'google-tiles' },
-        map.getStyle().layers[0]?.id,
-      );
-    } catch (error) {
-      // A refused key is not a bug the user can see the shape of — the map just
-      // stays empty. Google's own message names the cause (API not enabled,
-      // referrer not allowed, key invalid), so it goes straight to the panel,
-      // and the toggle drops back to a provider that works.
-      console.error('Google basemap unavailable:', error);
-      setStatus(`Google basemap unavailable: ${error.message}`, true);
-      if (generation !== groundGeneration) return;
-      currentProvider = 'mapbox';
-      providerControl?.revert();
-      syncBasemapStyle();
-    } finally {
-      // `revert()` above already repainted the buttons, and `busy(false)` calls
-      // the same `paint()`, so the failure path is idempotent rather than
-      // fighting itself.
-      if (generation === groundGeneration) providerControl?.busy(false);
-    }
-  }
-
-  // Fires on first load *and* after every setStyle, which is exactly when the
-  // custom layers need rebuilding.
-  map.on('style.load', () => {
-    // Before the builders, not after. A swap rebuilds every pin layer with its
-    // plain size expression, so a hover held across one would be a pin that is
-    // no longer big while `hoveredPin` still says it is — and the next mousemove
-    // over the same pin would match, do nothing, and leave it flat for good.
-    clearHover();
-    // Standard's own lights, before anything has had a chance to override them.
-    // Captured per style load rather than once, because a setStyle replaces
-    // them wholesale — and satellite's are not the map style's.
-    benchLights = structuredClone(map.getLights() ?? null);
-    styleBuilt = true;
-    addNetworkLayers();
-    addGoogleGround();
+  const endpoints = createEndpoints({
+    map,
+    route,
+    nav: { end: () => nav?.end() },
+    camera,
+    api,
+    geolocateControl: () => geolocateControl,
+    networkPoints: () => networkPoints,
+    routingEnabled: () => routingEnabled,
+    status: { setStatus, setBusy, setRouteSummary, setNavButtonsEnabled, setIdleStatus },
+    panel: { show: () => showRoutePanel(), padding: () => campusPadding() },
+    ui: { startCoordText, endCoordText },
+    paintLegs: () => paintLegs(),
+    clearSelection: () => clearSelection(),
+    clearSearchField: () => {
+      // Leaving a destination showing next to "Not set" is the kind of stale
+      // text people act on.
+      if (!searchInput) return;
+      searchInput.value = '';
+      searchClear.classList.add('hidden');
+      closeResults();
+    },
+    startLocating: () => startLocating(),
   });
+  const resetMap = () => endpoints.reset();
+  const locateStart = () => endpoints.locateStart();
+  const placeStart = (coords, label) => endpoints.placeStart(coords, label);
+  const placeEnd = (coords, label) => endpoints.placeEnd(coords, label);
+  const setDestination = (coords, name) => endpoints.setDestination(coords, name);
+  const coordLabel = (c) => endpoints.coordLabel(c);
 
-  /**
-   * Swap the basemap if the current provider/basemap/theme triple calls for a
-   * different one. All three toggles route through here: on satellite the theme
-   * no longer changes the Mapbox map, so this becomes a no-op and only the page
-   * chrome restyles.
-   */
-  function syncBasemapStyle() {
-    const nextKey = styleKey(currentProvider, currentBasemap, currentTheme, currentSkin);
-
-    if (nextKey !== appliedStyleKey) {
-      appliedStyleKey = nextKey;
-      // Invalidate any session request still in flight for the outgoing style.
-      groundGeneration++;
-      // Nothing to configure between here and the next style.load: the layers
-      // the bench writes to are about to stop existing. style.load sets it back.
-      styleBuilt = false;
-      // diff:false forces a full style reload. The default diffing path can
-      // drop custom layers without firing style.load, leaving a bare basemap.
-      // style.load re-adds our layers and re-requests the ground.
-      map.setStyle(litPalette().style, { diff: false });
-      return;
-    }
-
-    // Both toggles call this once on startup to publish their initial state,
-    // and that can land before the first style has loaded. There is nothing to
-    // restyle yet and every builder below would throw; style.load runs them.
-    if (!map.isStyleLoaded()) return;
-
-    // Same style, different look: light and dark are one Standard style under
-    // two light presets. Re-running the builders applies the new palette to
-    // layers that already exist, so the map recolours without a reload and
-    // without dropping the route or the campus mask.
-    //
-    // The hover goes first for the same reason it does on a style swap: those
-    // builders push a plain `text-color` and a plain `icon-size` over whatever
-    // the hover had written, and a `hoveredPin` still naming the pin underneath
-    // would make the next mousemove over it a no-op.
-    clearHover();
-    addNetworkLayers();
-    if (map.getLayer('campus-buildings')) addBuildingsLayer();
-  }
+  // Who draws the ground, and what to say when they refuse: src/ground.js.
+  const ground = createGround({
+    map,
+    googleKey,
+    provider: () => currentProvider,
+    basemap: () => currentBasemap,
+    theme: () => currentTheme,
+    skin: () => currentSkin,
+    appliedStyleKey: () => appliedStyleKey,
+    setAppliedStyleKey: (key) => { appliedStyleKey = key; },
+    setStyleBuilt: (on) => { styleBuilt = on; },
+    litPalette,
+    setStatus: (sentence, isError) => setStatus(sentence, isError),
+    rebuild: () => addNetworkLayers(),
+    clearHover: () => pins.clearHover(),
+    standBuildings: () => addBuildingsLayer(),
+    providerControl: () => providerControl,
+    setProvider: (next) => { currentProvider = next; },
+    captureStyleLights: (lights) => { benchLights = lights; },
+  });
+  const syncBasemapStyle = () => ground.sync();
 
   // Two surfaces, like the three controls below it: the layers menu's
   // radiogroup and the debug menu's. Both are handed over rather than copied,
@@ -4618,97 +1015,28 @@ function startApp() {
   // directionsBtn is declared up with the panels — setStatus can reach it first.
   const searchGo = document.getElementById('search-go');
 
-  /** Show or hide a floating card, keeping the button that owns it in step. */
-  function toggleSheet(sheet, button, force) {
-    const open = force ?? sheet.classList.contains('hidden');
-    sheet.classList.toggle('hidden', !open);
-    button?.setAttribute('aria-expanded', String(open));
-    return open;
-  }
-
-  /**
-   * Show or hide the route panel, and re-frame the campus behind it.
-   *
-   * The panel is what `campusPadding` reserves room for, so the map has to be
-   * re-centred when it comes or goes or the campus ends up visibly off to one
-   * side of the space left over. Only when it actually moved, though — every
-   * endpoint set calls showRoutePanel, and an easeTo per click on an already
-   * open panel is a camera that drifts while you are trying to use it.
-   */
-  function toggleRoutePanel(force) {
-    // The one card on this map that can be switched off entirely. Nothing is
-    // allowed to open it while the debug menu has the route GUI off, or the
-    // stylesheet would be hiding a panel this function had just told the camera
-    // to reserve room for — and the campus would sit off to one side of a gap
-    // with nothing in it.
-    const want = routingEnabled ? force : false;
-    const was = !sidePanel.classList.contains('hidden');
-    const open = toggleSheet(sidePanel, directionsBtn, want);
-    directionsBtn.setAttribute('aria-label', open ? 'Hide directions' : 'Directions');
-    if (open !== was) map.easeTo({ padding: campusPadding(), duration: 300 });
-    return open;
-  }
-
-  /**
-   * Bring the route panel up because something needs to be read in it.
-   *
-   * The panel starts closed, which means every message this app writes about a
-   * route — the distance, "Now press and hold to set an end point", a routing
-   * server that is down — is being written into a hidden card. Anything that
-   * sets an endpoint or reports an error opens it first, so the panel appears
-   * at the moment it acquires something to say and not before.
-   */
-  function showRoutePanel() {
-    toggleRoutePanel(true);
-  }
-
-  /**
-   * Show or hide the legend, and re-frame the campus beside it.
-   *
-   * Same arrangement as the route panel and for the same reason, which this
-   * did not have while it was a sheet in the left column behind a menu row: it
-   * holds 320px of the right edge now, campusPadding reserves that width, and
-   * a close that did not re-frame left the camera keeping the campus out of a
-   * strip with nothing in it.
-   */
-  function toggleLegendPanel(force) {
-    const was = !legendPanel.classList.contains('hidden');
-    const open = toggleSheet(legendPanel, legendOpen, force);
-    // The debug menu's row is a second surface on this one piece of state, like
-    // its map-type and look buttons are on theirs. Only the attribute is
-    // repeated here; the panel's own class is still the single source of truth,
-    // and both buttons read it through this function.
-    debugLegend.setAttribute('aria-expanded', String(open));
-    if (open !== was) map.easeTo({ padding: campusPadding(), duration: 300 });
-    return open;
-  }
-
-  // `phone` and the legend's opening state are set up with the panels — see
-  // there for why. This is only the button catching up with what was decided.
-  legendOpen.setAttribute('aria-expanded', String(!legendPanel.classList.contains('hidden')));
-
-  legendClose.addEventListener('click', () => {
-    // The outline first, so the category's pins are already gone by the time
-    // the re-frame runs and the camera is not fitting a set of markers that is
-    // about to be taken off the map.
-    //
-    // A highlight with its legend closed is a purple campus and nothing on
-    // screen saying why, so the outline — and the category it belongs to — go
-    // when the panel does.
-    clearLegendHighlight();
-    toggleLegendPanel(false);
+  // Which panel is open, and what opening one does to the others:
+  // src/panels.js.
+  const panels = createPanels({
+    map,
+    sidePanel,
+    legendPanel,
+    layersBtn,
+    layersMenu,
+    legendOpen,
+    legendClose,
+    debugLegend,
+    directionsBtn,
+    isPhone: () => phone.matches,
+    campusPadding: () => campusPadding(),
+    routingEnabled: () => routingEnabled,
+    clearLegendHighlight: () => clearLegendHighlight(),
   });
-
-  /** What either legend button does. */
-  function onLegendPressed() {
-    toggleSheet(layersMenu, layersBtn, false);
-    const open = toggleLegendPanel();
-    if (!open) { clearLegendHighlight(); return; }
-    // On the phone these two are alternatives, not a stack: both at once is a
-    // sheet over two thirds of the screen with three legend rows showing, and a
-    // campus squeezed into the strip above it.
-    if (phone.matches) toggleRoutePanel(false);
-  }
+  const toggleSheet = (panel, button, force) => panels.toggleSheet(panel, button, force);
+  const toggleRoutePanel = (force) => panels.toggleRoute(force);
+  const showRoutePanel = () => panels.showRoute();
+  const toggleLegendPanel = (force) => panels.toggleLegend(force);
+  const onLegendPressed = () => panels.onLegendPressed();
 
   legendOpen.addEventListener('click', onLegendPressed);
   debugLegend.addEventListener('click', onLegendPressed);
@@ -4751,128 +1079,27 @@ function startApp() {
   // Whether the locate control is watching. Tracked from its own events rather
   // than inferred, because `trigger()` is a toggle: called while it is already
   // watching it stops it, so switching the fixture off and on again would turn
-  // the blue dot off at the exact moment it was asked for.
-  let locating = false;
+  // The locate control, and the two-press unlock in front of it:
+  // The locate control, and the two-press unlock in front of it: src/locate.js.
+  const locate = createLocate({ control: () => geolocateControl });
+  const startLocating = (attempt) => locate.start(attempt);
 
-  const locateButton = () => document.querySelector('.mapboxgl-ctrl-geolocate');
-
-  // Set only when WE were the ones who re-enabled that button, so switching the
-  // fixture off puts it back the way the browser left it rather than leaving a
-  // live-looking control that cannot work.
-  let locateUnlocked = false;
-
-  /**
-   * Let the locate button be pressed even though the browser said no.
-   *
-   * The control asks for the geolocation permission while it sets itself up and
-   * disables its own button when the answer is "denied". That is right, and it
-   * stops being the question the moment the position is coming from a fixture
-   * instead — somebody who once blocked location for this origin is exactly the
-   * person who needs a way to see what the blue dot does. Without this the dot
-   * can still be turned on from here, but the button beside it is dead, and the
-   * button's own five states are half of the interface being looked at.
-   */
-  function unlockLocate(button) {
-    if (!button.disabled) return;
-    button.disabled = false;
-    locateUnlocked = true;
-  }
-
-  function relockLocate() {
-    if (!locateUnlocked) return;
-    const button = locateButton();
-    if (button) button.disabled = true;
-    locateUnlocked = false;
-  }
-
-  /**
-   * Start the locate control, once it is able to start.
-   *
-   * Waits for the BUTTON rather than calling `trigger()` and reading its
-   * refusal. The control builds that button at the end of setting itself up,
-   * and setting up waits on a permissions query which has not settled when a
-   * page opened with the fixture already on reaches this point — so trigger()
-   * would refuse, and warn, on every single reload with the switch on. Two
-   * seconds of retries and then it gives up, rather than spinning forever.
-   */
-  function startLocating(attempt = 0) {
-    // Before the map has loaded there is no control yet. The load handler calls
-    // this again once there is, so nothing is lost by returning here.
-    if (!geolocateControl || locating) return;
-    const button = locateButton();
-    if (!button) {
-      if (attempt < 20) setTimeout(() => startLocating(attempt + 1), 100);
-      return;
-    }
-    unlockLocate(button);
-    geolocateControl.trigger();
-  }
-
-  function applyDebug({ open, routing, gps, fps, twopoint, navbar, dirbutton }) {
-    // Read by the next card rather than applied to the open one: the readout is
-    // built with the flyover, and there is no sensible thing to do to a viewport
-    // that is already orbiting.
-    showFps = open && fps;
-
-    // The gate the lighting bench is read through. Set before anything else
-    // here, so applyLighting sees the new state whichever path reaches it.
-    debugOpen = open;
-    applyLighting();
-
-    // "Off by default" means off once you are in the back room, not off for
-    // everybody: with the panel closed this is the app, and the app gives
-    // directions. `open &&` is the whole of that guarantee, twice.
-    routingEnabled = !open || routing;
-    document.body.classList.toggle('no-routing', !routingEnabled);
-    if (!routingEnabled) toggleRoutePanel(false);
-
-    // The three developer controls: "Start here" on a place card, and Simulate
-    // and Clear on the route panel. Same `open &&` guarantee as the switch
-    // above — with the menu shut these are simply not on the screen, which is
-    // the point of moving them. The stylesheet does the hiding, so a card built
-    // while the switch was on does not have to be rebuilt when it goes off.
-    document.body.classList.toggle('no-twopoint', !(open && twopoint));
-
-    // NOT gated on the menu being open, and it is the only flag here that is
-    // not. The rule the back room is built on is that a LIE cannot follow you
-    // out of it — a routing GUI switched off, a GPS fix that is not yours —
-    // because those change what the app tells a visitor about the world. This
-    // one changes where the search field is. It is a layout, like the skin and
-    // the map type, and those persist too; a header that vanished the moment
-    // you closed the menu you turned it on in would just look broken.
-    showNavbar(navbar);
-
-    // The blue circle beside the search field, and off unless asked for.
-    //
-    // NOT gated on the menu being open, for the same reason the header above is
-    // not: it is a piece of layout rather than a lie, and it can be left on.
-    // What it opened was an empty two-ended route form — the shape you want
-    // when you are building a map and have two arbitrary points in mind, and
-    // not the shape of the question a visitor has. Theirs is "where is X", and
-    // the answer to that is a place card with Directions on it, which sets the
-    // destination and reads the start off the GPS without ever showing an empty
-    // form. So the form is the special case now, and the button that opens it
-    // moved in here with the rest of the map-building furniture.
-    document.body.classList.toggle('no-dirbutton', !dirbutton);
-    if (!dirbutton) directionsBtn?.setAttribute('aria-expanded', 'false');
-
-    const fixture = open && gps;
-
-    // A start that came from the fixture is a start with no marker — the dot was
-    // the marker. Switching the fixture off takes the dot away and would leave a
-    // route running from a point nothing on the map is drawing, so the route
-    // goes with it. `startPoint && !startMarker` is that state exactly, and it
-    // is the state itself rather than a flag kept alongside it.
-    if (!fixture && startPoint && !startMarker) resetMap();
-
-    // Where the position comes from, not whether the app is looking for one.
-    // Switching the fixture off hands the watch already in flight back to the
-    // real GPS rather than putting the dot away, which is the honest thing: it
-    // shows you what the real one actually does from here.
-    geolocation.useFixture(fixture ? CAMPUS_CENTRE : null);
-    if (fixture) startLocating();
-    else relockLocate();
-  }
+  // What each debug switch actually does to the running app: src/debug-apply.js.
+  const debugFlags = createDebugFlags({
+    geolocation,
+    centre: CAMPUS_CENTRE,
+    endpoints,
+    locate,
+    applyLighting: () => applyLighting(),
+    toggleRoutePanel: (force) => toggleRoutePanel(force),
+    showNavbar: (on) => showNavbar(on),
+    directionsBtn,
+    setOpen: (on) => { debugOpen = on; },
+    setShowFps: (on) => { showFps = on; },
+    setRoutingEnabled: (on) => { routingEnabled = on; },
+    routingEnabled: () => routingEnabled,
+  });
+  const applyDebug = (flags) => debugFlags.apply(flags);
 
   // Before createDebugMenu, so that the menu's first onChange — which can open
   // the panel, and therefore open the gate — finds a bench to read rather than
@@ -4931,341 +1158,49 @@ function startApp() {
   // is what made merging them possible rather than merely tidy.
   // -------------------------------------------------------------------------
 
-  /** "6 buildings", "1 building · 22 zones · 5 outdoors", or nothing at all. */
-  function countText(counts) {
-    const parts = [];
-    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-    if (counts.buildings) parts.push(plural(counts.buildings, 'building'));
-    if (counts.zones) parts.push(plural(counts.zones, 'zone'));
-    // Named rather than counted with the rest: these are the ones the outline
-    // cannot speak for, and rolling them into "15 things" would hide that.
-    if (counts.outside) parts.push(`${counts.outside} outdoors`);
-    return parts.join(' · ');
-  }
-
-  function renderLegend() {
-    legendList.replaceChildren(...CATEGORIES.map((category) => {
-      const highlight = legendHighlights.get(category.id);
-      const li = document.createElement('li');
-
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'g-legend-row';
-      row.dataset.id = category.id;
-      // A toggle, not a radio: the pressed row is a thing you turn off again,
-      // and there is no fourth state for "none of them" to occupy.
-      row.setAttribute('aria-pressed', String(activeCategory === category.id));
-      // Both data files are still in flight at this point, and a row that
-      // silently reports "Nothing found" reads as broken rather than as early.
-      row.disabled = !legendReady;
-
-      const glyph = document.createElement('span');
-      glyph.className = 'g-icon g-legend-glyph';
-      glyph.dataset.icon = category.glyph;
-
-      const text = document.createElement('span');
-      text.className = 'g-legend-text';
-      const name = document.createElement('span');
-      name.className = 'g-legend-name';
-      // The category's own short label rather than the printed wording. This
-      // row is a control now — the thing you press to find restrooms — and
-      // "Restrooms" is what a control is called; the sheet's full phrasing
-      // ("All-gender restroom") is the title, where it reads as a gloss.
-      name.textContent = category.label;
-      text.append(name);
-      row.title = category.legend;
-
-      // What the outline will do, printed before you ask for it. Absent until
-      // the join has run, which is the only thing `highlight` being missing
-      // ever means.
-      if (highlight) {
-        const count = document.createElement('span');
-        count.className = 'g-legend-count';
-        count.textContent = countText(highlight.counts);
-        text.append(count);
-      }
-
-      row.append(glyph, text);
-      row.addEventListener('click', () => selectCategory(category.id));
-      // Focus counts as hover, so the whole thing works from the keyboard.
-      row.addEventListener('mouseenter', () => previewLegendRow(category.id));
-      row.addEventListener('focus', () => previewLegendRow(category.id));
-      row.addEventListener('mouseleave', () => previewLegendRow(null));
-      row.addEventListener('blur', () => previewLegendRow(null));
-
-      li.append(row);
-      return li;
-    }));
-    paintIcons(legendList);
-    // One call site for both shapes of the same list, so a category cannot be
-    // live in the sidebar and dead in the sheet.
-    renderBrowse();
-  }
-
-  /**
-   * The same eleven, as the grid the phone sheet opens onto.
-   *
-   * WHY A SECOND RENDERER for one list. The legend is a column of rows with a
-   * count under each name — "6 buildings · 22 zones" — which is what it is for:
-   * a key you read down. Pulled open on a phone the sheet is not a key, it is
-   * the front page, and a front page asks a different question. Apple's is a
-   * grid of coloured discs and one word each, and that shape is the reason you
-   * can find Coffee on it without reading anything.
-   *
-   * So: same data, same press, same pressed state, different shape. Not a
-   * variant of `renderLegend` behind a flag — the two disagree about almost
-   * every element they build, and the one thing they must agree on is what a
-   * press does, which is `selectCategory` in both.
-   *
-   * THE DISC WEARS THE PIN'S OWN COLOUR. `pinColour` is what map-images.js
-   * paints the markers this row drops with, so pressing Restrooms puts teal
-   * pins on the map from a teal tile, and Emergency phones yellow ones from a
-   * yellow tile. Read from there rather than restated here, because a second
-   * table of eleven hues is a second table to drift.
-   */
-  function renderBrowse() {
-    if (!browseGrid) return;
-    browseGrid.replaceChildren(...CATEGORIES.map((category) => {
-      const tile = document.createElement('button');
-      tile.type = 'button';
-      tile.className = 'g-browse-tile';
-      tile.dataset.id = category.id;
-      tile.setAttribute('aria-pressed', String(activeCategory === category.id));
-      // Same reason the legend's rows are: both files are still in flight when
-      // this first runs, and a tile that answers "Nothing found" reads as
-      // broken rather than as early.
-      tile.disabled = !legendReady;
-      tile.title = category.legend;
-
-      const disc = document.createElement('span');
-      disc.className = 'g-browse-disc';
-      // `icon` is the disc a category with no pictogram draws its own pins
-      // with; `kinds[0]` is the pictogram for one that has them. Every category
-      // has at least one of the two — see src/categories.js — and pinColour
-      // falls back to the family blue for anything that somehow has neither.
-      const tint = pinColour(category.icon ?? category.kinds?.[0]);
-      disc.style.setProperty('--tint', tint);
-      // White on most of them and near-black on the yellow, decided by contrast
-      // rather than by eye — the same call map-images.js makes for the glyph
-      // inside the pin, from the same function, so a tile and the pins it drops
-      // cannot end up with different ink on the same hue.
-      disc.style.color = glyphInk(tint);
-
-      const glyph = document.createElement('span');
-      glyph.className = 'g-icon g-browse-glyph';
-      glyph.dataset.icon = category.glyph;
-      disc.append(glyph);
-
-      const name = document.createElement('span');
-      name.className = 'g-browse-name';
-      name.textContent = category.label;
-
-      tile.append(disc, name);
-      tile.addEventListener('click', () => selectCategory(category.id));
-      return tile;
-    }));
-    paintIcons(browseGrid);
-  }
-
-  /**
-   * The building-type grid: ten blocks of colour, two to a row.
-   *
-   * THE TILE IS THE COLOUR. The Find Nearby tile above it is a grey card with a
-   * coloured disc on it, and that is right for what it is — pressing it drops
-   * pins, and the disc is one of those pins shown early. This grid drops
-   * nothing. It is the classification itself, so there is no marker for a small
-   * shape to stand in for and no reason to spend two thirds of the tile on grey.
-   *
-   * The count is not decoration either. Four of these classes hold exactly one
-   * building on this campus, and a tile that says so is a tile somebody can
-   * decide about before pressing it — "Bookstore · 1 building" is an answer
-   * already, and the press is only for where it is.
-   *
-   * Written from src/building-kinds.js, coloured by pinColour and drawn with
-   * map-images.js's own pictogram for the class, which is the same drawing on
-   * the same footprints out on the map.
-   */
-  function renderKinds() {
-    if (!kindsGrid) return;
-    kindsGrid.replaceChildren(...BUILDING_KINDS.map((kind) => {
-      const tile = document.createElement('button');
-      tile.type = 'button';
-      tile.className = 'g-kind';
-      tile.dataset.id = kind.id;
-      tile.setAttribute('aria-pressed', String(activeKind === kind.id));
-      // Same gate as the row above: the directory is what the counts and the
-      // outlines are read from, and a tile that answers "Nothing found" before
-      // it has landed reads as broken rather than as early.
-      tile.disabled = !campusDirectory;
-      tile.title = POI_CLASSES[kind.id];
-
-      const tint = pinColour(kind.id);
-      tile.style.setProperty('--tint', tint);
-      // textInk, not glyphInk. A marker on the map carries a pictogram and
-      // WCAG's bar for one of those is 3:1; a tile carries a WORD, and the bar
-      // for that is 4.5. Three of these hues sit between the two — food, sport
-      // and arts all give white about 3.1 — so the pictogram rule would have
-      // put "Sport" in white on green and called it legible. The glyph takes
-      // the same ink as the label rather than its own: two inks on one tile
-      // reads as a bug, and at 4.96 the darker one is fine for both.
-      tile.style.color = textInk(tint);
-
-      const glyph = document.createElement('span');
-      glyph.className = 'g-kind-glyph';
-      glyph.innerHTML = glyphSvg(kind.id);
-
-      const text = document.createElement('span');
-      text.className = 'g-kind-text';
-      const name = document.createElement('span');
-      name.className = 'g-kind-name';
-      name.textContent = kind.label;
-      const count = document.createElement('span');
-      count.className = 'g-kind-count';
-      const n = kindGroups.get(kind.id)?.length ?? 0;
-      count.textContent = campusDirectory ? `${n} building${n === 1 ? '' : 's'}` : '…';
-      text.append(name, count);
-
-      tile.append(glyph, text);
-      tile.addEventListener('click', () => selectKind(kind.id));
-      return tile;
-    }));
-  }
-
-  /** The pressed state alone, for the paths that already redrew everything else. */
-  function syncLegendRows() {
-    for (const li of legendList.children) {
-      const row = li.firstElementChild;
-      row?.setAttribute('aria-pressed', String(row.dataset.id === activeCategory));
-    }
-    for (const tile of browseGrid?.children ?? []) {
-      tile.setAttribute('aria-pressed', String(tile.dataset.id === activeCategory));
-    }
-    // The building grid is synced from HERE rather than from its own selection
-    // path, so every route that already redrew the pressed state — clearing a
-    // category, dismissing the panel, pressing a legend row — un-presses a
-    // building tile too without having to learn that it exists.
-    for (const tile of kindsGrid?.children ?? []) {
-      tile.setAttribute('aria-pressed', String(tile.dataset.id === activeKind));
-    }
-  }
-
-  /** Called once the overlays a category reads from have actually arrived. */
-  function enableLegend() {
-    legendReady = true;
-    renderLegend();
-  }
-
-  /**
-   * The categories go live on the first of the two files they read.
-   *
-   * A chip reads amenities.json, places.json or both, so a category over the
-   * surviving file is still a working category and there is no reason to make
-   * the legend wait for the second one. Called from both arrivals rather than
-   * once after them; addCategoryLayer and enableLegend are both written to be
-   * re-entered — the first checks for its own layer and recolours it, the
-   * second sets a flag and re-renders — so the second call is a no-op with a
-   * repaint on the end of it.
-   */
-  function enableCategories() {
-    addCategoryLayer();
-    enableLegend();
-  }
-
-  /**
-   * Point at a row and its answer arrives on the map.
-   *
-   * This used to outline ground in purple. It now does what pressing does, less
-   * the parts that commit: the campus empties, the row's pins arrive on the
-   * lift's spring with their names, and the whole thing is undone the moment the
-   * pointer leaves. No results list, no camera move — a preview that flew the
-   * map somewhere would make running an eye down eleven rows unusable, and the
-   * pins land wherever they are, in view or not.
-   *
-   * Every row behaves this way, parking included. Its 22 outlined car parks were
-   * a real answer, but its pins are a better one — a lot you can read the name
-   * of beats a lot you can only see the shape of — and the permit machines that
-   * belong to the same question have no shape on the sheet to outline at all.
-   *
-   * The reversal is the reason this is cheap enough to fire on mouseenter:
-   * `choreography` cancels whatever is mid-flight and `fadeFrom` picks up the
-   * opacity where the cancelled run left it, so dragging the pointer down the
-   * column dissolves one set into the next instead of restarting eleven times.
-   */
-  function previewLegendRow(id) {
-    if (hoverRow === id) return;
-    hoverRow = id;
-    // The outline goes with the pointer arriving, not with the pins landing:
-    // shownRow drops it for the whole time a hover is up. See shownRow.
-    paintHighlight();
-
-    const category = id ? CATEGORY_BY_ID.get(id) : null;
-    if (hoverCategory === (category?.id ?? null)) return;
-
-    hoverCategory = category?.id ?? null;
-    hoverHits = category ? hitsFor(category) : [];
-
-    // Whichever direction this is: onto a row, off a row, or straight from one
-    // row to the next. `shownCategory` has already been updated, so the only
-    // question left is whether anything should be on the map when this settles.
-    if (shownCategory()) playCategorySwap();
-    else playCategoryClear();
-  }
-
-  /** Every half of the state, for the places the legend itself goes away. */
-  function clearLegendHighlight() {
-    // Through previewLegendRow rather than by nulling hoverRow, because a hover
-    // now owns pins as well as the outline and the panel can close with the
-    // pointer still on a row — a closing legend that left a preview behind would
-    // strand a category on the map with nothing on screen naming it. Returns
-    // immediately when there was no hover, so this costs nothing in the common
-    // case and never plays a spurious animation.
-    previewLegendRow(null);
-    if (activeCategory) clearCategory();
-    else { stickyRow = null; paintHighlight(); }
-  }
-
-  /**
-   * Do the join, once, when the overlays that feed it have arrived.
-   *
-   * Every row is resolved up front rather than on first hover: the answer is
-   * what the row prints under its caption, so it has to exist before anything
-   * is pointed at, and eleven categories over 90 areas is a few milliseconds.
-   */
-  function buildLegendIndex() {
-    legendAreas = buildAreas({
-      directory: campusDirectory,
-      buildings: campusBuildings,
-      basemap: campusBasemap,
-      zoneKinds: CATEGORIES.map((category) => category.zones).filter(Boolean),
-    });
-    legendHighlights.clear();
-    for (const category of CATEGORIES) {
-      legendHighlights.set(category.id, highlightFor(category, {
-        areas: legendAreas,
-        amenities: campusAmenities,
-        places: campusPlaces,
-      }));
-    }
-    // The building classes, into the same table under namespaced keys — see
-    // kindRow, and the `parking` collision it exists for. One table because
-    // paintHighlight reads one variable: whatever stickyRow names is what is
-    // outlined, and it should not have to know which family the row came from.
-    for (const kind of BUILDING_KINDS) {
-      legendHighlights.set(kindRow(kind.id), highlightForKind(kind.id, {
-        areas: legendAreas,
-        classify: poiFor,
-      }));
-    }
-    kindGroups = groupBuildings(campusDirectory, poiFor);
-    renderLegend();
-    renderKinds();
-  }
+  // The legend, the chips, and what each one lights up: src/legend.js.
+  const legend = createLegend({
+    map,
+    litPalette,
+    elements: {
+      legendList, browseGrid, kindsGrid, legendPanel, categoryPanel,
+    },
+    isPhone: () => phone.matches,
+    data: {
+      amenities: () => campusAmenities,
+      places: () => campusPlaces,
+      buildings: () => campusBuildings,
+      directory: () => campusDirectory,
+      sheet: () => campusBasemap,
+    },
+    camera,
+    /** Straight-line feet from wherever the user is measuring from. */
+    feetFrom: (coords) => {
+      const origin = endpoints.start()?.geometry.coordinates ?? map.getCenter().toArray();
+      return distance(point(origin), point(coords)) * FEET_PER_KM;
+    },
+    playSwap: () => choreo.swap(),
+    playClear: () => choreo.clear(),
+    toggleSheet: (panel, button, force) => toggleSheet(panel, button, force),
+    legendOpen,
+    addCategoryLayer: () => markers.addCategory(),
+    setDestination: (coords, name) => setDestination(coords, name),
+    buildingSub: (props) => buildingSub(props),
+  });
+  const shownCategory = () => legend.shownCategory();
+  const shownHits = () => legend.shownHits();
+  const addHighlightLayers = () => legend.addHighlightLayers();
+  const clearResults = () => legend.clearResults();
+  const clearLegendHighlight = () => legend.clearHighlight();
+  const buildLegendIndex = () => legend.buildIndex();
+  const renderLegend = () => legend.renderLegend();
+  const enableCategories = () => legend.enableCategories();
 
   renderLegend();
   // Disabled and countless until directory.json lands, for the same reason the
   // legend's rows are: ten tiles that all read "0 buildings" is a grid that
   // looks broken rather than early.
-  renderKinds();
+  legend.renderKinds();
 
   map.on('load', async () => {
     // From here on the sky is followed rather than sampled once. See
@@ -5353,7 +1288,7 @@ function startApp() {
       // Kept for the next Directions press, so it can answer from what the
       // control already knows instead of waking the radio again. See
       // currentPosition, which is the only reader.
-      lastFix = { at: [e.coords.longitude, e.coords.latitude], when: Date.now() };
+      endpoints.noteFix({ at: [e.coords.longitude, e.coords.latitude], when: Date.now() });
       // A simulated walk pushes a new fix every SIM_TICK_MS, so the camera ease
       // has to finish inside one tick. At a second apiece every fix would
       // interrupt the last and the dot would slide along a route the camera
@@ -5364,8 +1299,8 @@ function startApp() {
 
     // What `locating` is kept in step with — see startLocating for why guessing
     // at it is not good enough. Both events are the control's own.
-    geolocate.on('trackuserlocationstart', () => { locating = true; });
-    geolocate.on('trackuserlocationend', () => { locating = false; });
+    geolocate.on('trackuserlocationstart', () => locate.setLocating(true));
+    geolocate.on('trackuserlocationend', () => locate.setLocating(false));
 
     // A page reloaded with the debug fixture already set asked for the blue dot
     // before this control existed. It exists now.
@@ -5539,372 +1474,6 @@ function startApp() {
   //
   // Both the map click and the search box arrive here, so a searched
   // destination and a clicked one behave identically from this point on.
-  // -------------------------------------------------------------------------
-
-  const coordLabel = (c) => `${c[1].toFixed(4)}, ${c[0].toFixed(4)}`;
-
-  /** A destination chosen before a start point, held until there is one. */
-  let pendingEnd = null;
-
-  // The debug menu can take the route GUI away, and these three functions are
-  // where it is taken: they are the only places an endpoint is put on the map,
-  // so between them they are the whole of the offer. Guarded here rather than at
-  // the four things that CALL them — a map click, a card button, a search
-  // result, a category row — because a rule stated once at the funnel cannot be
-  // half-applied, and the stylesheet is already hiding the affordances. See
-  // routingEnabled, and body.no-routing in src/input.css.
-  //
-  // A tap still lifts a pin, opens a building and clears a category with the
-  // GUI off, because none of those are about going anywhere.
-
-  // `adoptFixtureStart` and `haveStart` stood here, and both are gone.
-  //
-  // They were the app's whole answer to "where am I": the fixture's coordinates
-  // if the debug menu had put one on the campus, and otherwise nothing. Their
-  // ONE PIN, NOT TWO argument was right and is kept below in locateStart — with
-  // a position on the map there is already a blue dot saying where you are, and
-  // a green Start pin beside it is the second pin. What was wrong was the
-  // premise that only a fixture could supply one.
-
-  /** How long to wait for a fix before saying so. */
-  const FIX_TIMEOUT_MS = 9000;
-  /** A fix this fresh is worth reusing rather than waking the radio for. */
-  const FIX_FRESH_MS = 30_000;
-
-  /**
-   * Where the phone says it is, as a promise.
-   *
-   * THROUGH THE LOCATE CONTROL, not through a second geolocation request of our
-   * own, and that is the whole shape of this function. The obvious version asks
-   * `getCurrentPosition` directly; it was written that way first and it was
-   * wrong twice over.
-   *
-   * The first is visible: the control is what draws the blue dot, and a
-   * position obtained behind its back leaves "from your location" as a claim
-   * with nothing on the map behind it. Triggering it as well means TWO watches
-   * on one radio — which is also what caught this. In headless Chrome the
-   * second consumer simply never receives a fix, so the dot sat spinning at
-   * "waiting" forever while the route drew perfectly. That specific behaviour
-   * is an emulator artifact and a real phone would have served both; running
-   * two watches to answer one question is a waste on any of them.
-   *
-   * The second is that the control is ALREADY watching whenever the dot is up,
-   * so most of the time the answer is in hand and no radio needs waking at all.
-   *
-   * The fixture reaches this the same way — it delivers through the control's
-   * watch like a real fix does, so nothing here needs to know which it has.
-   */
-  function currentPosition() {
-    const fresh = lastFix && Date.now() - lastFix.when < FIX_FRESH_MS;
-    if (fresh) return Promise.resolve(lastFix.at);
-
-    return new Promise((resolve, reject) => {
-      if (!geolocateControl) { reject({ code: 2 }); return; }
-      let settled = false;
-      const finish = (fn, value) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        geolocateControl.off('geolocate', onFix);
-        geolocateControl.off('error', onFail);
-        fn(value);
-      };
-      const onFix = (e) => finish(resolve, [e.coords.longitude, e.coords.latitude]);
-      const onFail = (error) => finish(reject, error);
-      const timer = setTimeout(() => {
-        // A STALE FIX BEATS A REFUSAL. A watch that has locked on and gone
-        // quiet is what a stationary phone looks like — some browsers report
-        // once and then say nothing until you move — and the last thing it said
-        // is still where you are standing. Refusing to route somebody who has
-        // not moved, because they have not moved, is the worst reading of this.
-        if (lastFix) finish(resolve, lastFix.at);
-        else finish(reject, { code: 3 });
-      }, FIX_TIMEOUT_MS);
-      geolocateControl.on('geolocate', onFix);
-      geolocateControl.on('error', onFail);
-      // No-op if it is already locked on, in which case the next fix its watch
-      // delivers is the one resolved above.
-      startLocating();
-    });
-  }
-
-  /**
-   * Make where you are the start of the route. The whole of "from my location".
-   *
-   * THIS IS WHAT DIRECTIONS WAS MISSING. The button has been on both cards from
-   * the beginning, and pressing it on a phone produced "…now press and hold the
-   * map to set a start point" — because the only position this app would ever
-   * adopt was the debug fixture. Everybody without the debug menu open was
-   * being asked to tell a map with a GPS in it where they were standing.
-   *
-   * Three ways to fail, and all three are said out loud rather than swallowed:
-   * the browser refuses or times out (see locationProblem), or the fix lands
-   * outside the routing graph (see reachProblem). The last is the quiet one —
-   * the router snaps a start to the nearest vertex with no notion of "too far",
-   * so opening this at home ten miles away would otherwise draw a confident
-   * eight-minute walk between two places neither of which is where you are.
-   *
-   * Returns whether there is now a start point to route from.
-   */
-  async function locateStart() {
-    if (!routingEnabled || !networkPoints) return false;
-
-    // The fixture answers on the next tick, so this spinner is a real wait only
-    // for a real GPS — which is exactly when it is worth showing.
-    setBusy(true);
-    setStatus('Finding your location…');
-    let at;
-    try {
-      at = await currentPosition();
-    } catch (error) {
-      setStatus(locationProblem(error), true);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-
-    const node = nearestPoint(point(at), networkPoints).geometry.coordinates;
-    const problem = reachProblem(distance(point(at), point(node)) * 1000);
-    if (problem) { setStatus(problem, true); return false; }
-
-    showRoutePanel();
-    startPoint = point(node);
-    startIsMine = true;
-    // No green pin, for the same reason the fixture plants none: the blue dot
-    // is what says where you are, and a marker on top of it is the second pin.
-    startMarker?.remove();
-    startMarker = null;
-    startCoordText.value = 'Your location';
-    return true;
-  }
-
-  /**
-   * Set the start of the route to a coordinate somebody chose.
-   *
-   * THE SAME REACH CHECK locateStart makes, and for the same reason — it was
-   * only ever on the GPS door. A fix that lands too far from the graph was
-   * refused; a press-and-hold that landed in the same place was not, and went
-   * on to produce a route from a vertex nowhere near where the pin is. The
-   * fence in ROUTABLE_BOUNDS keeps the camera over ground the server can route,
-   * but that box is a rectangle and the network inside it is not, so its corners
-   * are still further from a path than anybody should be routed from.
-   *
-   * A no-op for the three callers that pass a named campus place — every one of
-   * those is on the graph by construction, which test/directions.test.js holds
-   * them to. It is the dropped pin this is here for.
-   *
-   * Skipped entirely until the vertices have landed, because "we cannot check
-   * yet" is not the same as "too far" and refusing a press during the cold load
-   * would be the wrong sentence at the one moment it is most confusing.
-   *
-   * @returns {boolean} whether there is now a start point
-   */
-  function placeStart(coords, label) {
-    if (!routingEnabled) return false;
-
-    if (networkPoints) {
-      const node = nearestPoint(point(coords), networkPoints).geometry.coordinates;
-      const problem = reachProblem(distance(point(coords), point(node)) * 1000);
-      if (problem) { setStatus(problem, true); return false; }
-    }
-
-    showRoutePanel();
-    startPoint = point(coords);
-    // Somebody chose this, so Directions on the next card routes FROM it rather
-    // than replacing it with a GPS fix. See startIsMine.
-    startIsMine = false;
-    startMarker?.remove();
-    startMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_GREEN, { title: 'Start' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords)
-      .addTo(map);
-    startCoordText.value = label ?? coordLabel(coords);
-    return true;
-  }
-
-  async function placeEnd(coords, label) {
-    if (!routingEnabled) return;
-    showRoutePanel();
-    endPoint = point(coords);
-    endMarker?.remove();
-    endMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Destination' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords)
-      .addTo(map);
-    endCoordText.value = label ?? coordLabel(coords);
-    setStatus('Calculating route…');
-
-    // Guard against a stale response landing after the user has moved on.
-    const seq = ++requestSeq;
-    let result;
-    let failure = null;
-    // The only wait in this app the user asked for directly. "Calculating
-    // route…" has been the whole of the feedback here, and a sentence that does
-    // not change cannot distinguish a server thinking from a server gone.
-    //
-    // setBusy is ref-counted, so this pair balances whatever else is in flight:
-    // two overlapping requests take the spinner to two and the first to finish
-    // leaves it up for the second. That is why the `finally` is unconditional
-    // while everything below it is not.
-    setBusy(true);
-    try {
-      result = await requestRoute(startPoint.geometry.coordinates, coords);
-    } catch (error) {
-      console.error(error);
-      failure = 'Routing server unreachable — is `npm run dev` still running?';
-    } finally {
-      setBusy(false);
-    }
-
-    // EVERY OUTCOME IS CHECKED AGAINST THE SEQUENCE, the failures included.
-    //
-    // This check used to sit below the catch, so it guarded the success path
-    // and nothing else — and the failure path is the one that tears state down.
-    // A slow request that failed after a later one had already succeeded would
-    // null `endPoint`, remove the marker belonging to the route now on screen,
-    // and overwrite its summary with "Routing server unreachable". Worse, the
-    // teardown ran `endMarker.remove()` unguarded: press Clear while a request
-    // is in flight and resetMap() sets endMarker to null, so the failure that
-    // arrived afterwards threw a TypeError out of an async function nobody was
-    // awaiting.
-    //
-    // resetMap() bumps requestSeq for exactly this reason. It was only ever
-    // half-read.
-    if (seq !== requestSeq) return;
-
-    // One teardown for the three ways this can come to nothing — a dead server,
-    // an unroutable end, and two points the graph does not join. They differ
-    // only in the sentence, and they used to differ in whether setRouteSummary
-    // was cleared as well, which was not a decision anybody made.
-    const refusal = failure ?? result?.refused
-      ?? (result ? null : 'No path found between those two points.');
-    if (refusal) {
-      setStatus(refusal, true);
-      setRouteSummary(null);
-      endPoint = null;
-      endMarker?.remove();
-      endMarker = null;
-      return;
-    }
-
-    // `stepIndex` used to be zeroed here too. It is navigation's, it is only
-    // ever read while a walk is running, and nav.start() zeroes it — so this
-    // was resetting a counter nothing could have read.
-    route.set(result);
-
-    map.getSource('calculated-route').setData(route.feature());
-    paintLegs();
-
-    setRouteSummary(result.distanceFeet);
-    const turns = route.maneuvers.length - 2;
-    setStatus(`Route calculated — ${turns} turn${turns === 1 ? '' : 's'}.`);
-    setNavButtonsEnabled(true);
-
-    // A walk that starts off campus does not fit the campus view it was planned
-    // in, and half a route running off the top of the screen is the same bug as
-    // a category whose pins are behind the panel. Same helper, so it leaves the
-    // camera alone when the whole thing is already in front of you.
-    frame(route.coords, { maxZoom: 17 });
-  }
-
-  /**
-   * Make a named point the destination, whichever list it was picked from.
-   *
-   * Shared by the search box and the category panel. Both can be used before a
-   * start point exists, which is the case `pendingEnd` covers: the pin and the
-   * label go down now, and the route is calculated the moment the next map
-   * click supplies somewhere to walk from.
-   */
-  /**
-   * Put the red pin down and hold the destination, without routing to it.
-   *
-   * What is left when there is a place but no start: the pin, the label and the
-   * camera. `pendingEnd` is what makes it not a dead end — the next thing that
-   * supplies a start point picks this up and routes it.
-   *
-   * Writes no status of its own. It is only ever reached after something else
-   * has explained why there is no route yet, and that sentence is better than
-   * anything this could say over the top of it.
-   */
-  function parkDestination(coords, name) {
-    // The destination is the only thing worth looking at. With a start already
-    // down the camera belongs to the route instead, and placeEnd frames it —
-    // flying here first would land on the destination at z17, then test the
-    // route against the view it had *before* the flight, decide it was already
-    // visible, and leave half the walk off the top of the screen. Which is
-    // exactly what it did.
-    //
-    // Padding stated rather than inherited: showRoutePanel started a 300 ms
-    // padding ease, and a flight that did not carry its own would interrupt
-    // that ease and keep whatever partial value it had reached.
-    map.flyTo({
-      center: coords,
-      zoom: Math.max(map.getZoom(), 17),
-      padding: campusPadding(),
-      duration: 900,
-    });
-    pendingEnd = { coords, name };
-    endMarker?.remove();
-    endMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Destination' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords).addTo(map);
-    endCoordText.value = name ?? coordLabel(coords);
-  }
-
-  /**
-   * "Take me there." Every Directions button on this map ends up here.
-   *
-   * ONE PATH, and that is the point of it. A building's card, a pin's card, a
-   * dropped pin, a search result and a category row were four callers with
-   * three different ideas about what happens when there is no start point —
-   * park it, ask for a hold, or quietly do nothing — and none of them asked the
-   * GPS. They ask one function now, and it asks the GPS.
-   *
-   * The rule about an existing start is the only subtle thing here: a start
-   * somebody CHOSE outranks the phone, because they chose it. A start this app
-   * adopted from a previous fix does not, because it was never a choice and a
-   * newer fix is strictly better. See startIsMine.
-   */
-  async function setDestination(coords, name) {
-    // With the route GUI off, a search result and a category row still mean
-    // something — "show me where that is" — so this degrades to the camera
-    // rather than to nothing. Dropping the red pin here without a route panel
-    // to explain it would be the worst of the three options.
-    if (!routingEnabled) {
-      map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 17), duration: 900 });
-      return;
-    }
-
-    // Both ends already set: start over rather than accumulating markers. The
-    // start survives it — see below — so this is only clearing the old walk.
-    const keep = startPoint && !startIsMine ? startPoint : null;
-    if (startPoint && endPoint) resetMap();
-    if (keep) { startPoint = keep; startIsMine = false; }
-    // Before the flyTo below, so the camera is framing the space the panel has
-    // already taken rather than the space it is about to.
-    showRoutePanel();
-
-    if (!(startPoint && !startIsMine) && !(await locateStart())) {
-      // No fix, and locateStart has already said why. The destination still
-      // goes down, so that sentence is read next to a map showing where you
-      // asked to go rather than next to nothing.
-      parkDestination(coords, name);
-      return;
-    }
-
-    if (endPoint) await rerouteTo(coords, name);
-    else await placeEnd(coords, name);
-  }
-
   // The cursor says what a click will do. Over a pin or a building that is
   // "open this", so it becomes a pointer; everywhere else it is Mapbox's own —
   // the grab hand, which is the truth about the rest of the map, since dragging
@@ -5990,7 +1559,7 @@ function startApp() {
     // cleared the restrooms and opened whatever building was behind them would
     // leave the map in a state nobody asked for. The second tap gets the
     // building.
-    if (activeCategory) { clearCategory(); return; }
+    if (legend.isActive()) { legend.clearCategory(); return; }
 
     // A tap on a building asks what it is rather than dropping a pin on it.
     // The card's own buttons then set a start or destination, and they do it at
@@ -6058,10 +1627,9 @@ function startApp() {
           clearSelection();
           placeStart(coords, 'Dropped pin');
           // A destination chosen before a start has been waiting for this.
-          if (pendingEnd) {
-            const { coords: to, name } = pendingEnd;
-            pendingEnd = null;
-            placeEnd(to, name);
+          const parked = endpoints.takeParked();
+          if (parked) {
+            placeEnd(parked.coords, parked.name);
           } else {
             setStatus('Starting from the dropped pin. Now pick where you are going.');
           }
@@ -6096,380 +1664,26 @@ function startApp() {
   //
   // Every row is bound to routing nodes, so a chosen destination is already a
   // graph vertex and needs no snapping.
-  // -------------------------------------------------------------------------
-
-  const searchInput = document.getElementById('place-search');
-  const searchResults = document.getElementById('place-results');
-  const searchClear = document.getElementById('place-clear');
-  const placeShortcuts = document.getElementById('place-shortcuts');
-
-  // Built once from the committed artifact, which is static — unlike the place
-  // index below, which waits on a fetch.
-  const roomIndex = buildRoomIndex(roomsData);
-
-  /**
-   * How much each place is worth being offered first. See src/popular.js.
-   *
-   * Held rather than computed per query, because it reads localStorage and
-   * walks the directory and neither of those changes between the letters of one
-   * word. Rebuilt on exactly the two events that can move it: the directory
-   * landing, and somebody choosing somewhere.
-   */
-  let popularBonus = popularity();
-  function refreshPopularity() {
-    popularBonus = popularity({ directory: campusDirectory });
-    renderShortcuts();
-  }
-
-  /**
-   * The row of places the sheet offers when it is offering nothing else.
-   *
-   * FULL NAMES AT THEIR OWN WIDTH, and the row scrolls.
-   *
-   * The first draft of this fixed three chips across the phone, on the
-   * reasoning that a shortcut nobody can see is not a shortcut. Then I measured
-   * the names it would be holding: the three this campus actually ranks first
-   * are "Welcome and Support Center", "Student Center" and "Evangelisti
-   * Culinary Arts Center", and three of those in 390px is 114px each. Every
-   * chip would have read "Welcome and Su…". A row of truncated building names
-   * is not a faster way to pick a building, it is a quiz.
-   *
-   * So they take the width they need and the row scrolls sideways, which costs
-   * the second and third chip some visibility and costs the first one nothing.
-   * Four rather than three, since the ones past the edge are now free.
-   *
-   * The same ranking the suggestion list opens with, which is deliberate: a
-   * person who taps the field expects to see what was already on the shelf, and
-   * two orderings of the same places would be two things to keep in step. And
-   * the same handler on a press, so a shortcut and its row cannot disagree
-   * about what picking it means.
-   *
-   * Re-rendered from refreshPopularity, so walking somewhere reorders the shelf
-   * for next time without anything else having to know that it should.
-   */
-  function renderShortcuts() {
-    if (!placeShortcuts) return;
-    const hits = popularHits().slice(0, 4);
-    placeShortcuts.replaceChildren(...hits.map((entry) => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'g-shortcut';
-      chip.textContent = entry.name;
-      // The full name for anyone who cannot see how far the label was cut.
-      chip.title = entry.name;
-      chip.setAttribute('aria-label', `Go to ${entry.name}`);
-      chip.addEventListener('click', () => chooseDestination(entry));
-      return chip;
-    }));
-    // Never on screen at the same time as the list that holds the same places.
-    // This can run while the list is open — walking somewhere reorders the
-    // shelf — and unhiding it there would put the same three names on screen
-    // twice.
-    placeShortcuts.classList.toggle(
-      'hidden', !hits.length || !searchResults.classList.contains('hidden'),
-    );
-  }
-  let searchIndex = [];
-  let searchHits = [];
-  let activeHit = -1;
-
-  function buildSearchIndex() {
-    searchIndex = buildPlaceIndex(campusPlaces.features);
-    // The field is disabled in the markup and opened here, so nobody types into
-    // a box that has nothing to search yet.
-    searchInput.disabled = false;
-  }
-
-  function runSearch(query) {
-    return search({
-      index: searchIndex,
-      query,
-      rooms: lookupRoom(query, roomIndex).slice(0, MAX_RESULTS - 2),
-      bonus: popularBonus,
-    });
-  }
-
-  /**
-   * The list an empty field shows: where you have been, then where there is
-   * most to do. See `popularNames`.
-   *
-   * An empty field is exactly the state somebody is in when they have not
-   * decided what to type yet, and on a phone it is now the state the app BOOTS
-   * in — the field holds the bottom of the screen under a thumb. Answering it
-   * with nothing is a keyboard and a blank rectangle.
-   *
-   * Filtered against the index rather than trusted: these names come from
-   * my campus's building directory and the index is built from its places file, and
-   * a building the two spell differently is a row that would go nowhere.
-   */
-  function popularHits() {
-    return popularEntries({
-      index: searchIndex,
-      directory: campusDirectory,
-      limit: MAX_RESULTS - 2,
-    });
-  }
-
-  function closeResults() {
-    searchResults.classList.add('hidden');
-    afterExit(searchResults, () => searchResults.replaceChildren());
-    // ...and the shelf comes back, unless there is nothing on it.
-    if (placeShortcuts?.childElementCount) placeShortcuts.classList.remove('hidden');
-    searchInput.setAttribute('aria-expanded', 'false');
-    searchInput.removeAttribute('aria-activedescendant');
-    searchHits = [];
-    activeHit = -1;
-  }
-
-  function highlight(index) {
-    activeHit = index;
-    [...searchResults.children].forEach((li, i) => {
-      // `aria-selected` alone: the stylesheet draws the highlight off it, so
-      // the accessible state and the visible one cannot disagree.
-      li.setAttribute('aria-selected', String(i === index));
-    });
-    if (index >= 0) {
-      searchInput.setAttribute('aria-activedescendant', `place-result-${index}`);
-      searchResults.children[index]?.scrollIntoView({ block: 'nearest' });
-    }
-  }
-
-  function renderResults(hits) {
-    searchHits = hits;
-    if (!hits.length) { closeResults(); return; }
-    searchResults.replaceChildren(...hits.map((entry, i) => {
-      const li = document.createElement('li');
-      li.id = `place-result-${i}`;
-      li.setAttribute('role', 'option');
-      const name = document.createElement('div');
-      name.className = 'g-result-name';
-      name.textContent = entry.name;
-      li.append(name);
-      /*
-       * Only worth a second line when it says something the name did not — and
-       * my campus's own prose does not.
-       *
-       * `entry.description` is the sentence the college publishes, and it is
-       * written as a sentence: "This building consists of Welcome and Support
-       * Center, Access Card Station, CalWORKs, Career & Pathways...". Under a
-       * row that already says "Welcome and Support Center" that is five words
-       * of boilerplate, then the row's own name repeated back to it, then a
-       * list cut off mid-clause — and every row in the list starts with the
-       * same five words, so a phone showed four paragraphs that rhymed. It
-       * needed two lines to do it, which is what made each row 74px tall and
-       * the whole list nearly half the screen.
-       *
-       * buildingSub is what the place card puts under the same name, so a row
-       * and the card it opens now say the same thing about the same building
-       * rather than two different things in two different registers. It is one
-       * short line by construction: what is inside, or the name my campus files it
-       * under, or its footprint.
-       *
-       * The description is still the fallback, because a room is not a
-       * directory row and has nothing else to offer.
-       */
-      const row = entry.points.length > 1 ? null : directoryRow(entry.name);
-      const hint = entry.points.length > 1
-        ? `${entry.points.length} locations`
-        : (row ? buildingSub(row) : entry.description);
-      if (hint) {
-        const sub = document.createElement('div');
-        sub.className = 'g-result-sub';
-        sub.textContent = hint;
-        li.append(sub);
-      }
-      li.addEventListener('mousedown', (event) => {
-        // mousedown, not click: blur would close the list first.
-        event.preventDefault();
-        chooseDestination(entry);
-      });
-      return li;
-    }));
-    searchResults.classList.remove('hidden');
-    // The shelf is what the sheet shows INSTEAD of a list, not above one:
-    // both hold the same places in the same order, and a phone showing the
-    // three most likely answers twice, 40px apart, would just be asking which
-    // of the two to trust.
-    placeShortcuts?.classList.add('hidden');
-    // A new list has not been navigated yet, whatever the last one had been.
-    searchResults.classList.remove('is-navigating');
-    searchInput.setAttribute('aria-expanded', 'true');
-    highlight(0);
-  }
-
-  /** The instance of a multi-location entry nearest whatever we can measure from. */
-  function nearestInstance(entry) {
-    if (entry.points.length === 1) return entry.points[0];
-    const from = startPoint?.geometry.coordinates ?? map.getCenter().toArray();
-    return entry.points.reduce((best, candidate) => (
-      distance(point(candidate), point(from)) < distance(point(best), point(from))
-        ? candidate : best
-    ));
-  }
-
-  async function chooseDestination(entry) {
-    // A row with nowhere to go: a class at the Natomas centre, or outdoor PE,
-    // which the sheet draws as four separate fields. Both are real answers and
-    // both are shown; neither can be routed to, so the panel says why instead
-    // of dropping a pin somewhere defensible-looking.
-    if (!entry.points.length) {
-      searchInput.value = entry.name;
-      searchClear.classList.remove('hidden');
-      closeResults();
-      setStatus(entry.spread
-        ? `${entry.name} is ${entry.spread} — no single place to route to.`
-        : `${entry.name} is at ${entry.place}, which is not on this campus.`, true);
-      return;
-    }
-    const coords = nearestInstance(entry);
-    // Remembered here rather than in `setDestination`, which is also how a tap
-    // on the map arrives: this is the one path that means somebody LOOKED
-    // something up, which is the thing "most searched" is a claim about.
-    recordVisit(entry.name);
-    refreshPopularity();
-    searchInput.value = entry.name;
-    searchClear.classList.remove('hidden');
-    closeResults();
-    searchInput.blur();
-    await setDestination(coords, entry.name);
-  }
-
-  searchInput.addEventListener('input', () => {
-    searchClear.classList.toggle('hidden', !searchInput.value);
-    renderResults(searchInput.value ? runSearch(searchInput.value) : popularHits());
+  // The field, its list, the shelf under it and the two endpoint fields in the
+  // route panel: src/search-box.js. What it RANKS is src/search-rank.js.
+  const searchBox = createSearchBox({
+    places: () => campusPlaces,
+    directory: () => campusDirectory,
+    afterExit: (el, empty) => afterExit(el, empty),
+    setDestination: (coords, name) => setDestination(coords, name),
+    directoryRow: (name) => directoryRow(name),
+    buildingSub: (props) => buildingSub(props),
+    setStatus: (sentence, isError) => setStatus(sentence, isError),
+    measureFrom: () => endpoints.start()?.geometry.coordinates ?? map.getCenter().toArray(),
   });
+  const searchInput = searchBox.input;
+  const searchClear = searchBox.clear;
+  const closeResults = () => searchBox.closeResults();
+  const buildSearchIndex = () => searchBox.buildIndex();
+  const refreshPopularity = () => searchBox.refreshPopularity();
+  const wireEndpointField = (options) => searchBox.wireEndpointField(options);
 
-  // -------------------------------------------------------------------------
-  // The two endpoint fields
-  //
-  // Same index, same scoring, same shape of list as the search box above —
-  // deliberately, because "what can I type here" should have one answer
-  // wherever it is asked. What differs is only what a pick MEANS: in the search
-  // box it is always a destination, and here it is whichever end of the route
-  // you are typing into.
-  //
-  // The start also offers "Your location", which is the answer most of the time
-  // and is the one thing in the list that is not a place and cannot be spelt.
-  // It is offered on an empty field rather than only on a matching query, since
-  // an empty field is exactly the state somebody is in when they have not
-  // decided what to type yet.
-  // -------------------------------------------------------------------------
-
-  const HERE = { here: true, name: 'Your location' };
-
-  /** Whatever `runSearch` would say, with Your location in front where it fits. */
-  function endpointSuggestions(query, offerHere) {
-    const hits = runSearch(query);
-    if (!offerHere) return hits;
-    const q = normalise(query);
-    const wantsHere = !q || 'your location here me current'.includes(q) || q.startsWith('you');
-    return wantsHere ? [HERE, ...hits].slice(0, MAX_RESULTS) : hits;
-  }
-
-  /**
-   * Give a field a listbox over the campus index.
-   *
-   * Rendered with the same `.g-results` markup the search box uses so the two
-   * lists cannot drift apart visually, and closed on `blur` through a timeout
-   * rather than immediately — a click on a row IS a blur on the field, and
-   * closing first would remove the row before its own handler ran. `mousedown`
-   * with preventDefault is the other half of that, and is what the search box
-   * already does for the same reason.
-   */
-  function wireEndpointField({ input, list, offerHere, onPick }) {
-    let hits = [];
-    let active = -1;
-
-    const close = () => {
-      list.classList.add('hidden');
-      list.replaceChildren();
-      input.setAttribute('aria-expanded', 'false');
-      hits = [];
-      active = -1;
-    };
-
-    const mark = (index) => {
-      active = index;
-      [...list.children].forEach((li, i) => li.setAttribute('aria-selected', String(i === index)));
-    };
-
-    const render = (found) => {
-      hits = found;
-      if (!found.length) { close(); return; }
-      list.replaceChildren(...found.map((entry, i) => {
-        const li = document.createElement('li');
-        li.setAttribute('role', 'option');
-        const name = document.createElement('div');
-        name.className = 'g-result-name';
-        name.textContent = entry.name;
-        li.append(name);
-        const hint = entry.here ? 'Where your phone says you are'
-          : (entry.points?.length > 1 ? `${entry.points.length} locations` : entry.description);
-        if (hint) {
-          const sub = document.createElement('div');
-          sub.className = 'g-result-sub';
-          sub.textContent = hint;
-          li.append(sub);
-        }
-        li.addEventListener('mousedown', (event) => {
-          event.preventDefault();
-          pick(i);
-        });
-        return li;
-      }));
-      list.classList.remove('hidden');
-      input.setAttribute('aria-expanded', 'true');
-      mark(0);
-    };
-
-    async function pick(index) {
-      const entry = hits[index];
-      if (!entry) return;
-      close();
-      input.blur();
-      if (entry.here) { input.value = 'Your location'; await onPick(null, null, true); return; }
-      // A row with nowhere to go — a class at the Natomas centre, outdoor PE.
-      // The search box says so rather than dropping a pin somewhere
-      // defensible-looking, and so does this.
-      if (!entry.points?.length) {
-        setStatus(entry.spread
-          ? `${entry.name} is ${entry.spread} — no single place to route to.`
-          : `${entry.name} is at ${entry.place}, which is not on this campus.`, true);
-        return;
-      }
-      input.value = entry.name;
-      await onPick(nearestInstance(entry), entry.name, false);
-    }
-
-    input.addEventListener('input', () => render(endpointSuggestions(input.value, offerHere)));
-    input.addEventListener('focus', () => render(endpointSuggestions(input.value, offerHere)));
-    input.addEventListener('blur', () => setTimeout(close, 120));
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') { close(); return; }
-      if (!hits.length) return;
-      if (event.key === 'ArrowDown') { event.preventDefault(); mark((active + 1) % hits.length); }
-      else if (event.key === 'ArrowUp') { event.preventDefault(); mark((active - 1 + hits.length) % hits.length); }
-      else if (event.key === 'Enter') { event.preventDefault(); pick(active < 0 ? 0 : active); }
-    });
-  }
-
-  /**
-   * Draw the walk again after one of its ends was retyped.
-   *
-   * The destination is read back off the map rather than remembered separately,
-   * because `endPoint` is where the route actually goes and a second copy of it
-   * is a second thing that can be wrong.
-   */
-  async function rerouteFromStart() {
-    if (!startPoint) return;
-    if (endPoint) {
-      await rerouteTo(endPoint.geometry.coordinates, endCoordText.value || null);
-    } else if (pendingEnd) {
-      const { coords, name } = pendingEnd;
-      pendingEnd = null;
-      await placeEnd(coords, name);
-    }
-  }
+  const rerouteFromStart = () => endpoints.rerouteFromStart();
 
   wireEndpointField({
     input: startCoordText,
@@ -6494,39 +1708,4 @@ function startApp() {
   });
 
 
-  searchInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') { closeResults(); return; }
-    if (!searchHits.length) return;
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      // A keyboard cursor exists from the first arrow press and not before.
-      // The highlight is drawn off this class on a phone, where there is no
-      // pointer to have moved and a row shaded before anything was pressed
-      // reads as a row that is already chosen. See .g-results.is-navigating.
-      searchResults.classList.add('is-navigating');
-      highlight((activeHit + 1) % searchHits.length);
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      searchResults.classList.add('is-navigating');
-      highlight((activeHit - 1 + searchHits.length) % searchHits.length);
-    } else if (event.key === 'Enter' && activeHit >= 0) {
-      event.preventDefault();
-      chooseDestination(searchHits[activeHit]);
-    }
-  });
-
-  searchInput.addEventListener('focus', () => {
-    renderResults(searchInput.value ? runSearch(searchInput.value) : popularHits());
-  });
-  searchInput.addEventListener('blur', () => setTimeout(closeResults, 0));
-
-  searchClear.addEventListener('click', () => {
-    searchInput.value = '';
-    searchClear.classList.add('hidden');
-    // Back to the empty-field list rather than to nothing. Clearing is a step
-    // towards typing something else, and the list you started from is the most
-    // useful thing to land on.
-    renderResults(popularHits());
-    searchInput.focus();
-  });
 }
