@@ -65,6 +65,9 @@ const text = (s) => s
   .replace(/<[^>]+>/g, '')
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#(\d+);/g, (_, d) => String.fromCharCode(d))
   .replace(/&[a-z]+;/g, ' ')
+  // \u0001 is BREAK, the sentinel three lines up: this collapses whitespace
+  // WITHOUT eating it, which is the whole reason the class is negated.
+  // eslint-disable-next-line no-control-regex
   .replace(/[^\S\u0001]+/g, ' ')
   .trim();
 
@@ -286,7 +289,7 @@ for (const m of rows) {
 const sorted = (set) => [...set].sort();
 const artifact = {
   term: TERM,
-  source: 'the district's class-search endpoint',
+  source: "the district's class-search endpoint",
   note: 'Room -> building is a LIST: 21 of 149 room numbers are used by more than one building.',
   buildings: Object.fromEntries(
     [...buildings.values()]

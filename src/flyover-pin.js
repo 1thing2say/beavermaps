@@ -34,10 +34,6 @@
 import {
   pushPinSvg, pinShadowSvg, SHADOW_BOX, PUSH_PIN, PUSH_PIN_RED,
 } from './push-pin.js';
-// The same scale the flyover's own box is built with. Imported rather than
-// restated, because a shadow slid on one scale across a building framed on
-// another is a picture of two different campuses.
-import { M_PER_DEG_LAT, M_PER_DEG_LON } from './flyover.js';
 
 /**
  * How long the fall takes, in ms, and very nearly how long it is WATCHED for.
@@ -527,7 +523,7 @@ export const pinShadowIcon = () => (shadowIcon ??= {
  */
 export function pinLayers(
   { IconLayer },
-  { roof, drop, clear, px, span, width, height, ms, colour = PUSH_PIN_RED },
+  { roof, drop, clear, px, span, width, ms, colour = PUSH_PIN_RED },
 ) {
   // The compression is the icon's, so the icon is chosen per frame. The ghosts
   // share it: a trail of uncompressed pins behind a compressed one would read

@@ -353,8 +353,12 @@ snapping.
 - **Routing** posts both ends to `/api/route`, where one `PathFinder` over the
   merged graph answers with the path, the distance and the turn-by-turn. The
   geometry feeds a `calculated-route` source (Google's navigation blue,
-  `#4285f4`, over a darker blue casing). A missing path clears the end marker
-  and shows an error.
+  `#4285f4`, over a darker blue casing). Three non-answers, and they are
+  distinguished: **404** means both ends are on the graph and nothing joins
+  them, **422** means an end is further than `REACH_M` from the graph to snap to
+  — the server enforcing the same rule the browser does, since the endpoint is
+  public — and **429** means too many requests from one address. All three clear
+  the end marker and put the server's own sentence on the status line.
 - **Framing.** A finished route is brought into view unless it is already there
   — the same rule the category chips use, and for the same reason: a gratuitous
   `flyTo` throws away wherever the user had panned to. This is also why picking a
@@ -1163,14 +1167,20 @@ rule has to as well.
 beavermaps/
 ├── index.html              # Page shell: search field, sheet, panels, icon links
 ├── server/
-│   └── index.js            # Routing API; also serves the overlay GeoJSON
+│   ├── index.js            # HTTP only: routes, headers, static, error shape
+│   ├── graph.js            # The routing graph and the reach check — testable
+│   ├── limit.js            # How often one caller may ask for a route
+│   └── wire.js             # What goes on the wire, and in which encoding
 ├── src/
 │   ├── main.js             # Map setup, click handling, snapping, routing
+│   ├── campus-bounds.js    # Where the campus is, and how far the camera may go
+│   ├── storage.js          # Reading a preference without betting the app on it
+│   ├── setup-problem.js    # What to say when the app cannot start at all
 │   ├── paths.json          # The walkable network (GeoJSON LineStrings)
 │   ├── approach-paths.json # The streets around campus — routed over, never drawn
 │   ├── campus-clip.js      # Where our map stops and the basemap's takes over
 │   ├── buildings.json      # Footprints, extruded during navigation
-│   ├── landcover.json      # Lawn, trees, paving, parking, track, pool
+│   ├── landcover.json      # Lawn, trees, paving, parking, track, pool (superseded)
 │   ├── amenities.json      # Defibrillators, phones, restrooms, bus stops…
 │   ├── places.json         # my campus's destination directory, positioned
 │   ├── campus-boundary.json# OSM campus polygon, used to mask the basemap
@@ -1186,6 +1196,9 @@ beavermaps/
 │   ├── google-tiles.js     # Map Tiles API sessions, dark styling, attribution
 │   └── input.css           # Tailwind entry stylesheet
 ├── scripts/                # Data extraction — see below
+├── test/                   # node --test, against the committed artifacts
+├── .github/workflows/ci.yml# lint, test, build, boot smoke test
+├── eslint.config.js        # Correctness rules only — no style opinions
 ├── vite.config.js
 ├── package.json
 └── TECHNICAL_DOCS.md       # Detailed explanation of the routing logic
@@ -1207,7 +1220,7 @@ this campus is close to empty. The extraction lives in `scripts/`:
 | `build-amenities.mjs` | `amenities.json` — 84 amenity points in 12 classes |
 | `build-places.mjs` | `places.json` — my campus's 120 destinations, positioned |
 | `build-directory.mjs` | `directory.json` — 30 buildings and what is inside them |
-| `build-landcover.mjs` | `landcover.json` — 593 ground polygons, superseded |
+| `build-landcover.mjs` | `landcover.json` — 593 ground polygons, superseded (not served) |
 | `build-boundary.mjs` | `campus-boundary.json` — the OSM campus polygon |
 | `projection.mjs` | the SVG→WGS84 transform every other script uses |
 | `svg-geometry.mjs` | shared SVG path/transform parsing |
@@ -1250,23 +1263,51 @@ the tap landed, and `build-directory.mjs` reads only committed artifacts, so
 unlike its siblings it runs from a bare clone.
 
 `buildings.json` is still separate: it carries heights, and the 3D extrusion
-during navigation needs them. `landcover.json` is kept and still served, but the
-client no longer draws it.
+during navigation needs them. `landcover.json` is kept as a file — it is the
+smaller seven-class extraction and `build-labels.mjs` still reasons about it —
+but the client no longer draws it and it is no longer an endpoint. It was served
+from `/api/landcover` long after the last fetch of it was removed, costing a
+320 KB read, parse and gzip at every boot to answer a request nobody made.
 
 Their source is gitignored (it is third-party content), so these are **not
 runnable from a bare clone** — but every output they produce is committed. Each
 script's header carries its own derivation, including the measurements that
 ruled out the approaches that did not work.
 
-### Tests
+### Tests and checks
 
 ```bash
 npm test          # node --test, no framework
+npm run lint      # eslint — correctness rules only, no style opinions
+npm run check     # both, which is what CI runs
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint, tests, a production build and a boot
+smoke test on every push. The suite existed and passed for a long time before
+anything ran it automatically; during that window `scripts/build-rooms.mjs`
+acquired an unescaped apostrophe and could not be parsed at all, which
+`node --check` finds in a tenth of a second and nothing was asking.
+
+The lint config is deliberately narrow. It has no opinion about formatting —
+this codebase has a voice and a formatter would flatten it — and every rule in
+it is about the class of mistake that is invisible in review and obvious at
+runtime.
 
 The suite runs against the committed artifacts rather than the generators, so it
 works from a bare clone. It is aimed at the failures that do not announce
 themselves:
+
+- **the router refuses what it cannot answer.** `nearestPoint` has no notion of
+  "too far", so a request from Paris used to come back `200` with a real 7,520 ft
+  walk starting in Sacramento. `REACH_M` was written down and enforced in the
+  browser only, which is to say enforced for our own front-end and nothing else
+  that can reach a public endpoint.
+- **`maxBounds` exists.** Three separate comments argued from "the camera cannot
+  leave CAMPUS_BOUNDS" and nothing set a bound.
+- **a preference that cannot be read does not take the map with it.**
+  `localStorage.getItem` throws rather than returning null where an origin may
+  not have storage, and four of the seven modules that persist something read it
+  unguarded at boot, before anything is drawn.
 
 - **the walkable network is one connected component.** A fragmented graph draws
   identically and fails only when someone asks for a route across the split.

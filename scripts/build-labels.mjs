@@ -61,7 +61,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { projectPdf } from './projection.mjs';
-import { readShapes, pointInRing, applyMat, parseTransform } from './svg-geometry.mjs';
+import { readShapes, pointInRing } from './svg-geometry.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PDF = path.join(root, 'campus-data/wayfind/external/campus-map.pdf');
@@ -337,7 +337,7 @@ for (const block of blocks) {
 // Success Center are real buildings that the sheet simply does not name.
 
 import {
-  metresBetween, poleOfInaccessibility, tidyName, groupByName,
+  metresBetween, poleOfInaccessibility, groupByName,
 } from './building-names.mjs';
 
 /**

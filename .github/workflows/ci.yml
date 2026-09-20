@@ -1,0 +1,101 @@
+# The checks that used to exist and never ran.
+#
+# This repository had 223 passing tests and nothing that ran them on a push. A
+# test suite nobody runs is documentation with a `.test.js` extension — and the
+# scan that added this workflow found a build script that had been syntactically
+# broken for some time, which `node --check` catches in a tenth of a second and
+# which nothing was asking.
+#
+# Three jobs rather than one, because they fail for different reasons and a
+# combined red tells you less than three separate ones.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A second push to the same branch makes the first one's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      # `npm ci` rather than `npm install`: the lockfile is the input, and a
+      # resolution that drifts under CI is a green tick for code nobody ran.
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+
+      # The tokens are inlined at build time, so a build has to have something
+      # in their place or Vite emits `undefined` and the bundle is not the one
+      # that would ship. These are deliberately fake: the question this job
+      # answers is "does it compile", and nothing here talks to Mapbox or Google.
+      # A real token in a workflow file would be a real token in a public repo.
+      - run: npm run build
+        env:
+          VITE_MAPBOX_TOKEN: pk.ci-build-only-not-a-real-token
+          VITE_GOOGLE_MAPS_KEY: ci-build-only-not-a-real-key
+
+      # The server reads ten committed JSON files at boot and imports two
+      # modules out of src/. Listing them individually in the Dockerfile once
+      # meant the image built clean and died on the first missing readFileSync —
+      # so "does it start" is a separate question from "does it compile".
+      - name: the server boots and answers
+        run: |
+          PORT=8099 node server/index.js &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8099/healthz >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:8099/healthz | tee /dev/stderr | grep -q '"ok":true'
+
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    # Advisories are published against dependencies on their own schedule, so
+    # this one going red is news about the world rather than about a commit.
+    # It does not gate anything.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      # Production only: a DoS in a dev-time build tool is not something a
+      # visitor to this map can reach.
+      - run: npm audit --omit=dev --audit-level=moderate

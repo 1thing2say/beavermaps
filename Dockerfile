@@ -38,5 +38,18 @@ COPY server ./server
 # costs less than the next boot crash.
 COPY src ./src
 
+# Drop root.
+#
+# node:20-slim ships an unprivileged `node` user (uid 1000) and does not use it
+# — the default for every official node image is root, so without this line the
+# process answering requests from the public internet is uid 0 inside its
+# container. Nothing here needs it: the server reads dist/ and src/ and writes
+# nothing at all, so the files stay root-owned and mode 644 and `node` reads
+# them fine. Ownership is not handed over deliberately — a runtime that cannot
+# write its own code is one fewer thing to reason about.
+#
+# The port is 8080, well clear of the 1024 that would have needed privilege.
+USER node
+
 EXPOSE 8080
 CMD ["node", "server/index.js"]

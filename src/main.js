@@ -65,6 +65,9 @@ import { buildRoomIndex, lookupRoom } from './rooms.js';
 import { popularity, popularNames, recordVisit } from './popular.js';
 import { FONTS, SATELLITE, palette, styleKey, underPreset, followsClock, toward } from './palette.js';
 
+import { tokenRefusal, showSetupProblem } from './setup-problem.js';
+import { CAMPUS_BOUNDS, ROUTABLE_BOUNDS } from './campus-bounds.js';
+
 import {
   buildAreas,
   highlightFor,
@@ -132,13 +135,6 @@ const BANNER_SWAP_MS = 320;
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
-// Bounding box of the walkable network, [[west, south], [east, north]]. Printed
-// by scripts/build-walk-network.mjs — regenerate paths.json and update this.
-const CAMPUS_BOUNDS = [
-  [-121.350452, 38.644706],
-  [-121.342319, 38.653606],
-];
-
 // Breathing room around the campus when it is framed, in px.
 const FIT_MARGIN = 40;
 
@@ -169,9 +165,30 @@ const CAMPUS_RING = ringOf(campusBoundary);
 // stops meaning "the middle of the campus" the next time the ring is redrawn.
 const CAMPUS_CENTRE = centreOf(CAMPUS_RING);
 
-if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
-  console.warn("Please add your Mapbox Access Token to the .env file as VITE_MAPBOX_TOKEN.");
+const setupProblem = tokenRefusal(accessToken);
+if (setupProblem) {
+  // On the screen, not in the console. See src/setup-problem.js — this is the
+  // one failure with no degraded mode to fall back to, so the sentence has to
+  // go where the map would have been.
+  console.warn(`[beavermaps] ${setupProblem}`);
+  showSetupProblem(setupProblem);
 } else {
+  startApp();
+}
+
+/**
+ * The whole app.
+ *
+ * A NAMED FUNCTION rather than the `else` branch it used to be. The body below
+ * is seven thousand lines, and until this line it was an anonymous block
+ * belonging to a token check — so the file's top-level shape was one `if`, and
+ * every profiler stack, every error and every `this is inside what?` question
+ * about any of it answered "(anonymous)". A name costs nothing and is the first
+ * step of getting this file down to a size somebody can hold in their head.
+ *
+ * Hoisted, which is why it can be called above where it is declared.
+ */
+function startApp() {
   mapboxgl.accessToken = accessToken;
 
   // Set the attribute before the map exists so the first paint is never the
@@ -337,10 +354,12 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // THE TRADE IS REAL AND IS NOT FREE. Google's 2D tiles bill per tile
     // request — see the note on `scale` in src/google-tiles.js — so a smaller
     // cache is more requests. It is a good trade *here* specifically because
-    // the camera cannot leave CAMPUS_BOUNDS: there is no long pan across a
+    // the camera cannot leave ROUTABLE_BOUNDS: there is no long pan across a
     // city to refetch, only one campus at two or three zooms. Raise this first
     // if the tile bill ever looks wrong.
     maxTileCacheSize: 60,
+    // The fence that sentence depends on. See ROUTABLE_BOUNDS.
+    maxBounds: ROUTABLE_BOUNDS,
   });
 
   // Dev-only handle, stripped from the production bundle by the constant fold.
@@ -361,11 +380,6 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   let campusPlaces = null;
   let campusLabels = null;
   let campusDirectory = null;
-  // Which building the outline in the directory layers belongs to. There was a
-  // second variable beside it holding the open card, back when the card was a
-  // Mapbox popup that had to be kept and removed; the card is the contents of
-  // #place-panel now, so the panel's own hidden state is the whole of it.
-  let selectedBuilding = null;
 
   // State variables
   let startMarker = null;
@@ -869,6 +883,19 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   /**
    * Ask the server for a route. The graph and the maneuver derivation both live
    * there now — this file never builds a PathFinder.
+   *
+   * Three shapes come back, because the server distinguishes three answers:
+   *
+   *   the route            it found one
+   *   null                 both ends are on the graph and nothing joins them (404)
+   *   { refused: '…' }     an end is too far from the graph to snap to (422)
+   *
+   * The last one is the server enforcing REACH_M, which this file also enforces
+   * in locateStart — and has to go on enforcing, because the browser can refuse
+   * before spending a round trip. What is new is that the server refuses too, so
+   * the rule holds for a start point that did not come from the GPS. Its
+   * sentence is the one from src/directions.js, written once and said by
+   * whichever side noticed first.
    */
   async function requestRoute(from, to) {
     const response = await fetch('/api/route', {
@@ -877,6 +904,10 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       body: JSON.stringify({ from, to }),
     });
     if (response.status === 404) return null;          // reachable, but no path
+    if (response.status === 422) {
+      const payload = await response.json().catch(() => null);
+      return { refused: payload?.error ?? 'That is too far from the campus paths to walk from.' };
+    }
     if (!response.ok) throw new Error(`route request failed (${response.status})`);
     return response.json();
   }
@@ -3504,7 +3535,11 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   function highlightBuilding(officialName) {
-    selectedBuilding = officialName;
+    // The name used to be kept in a `selectedBuilding` variable alongside a
+    // second one holding the open card, back when the card was a Mapbox popup
+    // that had to be kept and removed. The card is the contents of #place-panel
+    // now, so the panel's own hidden state is the whole of it — and the name
+    // was written here and read nowhere, which is what a linter is for.
     const filter = officialName ? ['==', ['get', 'officialName'], officialName] : NOTHING_SELECTED;
     for (const id of ['campus-directory-fill', 'campus-directory-line']) {
       if (map.getLayer(id)) map.setFilter(id, filter);
@@ -4042,7 +4077,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   }
 
   /** Re-route from the existing start to a newly chosen destination. */
-  async function resetMap0(coords, name) {
+  async function rerouteTo(coords, name) {
     if (endMarker) endMarker.remove();
     endMarker = null;
     endPoint = null;
@@ -6262,8 +6297,36 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     return true;
   }
 
+  /**
+   * Set the start of the route to a coordinate somebody chose.
+   *
+   * THE SAME REACH CHECK locateStart makes, and for the same reason — it was
+   * only ever on the GPS door. A fix that lands too far from the graph was
+   * refused; a press-and-hold that landed in the same place was not, and went
+   * on to produce a route from a vertex nowhere near where the pin is. The
+   * fence in ROUTABLE_BOUNDS keeps the camera over ground the server can route,
+   * but that box is a rectangle and the network inside it is not, so its corners
+   * are still further from a path than anybody should be routed from.
+   *
+   * A no-op for the three callers that pass a named campus place — every one of
+   * those is on the graph by construction, which test/directions.test.js holds
+   * them to. It is the dropped pin this is here for.
+   *
+   * Skipped entirely until the vertices have landed, because "we cannot check
+   * yet" is not the same as "too far" and refusing a press during the cold load
+   * would be the wrong sentence at the one moment it is most confusing.
+   *
+   * @returns {boolean} whether there is now a start point
+   */
   function placeStart(coords, label) {
-    if (!routingEnabled) return;
+    if (!routingEnabled) return false;
+
+    if (networkPoints) {
+      const node = nearestPoint(point(coords), networkPoints).geometry.coordinates;
+      const problem = reachProblem(distance(point(coords), point(node)) * 1000);
+      if (problem) { setStatus(problem, true); return false; }
+    }
+
     showRoutePanel();
     startPoint = point(coords);
     // Somebody chose this, so Directions on the next card routes FROM it rather
@@ -6278,6 +6341,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       .setLngLat(coords)
       .addTo(map);
     startCoordText.value = label ?? coordLabel(coords);
+    return true;
   }
 
   async function placeEnd(coords, label) {
@@ -6298,29 +6362,52 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
     // Guard against a stale response landing after the user has moved on.
     const seq = ++requestSeq;
     let result;
+    let failure = null;
     // The only wait in this app the user asked for directly. "Calculating
     // route…" has been the whole of the feedback here, and a sentence that does
     // not change cannot distinguish a server thinking from a server gone.
+    //
+    // setBusy is ref-counted, so this pair balances whatever else is in flight:
+    // two overlapping requests take the spinner to two and the first to finish
+    // leaves it up for the second. That is why the `finally` is unconditional
+    // while everything below it is not.
     setBusy(true);
     try {
       result = await requestRoute(startPoint.geometry.coordinates, coords);
     } catch (error) {
       console.error(error);
-      setStatus('Routing server unreachable — is `npm run dev` still running?', true);
-      endPoint = null;
-      endMarker.remove();
-      endMarker = null;
-      return;
+      failure = 'Routing server unreachable — is `npm run dev` still running?';
     } finally {
       setBusy(false);
     }
+
+    // EVERY OUTCOME IS CHECKED AGAINST THE SEQUENCE, the failures included.
+    //
+    // This check used to sit below the catch, so it guarded the success path
+    // and nothing else — and the failure path is the one that tears state down.
+    // A slow request that failed after a later one had already succeeded would
+    // null `endPoint`, remove the marker belonging to the route now on screen,
+    // and overwrite its summary with "Routing server unreachable". Worse, the
+    // teardown ran `endMarker.remove()` unguarded: press Clear while a request
+    // is in flight and resetMap() sets endMarker to null, so the failure that
+    // arrived afterwards threw a TypeError out of an async function nobody was
+    // awaiting.
+    //
+    // resetMap() bumps requestSeq for exactly this reason. It was only ever
+    // half-read.
     if (seq !== requestSeq) return;
 
-    if (!result) {
-      setStatus('No path found between those two points.', true);
+    // One teardown for the three ways this can come to nothing — a dead server,
+    // an unroutable end, and two points the graph does not join. They differ
+    // only in the sentence, and they used to differ in whether setRouteSummary
+    // was cleared as well, which was not a decision anybody made.
+    const refusal = failure ?? result?.refused
+      ?? (result ? null : 'No path found between those two points.');
+    if (refusal) {
+      setStatus(refusal, true);
       setRouteSummary(null);
       endPoint = null;
-      endMarker.remove();
+      endMarker?.remove();
       endMarker = null;
       return;
     }
@@ -6437,7 +6524,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
       return;
     }
 
-    if (endPoint) await resetMap0(coords, name);
+    if (endPoint) await rerouteTo(coords, name);
     else await placeEnd(coords, name);
   }
 
@@ -7157,7 +7244,7 @@ if (!accessToken || accessToken === 'YOUR_MAPBOX_TOKEN_HERE') {
   async function rerouteFromStart() {
     if (!startPoint) return;
     if (endPoint) {
-      await resetMap0(endPoint.geometry.coordinates, endCoordText.value || null);
+      await rerouteTo(endPoint.geometry.coordinates, endCoordText.value || null);
     } else if (pendingEnd) {
       const { coords, name } = pendingEnd;
       pendingEnd = null;

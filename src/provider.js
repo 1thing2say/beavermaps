@@ -24,6 +24,7 @@
 // would be a switch to nothing, so `revert` is still worth having and is still
 // only reachable from Google's side.
 
+import { readText, writeText } from './storage.js';
 import { spin } from './spinner.js';
 
 const STORAGE_KEY = 'mapper-provider';
@@ -54,7 +55,7 @@ const LABELS = { mapbox: 'Mapbox', google: 'Google' };
  * same failed session request on every page load.
  */
 export function preferredProvider() {
-  return localStorage.getItem(STORAGE_KEY) === 'mapbox' ? 'mapbox' : 'google';
+  return readText(STORAGE_KEY) === 'mapbox' ? 'mapbox' : 'google';
 }
 
 /**
@@ -97,7 +98,7 @@ export function createProviderToggle({ surfaces, onChange }) {
   function apply(next, { persist }) {
     provider = next;
     paint();
-    if (persist) localStorage.setItem(STORAGE_KEY, provider);
+    if (persist) writeText(STORAGE_KEY, provider);
     onChange(provider);
   }
 
@@ -144,7 +145,7 @@ export function createProviderToggle({ surfaces, onChange }) {
     /** Drop back to Mapbox without re-notifying the caller that asked us to. */
     revert() {
       provider = 'mapbox';
-      localStorage.setItem(STORAGE_KEY, provider);
+      writeText(STORAGE_KEY, provider);
       paint();
     },
   };

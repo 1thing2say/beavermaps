@@ -1,3 +1,5 @@
+import { readText, writeText } from './storage.js';
+
 const STORAGE_KEY = 'mapper-basemap';
 
 const ICON_ATTRS =
@@ -19,7 +21,7 @@ const ICONS = {
  * combinations where only two are meaningful.
  */
 export function preferredBasemap() {
-  const saved = localStorage.getItem(STORAGE_KEY);
+  const saved = readText(STORAGE_KEY);
   return saved === 'satellite' ? 'satellite' : 'map';
 }
 
@@ -46,7 +48,7 @@ export function createBasemapToggle({ surfaces, onChange }) {
       button.setAttribute('aria-label', `Switch to ${target} basemap`);
     }
 
-    if (persist) localStorage.setItem(STORAGE_KEY, basemap);
+    if (persist) writeText(STORAGE_KEY, basemap);
     onChange(basemap);
   }
 

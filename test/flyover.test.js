@@ -21,7 +21,7 @@ import {
   M_PER_DEG_LAT, M_PER_DEG_LON, MIN_SPAN_M, roofOf,
 } from '../src/flyover.js';
 import {
-  fallen, squashed, DROP_MS, SETTLED_MS, HOLD_MS, pinHeight, dropPixels, pinIcon, pinShadowIcon,
+  fallen, squashed, DROP_MS, SETTLED_MS, pinHeight, dropPixels, pinIcon, pinShadowIcon,
   warmPinIcons,
 } from '../src/flyover-pin.js';
 import {
