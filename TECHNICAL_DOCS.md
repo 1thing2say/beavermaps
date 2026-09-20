@@ -27,6 +27,12 @@ coordinates.
 | Turning a path into instructions | `src/maneuvers.js` | server |
 | The 3D flyover | deck.gl + Google 3D Tiles | browser, lazily |
 
+The browser half is a set of modules that each take their collaborators through
+a factory, wired together by `src/main.js`. The ones a route passes through are
+`src/api.js` (the request), `src/route-state.js` (the answer), `src/endpoints.js`
+(the two ends and their pins), `src/route-layers.js` (the ribbon) and
+`src/navigation.js` (walking it).
+
 ---
 
 ## 1. Why the graph is on the server

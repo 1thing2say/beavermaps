@@ -47,7 +47,7 @@ test('both refusals end in something to do', () => {
 });
 
 test('the host guard names the host the errors actually come from', () => {
-  // main.js compares `new URL(error.url).host` against this, so a scheme or a
+  // src/ground.js compares `new URL(error.url).host` against this, so a scheme or a
   // trailing slash here would silently match nothing and restore the black
   // rectangle. Measured value from a live 403.
   assert.equal(MAPBOX_HOST, 'api.mapbox.com');

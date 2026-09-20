@@ -40,7 +40,7 @@ test('buildings have plausible footprints and heights', () => {
     assert.ok(area > 50, `footprint covers only ${area.toFixed(0)} m2`);
     // Zero is a measurement here, not a missing one: the pool is a footprint
     // with nothing above the ground, so build-buildings.mjs writes 0 and
-    // src/main.js filters the extrusion layer to `height > 0` rather than
+    // src/buildings-lighting.js filters the extrusion layer to `height > 0` rather than
     // standing a slab of building colour up over the water. Everything else
     // carries a placeholder mass.
     assert.ok(f.properties.height >= 0 && f.properties.height < 60,

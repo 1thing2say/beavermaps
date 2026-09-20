@@ -1172,14 +1172,39 @@ beavermaps/
 │   ├── limit.js            # How often one caller may ask for a route
 │   └── wire.js             # What goes on the wire, and in which encoding
 ├── src/
-│   ├── main.js             # Map setup, layer building, chrome, event wiring
+│   ├── main.js             # Wiring: builds the modules below and connects them
+│   │
+│   │   # What is on the map
+│   ├── campus-sheet.js     # The printed campus map, drawn element for element
+│   ├── buildings-lighting.js # Footprints standing up, and the light on them
+│   ├── marker-layers.js    # Amenity pins, lamps, and a category's own pins
+│   ├── label-layers.js     # The printed names, and the layer buildings are tapped on
+│   ├── route-layers.js     # The ribbon, the linework, and what goes under what
+│   ├── sun-lights.js       # The sun over the campus, as Mapbox states a light
+│   ├── lit-palette.js      # The palette moved to the time of day, and its timer
+│   ├── ground.js           # Who draws the ground, and what to say when they refuse
+│   │
+│   │   # What you can do to it
+│   ├── endpoints.js        # The two ends of a walk, and every way to choose one
 │   ├── route-state.js      # The walk on the screen — one way in, one way out
 │   ├── navigation.js       # Turn-by-turn, the sign choreography, the simulator
-│   ├── long-press.js       # Press and hold: how long, how far, what ends one
+│   ├── legend.js           # The legend, the chips, and what each one lights up
+│   ├── search-box.js       # The field, its list, and the two endpoint fields
 │   ├── search-rank.js      # What typing into the box finds, and in what order
-│   ├── sun-lights.js       # The sun over the campus, as Mapbox states a light
-│   ├── viewport.js         # What the chrome is standing on, and what can be seen
+│   ├── pin-state.js        # Which pin is lifted, which is under the pointer
+│   ├── pin-choreography.js # Clearing the map for an answer, and playing it in
+│   ├── long-press.js       # Press and hold: how long, how far, what ends one
+│   ├── cards.js            # The panel, and everything that goes in it
+│   ├── camera.js           # Where the camera goes and what may cover it
+│   ├── viewport.js         # What the chrome stands on, and what can be seen
+│   ├── panels.js           # Which panel is open, and what that does to the rest
+│   ├── shell.js            # The sheet, the stack, and the phone's layout observers
+│   ├── locate.js           # The locate control and the two-press unlock
 │   ├── status-line.js      # The one line the app speaks in, and its spinner
+│   ├── api.js              # The four questions this app asks its own server
+│   ├── debug-apply.js      # What each switch in the back room does to the app
+│   │
+│   │   # Data and the rest
 │   ├── campus-bounds.js    # Where the campus is, and how far the camera may go
 │   ├── storage.js          # Reading a preference without betting the app on it
 │   ├── setup-problem.js    # What to say when the app cannot start at all
@@ -1303,12 +1328,12 @@ runtime. It is also the safety net that makes moving code out of `main.js`
 tractable: `no-undef` names every dependency an extraction forgot to carry, and
 `no-unused-vars` names every import the code left behind.
 
-`src/main.js` is still the largest file here, and the modules beside it are the
-parts that have been taken out of it so far — the ones that own state, run on a
-clock or decide something. What is left in `main.js` is mostly Mapbox layer and
-paint specification, DOM construction and event wiring: bulk rather than
-behaviour, and the part where moving a layer id silently produces a blank map
-rather than a failing test.
+`src/main.js` was 7,313 lines and is now about 1,700. What is left in it is
+wiring: it builds each module above, hands each one the collaborators it asked
+for, registers the event handlers and runs the boot sequence. Every module takes
+its dependencies through its factory, so none of them reaches into another's
+state and each can be handed fakes by a test — which is how the modules that had
+never been tested got tests.
 
 The suite runs against the committed artifacts rather than the generators, so it
 works from a bare clone. It is aimed at the failures that do not announce

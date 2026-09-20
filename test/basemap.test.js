@@ -18,7 +18,7 @@ const features = basemap.features;
 
 /**
  * Every class scripts/build-basemap.mjs is allowed to emit. A kind arriving
- * that is not listed here means the LAYERS table changed, and since src/main.js
+ * that is not listed here means the LAYERS table changed, and since src/campus-sheet.js
  * colours by kind, an unlisted one silently renders in my campus's print palette
  * instead of the theme's.
  */
@@ -44,7 +44,7 @@ test('every feature carries a known kind and a geometry', () => {
 });
 
 // Draw order is the whole reason `i` exists. A flat vector map is a painter's
-// algorithm — striping over tarmac, trees over lawn — and src/main.js rebuilds
+// algorithm — striping over tarmac, trees over lawn — and src/campus-sheet.js rebuilds
 // it with fill-sort-key. If the file stops being sorted, the sort key still
 // works, but anything reading the file in order gets the campus inside out.
 test('features are in strictly increasing draw order', () => {
@@ -112,7 +112,7 @@ test('holes lie inside their exterior', () => {
 });
 
 /**
- * The kinds src/main.js fills from the palette whatever the sheet says, listed
+ * The kinds src/campus-sheet.js fills from the palette whatever the sheet says, listed
  * in the campus-sheet-fill filter there.
  *
  * They are the shapes my campus drew as something other than a surface: nineteen

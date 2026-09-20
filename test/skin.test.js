@@ -30,7 +30,7 @@ const THEMES = ['light', 'dark'];
 /**
  * The entries of `land` that are paint on a surface rather than the surface.
  *
- * One so far: a bay divider is 0.99 m of white line on tarmac, and src/main.js
+ * One so far: a bay divider is 0.99 m of white line on tarmac, and src/campus-sheet.js
  * draws it as a line — `campus-rake`, over the car park rather than instead of
  * it. It lives in `land` only because sheetPaint looks colours up by the sheet's
  * `kind`, which does not distinguish the two.
