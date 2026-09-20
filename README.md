@@ -1172,7 +1172,14 @@ beavermaps/
 │   ├── limit.js            # How often one caller may ask for a route
 │   └── wire.js             # What goes on the wire, and in which encoding
 ├── src/
-│   ├── main.js             # Map setup, click handling, snapping, routing
+│   ├── main.js             # Map setup, layer building, chrome, event wiring
+│   ├── route-state.js      # The walk on the screen — one way in, one way out
+│   ├── navigation.js       # Turn-by-turn, the sign choreography, the simulator
+│   ├── long-press.js       # Press and hold: how long, how far, what ends one
+│   ├── search-rank.js      # What typing into the box finds, and in what order
+│   ├── sun-lights.js       # The sun over the campus, as Mapbox states a light
+│   ├── viewport.js         # What the chrome is standing on, and what can be seen
+│   ├── status-line.js      # The one line the app speaks in, and its spinner
 │   ├── campus-bounds.js    # Where the campus is, and how far the camera may go
 │   ├── storage.js          # Reading a preference without betting the app on it
 │   ├── setup-problem.js    # What to say when the app cannot start at all
@@ -1197,6 +1204,7 @@ beavermaps/
 │   └── input.css           # Tailwind entry stylesheet
 ├── scripts/                # Data extraction — see below
 ├── test/                   # node --test, against the committed artifacts
+│   └── fake-dom.js         # Enough of a DOM to run the parts that touch one
 ├── .github/workflows/ci.yml# lint, test, build, boot smoke test
 ├── eslint.config.js        # Correctness rules only — no style opinions
 ├── vite.config.js
@@ -1291,7 +1299,16 @@ acquired an unescaped apostrophe and could not be parsed at all, which
 The lint config is deliberately narrow. It has no opinion about formatting —
 this codebase has a voice and a formatter would flatten it — and every rule in
 it is about the class of mistake that is invisible in review and obvious at
-runtime.
+runtime. It is also the safety net that makes moving code out of `main.js`
+tractable: `no-undef` names every dependency an extraction forgot to carry, and
+`no-unused-vars` names every import the code left behind.
+
+`src/main.js` is still the largest file here, and the modules beside it are the
+parts that have been taken out of it so far — the ones that own state, run on a
+clock or decide something. What is left in `main.js` is mostly Mapbox layer and
+paint specification, DOM construction and event wiring: bulk rather than
+behaviour, and the part where moving a layer id silently produces a blank map
+rather than a failing test.
 
 The suite runs against the committed artifacts rather than the generators, so it
 works from a bare clone. It is aimed at the failures that do not announce
