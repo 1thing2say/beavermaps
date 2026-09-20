@@ -63,7 +63,9 @@ const BUILDING_FILL = '#fff';
 // building on this campus that could not be tapped, carded or flown over.
 // Exactly one shape in the file carries this fill.
 const POOL_FILL = '#37afcb';
-const BUILDING_STROKE = '#231f20'; // every real footprint is outlined in this
+// Not filtered on — recorded because it is the other half of the convention
+// DECOR_STROKE is read against, and the next person to touch this needs both.
+const _BUILDING_STROKE = '#231f20'; // every real footprint is outlined in this
 const DECOR_STROKE = '#a6a6a6';    // the three street-label plates down the west edge
 const KEEP_ALWAYS_M2 = 400; // above this, every #fff shape was a building
 const KEEP_MAYBE_M2 = 60;   // below this, everything was a glyph or a stall stripe

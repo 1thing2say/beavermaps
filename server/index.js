@@ -2,16 +2,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import express from 'express';
-import pathFinderModule from 'geojson-path-finder';
-import { point, featureCollection } from '@turf/helpers';
-import { nearestPoint } from '@turf/nearest-point';
-import { buildManeuvers, FEET_PER_KM } from '../src/maneuvers.js';
+import { createGraph } from './graph.js';
+import { createRateLimit } from './limit.js';
 import { wireForm, sendWire, compressedStatic } from './wire.js';
-
-// geojson-path-finder ships CommonJS with no "exports" map, so under bare Node
-// the default import is the module namespace rather than the class itself.
-// Vite's bundler papers over this; node does not.
-const PathFinder = pathFinderModule.default ?? pathFinderModule;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -19,12 +12,17 @@ const distDir = path.join(root, 'dist');
 
 const PORT = process.env.PORT || 8080;
 
+const readJson = (name) => JSON.parse(readFileSync(path.join(root, name), 'utf8'));
+
 // ---------------------------------------------------------------------------
 // Boot-time graph construction. This is the entire reason routing lives on a
 // server: the O(E) topology build is paid once at startup instead of on every
 // visitor's phone.
+//
+// The graph itself is server/graph.js. Nothing but file reading and HTTP is
+// left in here, which is what makes the router testable — see test/router.test.js.
 // ---------------------------------------------------------------------------
-const network = JSON.parse(readFileSync(path.join(root, 'src/paths.json'), 'utf8'));
+const network = readJson('src/paths.json');
 
 /**
  * The streets around the campus, so a walk can start outside it.
@@ -38,16 +36,18 @@ const network = JSON.parse(readFileSync(path.join(root, 'src/paths.json'), 'utf8
  * Unioned rather than merged into paths.json on purpose: that file is my campus's
  * printed linework and one script owns it. This one is OpenStreetMap's, owned by
  * scripts/build-approach-network.mjs, and the join between them is fifteen
- * connectors that script prints on every build. geojson-path-finder builds its
- * topology from coordinates rather than from feature identity, so concatenating
- * the two collections IS the merge — the gate connectors end on my campus's vertices
- * at the same seven decimals those vertices are written at, and weld there.
+ * connectors that script prints on every build.
  */
-const approach = JSON.parse(readFileSync(path.join(root, 'src/approach-paths.json'), 'utf8'));
-const graph = {
-  type: 'FeatureCollection',
-  features: [...network.features, ...approach.features],
-};
+const approach = readJson('src/approach-paths.json');
+
+const buildStart = Date.now();
+const graph = createGraph({ network, approach });
+
+console.log(
+  `[beavermaps] graph ready in ${Date.now() - buildStart}ms ` +
+  `(${network.features.length} campus + ${approach.features.length} approach segments, ` +
+  `${graph.vertices.length} vertices)`
+);
 
 /**
  * Everything the client draws but never routes over, extracted from my campus's own
@@ -56,47 +56,21 @@ const graph = {
  * and editing the data does not mean rebuilding the front-end.
  *
  * `basemap` is the whole printed sheet translated element for element — it is
- * what the client draws. `landcover` is the earlier partial extraction it
- * replaces, still served because it is a smaller file that carries the same
- * seven ground classes.
+ * what the client draws.
+ *
+ * `landcover` USED TO BE HERE and is not any more. It was the earlier partial
+ * extraction the sheet replaced, kept on the list after nothing fetched it any
+ * more — 320 KB read, parsed, gzipped and held resident at every boot to answer
+ * a request that was never made. src/landcover.json and its generator stay; the
+ * file is still the smaller seven-class extraction and scripts/build-labels.mjs
+ * still reasons about it. It is just not an endpoint.
  *
  * Read once at boot, like the network — so like the network, changing a file
  * needs a restart.
  */
+const OVERLAY_NAMES = ['buildings', 'basemap', 'amenities', 'places', 'labels', 'directory'];
 const OVERLAYS = Object.fromEntries(
-  ['buildings', 'basemap', 'landcover', 'amenities', 'places', 'labels', 'directory']
-    .map((name) => [
-      name,
-      JSON.parse(readFileSync(path.join(root, `src/${name}.json`), 'utf8')),
-    ]),
-);
-
-const buildStart = Date.now();
-// The default vertex-snapping precision is 1e-5 degrees, and the closest pair of
-// distinct campus nodes is 1.24e-5 apart — a 24% margin. Tightening it to 1e-7
-// (~1cm, matching the precision paths.json is written at) keeps tight junctions
-// like stair landings from being welded into a single vertex.
-const pathFinder = new PathFinder(graph, { precision: 1e-7 });
-
-// Every unique vertex, so incoming coordinates can be snapped onto the graph.
-// findPath only accepts points that are actually nodes in the network.
-const seen = new Set();
-const vertices = [];
-for (const feature of graph.features) {
-  for (const coord of feature.geometry.coordinates) {
-    const key = `${coord[0]},${coord[1]}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      vertices.push(coord);
-    }
-  }
-}
-const networkPoints = featureCollection(vertices.map((v) => point(v)));
-
-console.log(
-  `[beavermaps] graph ready in ${Date.now() - buildStart}ms ` +
-  `(${network.features.length} campus + ${approach.features.length} approach segments, ` +
-  `${vertices.length} vertices)`
+  OVERLAY_NAMES.map((name) => [name, readJson(`src/${name}.json`)]),
 );
 
 // ---------------------------------------------------------------------------
@@ -108,9 +82,6 @@ console.log(
 // 170. That was the single biggest cost in a cold load — measured in a
 // throttled browser against these very files, the overlays took 1,838 ms at
 // 8 Mbps before and 250 ms after.
-//
-// (The boot line below counts nine, not eight: /api/landcover is the older
-// partial extraction the sheet replaced, still served and no longer fetched.)
 //
 // COMPRESSED ONCE, AT BOOT, rather than per request. Every one of these is
 // already read once and held — see OVERLAYS — so they are constants, and a
@@ -128,7 +99,7 @@ console.log(
 const wireStart = Date.now();
 const WIRE = {
   network: wireForm(network),
-  vertices: wireForm({ vertices }),
+  vertices: wireForm({ vertices: graph.vertices }),
   ...Object.fromEntries(Object.entries(OVERLAYS).map(([name, data]) => [name, wireForm(data)])),
 };
 console.log(
@@ -141,7 +112,43 @@ console.log(
 // HTTP
 // ---------------------------------------------------------------------------
 const app = express();
-app.use(express.json());
+
+// Nothing here is served faster for having announced which framework served it.
+app.disable('x-powered-by');
+
+/**
+ * Behind Fly's edge, so the client address arrives in X-Forwarded-For.
+ *
+ * ONE HOP, not `true`. `trust proxy: true` tells Express to believe the
+ * left-most entry of a header the client itself can write, which turns the rate
+ * limiter below into a header field anybody can rotate. One hop means "trust the
+ * proxy immediately in front of me and nothing further out", which is exactly
+ * the deployment in fly.toml. Run this without a proxy and req.ip is the socket
+ * address, which is also correct.
+ */
+app.set('trust proxy', 1);
+
+/**
+ * The headers a static site and a JSON API both want, and neither had.
+ *
+ * `nosniff` is the load-bearing one: without it a browser is free to decide for
+ * itself that a response is HTML whatever the Content-Type said, and every
+ * payload here is attacker-influenced in the trivial sense that a place name
+ * comes out of a data file. The frame and referrer lines are cheap and there is
+ * no case where this map wants to be in somebody else's iframe or to name the
+ * page a visitor came from to a third party.
+ */
+app.use((_req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+// A route request is two coordinates. The default 100 KB is three orders of
+// magnitude more room than that, and the parse is the one piece of work here
+// that happens before any of our own code can decline it.
+app.use(express.json({ limit: '4kb' }));
 
 function parseCoord(value) {
   const pair = Array.isArray(value) ? value : String(value ?? '').split(',');
@@ -153,7 +160,17 @@ function parseCoord(value) {
   return [lon, lat];
 }
 
+const takeRoute = createRateLimit();
+
 function route(req, res) {
+  const quota = takeRoute(req.ip ?? 'unknown');
+  res.set('RateLimit-Limit', String(quota.limit));
+  res.set('RateLimit-Remaining', String(quota.remaining));
+  if (!quota.allowed) {
+    res.set('Retry-After', String(quota.retryAfterSeconds));
+    return res.status(429).json({ error: 'too many route requests — try again shortly' });
+  }
+
   const source = req.method === 'POST' ? req.body : req.query;
   const from = parseCoord(source?.from);
   const to = parseCoord(source?.to);
@@ -164,20 +181,23 @@ function route(req, res) {
     });
   }
 
-  const start = nearestPoint(point(from), networkPoints);
-  const end = nearestPoint(point(to), networkPoints);
+  const result = graph.route(from, to);
 
-  const result = pathFinder.findPath(start, end);
-  if (!result) return res.status(404).json({ error: 'no path found on the network' });
+  // 422 rather than 404, and the two are not interchangeable. A 404 means the
+  // graph was asked a sensible question and has no answer — both ends are on it
+  // and nothing joins them. A 422 means the question itself was not answerable:
+  // the coordinate is nowhere near anything this server knows how to walk on.
+  // The client tells them apart to decide what to say, so the wire has to.
+  if (!result.ok) {
+    const status = result.reason === 'unreachable' ? 422 : 404;
+    return res.status(status).json({ error: result.error, reason: result.reason });
+  }
 
-  res.json({
-    geometry: { type: 'LineString', coordinates: result.path },
-    distanceFeet: Math.round(result.weight * FEET_PER_KM),
-    maneuvers: buildManeuvers(result.path),
-    snapped: {
-      from: start.geometry.coordinates,
-      to: end.geometry.coordinates,
-    },
+  return res.json({
+    geometry: result.geometry,
+    distanceFeet: result.distanceFeet,
+    maneuvers: result.maneuvers,
+    snapped: result.snapped,
   });
 }
 
@@ -196,10 +216,7 @@ app.get('/api/network', (req, res) => sendWire(req, res, WIRE.network));
  *
  * The client snaps a click to the nearest one so the marker lands on the graph
  * the instant you tap, rather than waiting a round trip to find out where the
- * route will really begin. Before the approach network existed it could do that
- * from /api/network, because the drawn network and the routed one were the same
- * thing; now they are not, and snapping to the drawn one would drag a start
- * point on the pavement outside up to 800 m onto the campus.
+ * route will really begin.
  *
  * Pairs rather than a FeatureCollection because this is the one payload where
  * the framing costs more than the data: `{"type":"Feature","properties":{},…}`
@@ -207,11 +224,25 @@ app.get('/api/network', (req, res) => sendWire(req, res, WIRE.network));
  */
 app.get('/api/vertices', (req, res) => sendWire(req, res, WIRE.vertices));
 
-for (const name of Object.keys(OVERLAYS)) {
+for (const name of OVERLAY_NAMES) {
   app.get(`/api/${name}`, (req, res) => sendWire(req, res, WIRE[name]));
 }
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, vertices: vertices.length }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, vertices: graph.vertices.length }));
+
+/**
+ * An unknown /api path is a 404, and says so in the language the caller asked in.
+ *
+ * BEFORE the SPA fallback, which is the whole point. Without this, every
+ * misspelled endpoint fell through to `index.html` and came back 200 with 59 KB
+ * of markup — so `fetchOverlay('buidlings')` passed its `response.ok` check and
+ * then died inside `response.json()` with a parse error naming a position in a
+ * document the caller never asked for. A 404 is four lines and turns that into
+ * the sentence it always was.
+ */
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `no such endpoint: ${req.method} /api${req.path}` });
+});
 
 // Serve the built front-end when it exists. In dev the Vite server handles
 // this and proxies /api back here instead.
@@ -226,10 +257,43 @@ if (existsSync(distDir)) {
   app.use(express.static(distDir));
   // Fallback as middleware rather than app.get('*') — Express 5 no longer
   // accepts a bare wildcard path.
-  app.use((_req, res) => res.sendFile(path.join(distDir, 'index.html')));
+  //
+  // GET AND HEAD ONLY. A single-page app serves its shell in place of a path it
+  // does not recognise because the router in the browser will recognise it; that
+  // argument is about navigation and navigation is a GET. Answering `DELETE
+  // /anything` with 200 and the whole app said this server has a handler for
+  // every verb at every path, which is both untrue and the sort of untrue that
+  // makes a scanner's report longer than it needs to be.
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    return res.sendFile(path.join(distDir, 'index.html'));
+  });
+  app.use((_req, res) => res.status(405).json({ error: 'method not allowed' }));
 } else {
   console.log('[beavermaps] no dist/ found — API only. Run `npm run build` to serve the app.');
 }
+
+/**
+ * Errors, as JSON.
+ *
+ * Express's default handler writes an HTML error page, which is the wrong
+ * content type for every route above and — outside NODE_ENV=production — has
+ * the stack trace and the absolute paths of this filesystem in it. The
+ * Dockerfile does set NODE_ENV, so the leak was a development one; the wrong
+ * content type was everywhere. A malformed JSON body is the way to reach this
+ * in practice, and `err.status` is already 400 by the time body-parser is done
+ * with it.
+ *
+ * Four parameters, because that arity is how Express recognises an error
+ * handler. `next` is unused and cannot be dropped.
+ */
+app.use((err, _req, res, _next) => {
+  const status = Number.isInteger(err?.status) ? err.status : 500;
+  if (status >= 500) console.error(err);
+  res.status(status).json({
+    error: status >= 500 ? 'internal error' : (err.message ?? 'bad request'),
+  });
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[beavermaps] listening on http://0.0.0.0:${PORT}`);

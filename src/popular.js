@@ -31,6 +31,8 @@
 // quietly reorders itself past what you typed stops being search. It settles
 // ties, and ties are all it is asked to settle.
 
+import { readJson, writeJson, removeKey } from './storage.js';
+
 const STORAGE_KEY = 'mapper-popular';
 
 /**
@@ -92,21 +94,12 @@ function isRow(row) {
  * their map.
  */
 function load() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
-    return Array.isArray(saved) ? saved.filter(isRow) : [];
-  } catch {
-    return [];
-  }
+  const saved = readJson(STORAGE_KEY);
+  return Array.isArray(saved) ? saved.filter(isRow) : [];
 }
 
 function save(rows) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-  } catch {
-    // Private browsing, or a full quota. Suggestion order is not worth a throw
-    // in the middle of opening a place card.
-  }
+  writeJson(STORAGE_KEY, rows);
 }
 
 /** A stored weight, brought forward to now. */
@@ -148,9 +141,7 @@ export function visitWeights(now = Date.now()) {
 
 /** For the debug menu, and for anybody who wants their history back. */
 export function forgetVisits() {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch { /* nothing to do about it and nothing depends on it */ }
+  removeKey(STORAGE_KEY);
 }
 
 /**

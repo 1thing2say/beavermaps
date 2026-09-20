@@ -11,6 +11,8 @@
 // picked Auto on a dark machine would silently pin them the first time they
 // opened the app at night.
 
+import { readText, writeText } from './storage.js';
+
 const STORAGE_KEY = 'mapper-theme';
 const MODES = ['light', 'dark', 'auto'];
 
@@ -18,7 +20,7 @@ const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
 /** What the user chose: 'light', 'dark' or 'auto'. */
 export function preferredThemeMode() {
-  const saved = localStorage.getItem(STORAGE_KEY);
+  const saved = readText(STORAGE_KEY);
   return MODES.includes(saved) ? saved : 'auto';
 }
 
@@ -64,7 +66,7 @@ export function createThemeControl({ groups, onChange }) {
     for (const button of buttons) {
       button.setAttribute('aria-checked', String(button.dataset.themeMode === mode));
     }
-    if (persist) localStorage.setItem(STORAGE_KEY, mode);
+    if (persist) writeText(STORAGE_KEY, mode);
     onChange(theme);
   }
 

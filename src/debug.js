@@ -32,6 +32,8 @@
 // having to remember which switch they flipped. A debug mode you can get
 // stranded inside is a bug with a nice name.
 
+import { readJson, writeJson } from './storage.js';
+
 const STORAGE_KEY = 'mapper-debug';
 
 /**
@@ -57,7 +59,7 @@ const CLOSED = {
  */
 function stored() {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
+    const saved = readJson(STORAGE_KEY);
     if (!saved || typeof saved !== 'object') return { ...CLOSED };
     const state = { open: saved.open === true };
     for (const flag of DEBUG_FLAGS) state[flag] = saved[flag] === true;
@@ -114,7 +116,7 @@ export function createDebugMenu({ panel, close, switches, onChange }) {
       // control that still shows its position is the honest way to say so.
       input.disabled = !state.open;
     }
-    if (persist) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (persist) writeJson(STORAGE_KEY, state);
     // A copy, not the object. The caller reads flags out of this on every
     // change; handing it the live one would let a stray write become state that
     // was never stored.

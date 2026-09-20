@@ -42,6 +42,8 @@
 // at Dusk cannot follow you out of the back room. See the rule at the top of
 // debug.js — this file is the reason that rule needed writing down twice.
 
+import { readJson, writeJson } from './storage.js';
+
 const STORAGE_KEY = 'mapper-lighting';
 
 /** Standard's `lightPreset`, plus the one that means "whatever the theme says". */
@@ -98,7 +100,7 @@ function num(value, fallback) {
  */
 function stored(defaults) {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
+    const saved = readJson(STORAGE_KEY);
     if (!saved || typeof saved !== 'object') return { ...defaults };
     const state = {
       preset: PRESETS.includes(saved.preset) ? saved.preset : defaults.preset,
@@ -178,7 +180,7 @@ export function createLightingControl({ root, emissive, onChange }) {
     ambientColor.value = state.ambientColor;
     ambientColor.disabled = !state.lights;
 
-    if (persist) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (persist) writeJson(STORAGE_KEY, state);
     onChange({ ...state });
   }
 

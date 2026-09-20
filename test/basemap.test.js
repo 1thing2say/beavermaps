@@ -201,7 +201,7 @@ test('the lighting follows the sun rather than the clock or the theme', () => {
   // Sacramento's published solstice times, which is the check that matters: a
   // table of hours cannot do this. Sunset moves by three and a half hours
   // between these two dates.
-  const crossing = (day, from, to) => {
+  const crossing = (day, from, _to) => {
     let last = null;
     for (let m = 0; m < 1440; m += 1) {
       const t = new Date(Date.parse(`${day}T00:00:00Z`) + m * 60_000);

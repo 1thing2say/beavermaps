@@ -22,6 +22,8 @@
 //
 // Apple is the default. The switch exists to go back.
 
+import { readText, writeText } from './storage.js';
+
 const STORAGE_KEY = 'mapper-skin';
 
 export const SKINS = ['apple', 'classic'];
@@ -50,7 +52,7 @@ const LABELS = { classic: 'Classic', apple: 'Apple' };
  * `preferredProvider`: the stored value only ever means "I went back".
  */
 export function preferredSkin() {
-  return localStorage.getItem(STORAGE_KEY) === 'classic' ? 'classic' : 'apple';
+  return readText(STORAGE_KEY) === 'classic' ? 'classic' : 'apple';
 }
 
 /**
@@ -90,7 +92,7 @@ export function createSkinControl({ surfaces, onChange }) {
     skin = next;
     applySkinAttribute(skin);
     paint();
-    if (persist) localStorage.setItem(STORAGE_KEY, skin);
+    if (persist) writeText(STORAGE_KEY, skin);
     onChange(skin);
   }
 
