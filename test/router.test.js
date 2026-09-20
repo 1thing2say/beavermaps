@@ -154,3 +154,56 @@ test('the vertex precision is tight enough not to weld distinct junctions', () =
   assert.ok(VERTEX_PRECISION < closest / 10,
     `precision ${VERTEX_PRECISION} vs closest distinct pair ${closest.toExponential(3)}`);
 });
+
+test('a route from a place to itself is refused rather than answered', () => {
+  // FOUND BY A TEST FOR SOMETHING ELSE. A one-coordinate route is what
+  // findPath returns when both ends snap to the same vertex, and that is not
+  // exotic: two taps inside one courtyard do it, and so does picking a
+  // destination while standing on it. The endpoint answered 200 with
+  // `coordinates: [[lon, lat]]`, `distanceFeet: 0` and `maneuvers: []`.
+  //
+  // Nothing downstream survives that. `lineString()` throws outright on a
+  // single coordinate, so the browser's handler died mid-assignment and left
+  // the panel saying "Calculating…"; `maneuvers.length - 2` would have read
+  // "-2 turns"; and the banner's first render indexes `maneuvers[0]`, which is
+  // not there. Same shape as the Paris bug above — a 200 to a question that
+  // should have been a refusal — and refused the same way.
+  const vertex = graph.vertices[0];
+  const result = graph.route(vertex, vertex);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'same-place');
+  assert.match(result.error, /same place/i);
+  // A refusal names the way forward.
+  assert.match(result.error, /pick a destination/i);
+});
+
+test('two points that snap to the same vertex are the same place', () => {
+  // The check is on the SNAPPED ends, not the requested ones — a metre apart
+  // in the request is the same vertex in the graph, and it is the graph's
+  // answer that the rest of the app has to work with.
+  const vertex = graph.vertices[0];
+  const almost = [vertex[0] + 0.000002, vertex[1] + 0.000002];
+
+  const snapped = graph.snap(almost);
+  assert.deepEqual(snapped.coord, vertex, 'test premise: these snap together');
+
+  assert.equal(graph.route(vertex, almost).reason, 'same-place');
+});
+
+test('every route that IS answered has a drawable line', () => {
+  // The invariant the browser assumes everywhere and the server never stated:
+  // two coordinates minimum, and a maneuver at each end.
+  const pairs = [
+    [ON_CAMPUS, ALSO_ON_CAMPUS],
+    [ALSO_ON_CAMPUS, ON_CAMPUS],
+    [graph.vertices[0], graph.vertices.at(-1)],
+  ];
+  for (const [from, to] of pairs) {
+    const result = graph.route(from, to);
+    if (!result.ok) continue;
+    assert.ok(result.geometry.coordinates.length >= 2,
+      `${JSON.stringify(from)} -> ${JSON.stringify(to)} gave one coordinate`);
+    assert.ok(result.maneuvers.length >= 2, 'a walk has at least a depart and an arrive');
+  }
+});

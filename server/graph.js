@@ -97,6 +97,7 @@ export function createGraph({ network, approach }) {
    *   { ok: true, ... }                      a route
    *   { ok: false, reason: 'unreachable' }   an end too far from the graph to snap
    *   { ok: false, reason: 'no-path' }       both ends snapped; the graph does not join them
+   *   { ok: false, reason: 'same-place' }    both ends snapped to the SAME vertex
    *
    * THE FIRST REFUSAL IS THE ONE THIS FUNCTION EXISTS FOR. Snapping is
    * unconditional, so without it a request from ten miles away comes back as a
@@ -128,6 +129,27 @@ export function createGraph({ network, approach }) {
 
     const result = pathFinder.findPath(start.feature, end.feature);
     if (!result) return { ok: false, reason: 'no-path', error: 'no path found on the network' };
+
+    // A WALK OF ONE POINT IS NOT A WALK. When both ends snap to the same vertex
+    // — two taps inside one courtyard, a destination picked while standing on
+    // it — findPath succeeds and returns a path of a single coordinate with a
+    // weight of zero. That was answered as 200 OK, and everything downstream
+    // assumed at least two: `lineString()` throws outright on one coordinate,
+    // so the browser's route handler died mid-assignment and left the panel
+    // saying "Calculating…" for ever; had it survived, `maneuvers.length - 2`
+    // would have put "Route calculated — -2 turns." under it.
+    //
+    // Same shape as the reach check above, and refused for the same reason:
+    // the endpoint is public, and a caller that asks for a zero-length walk
+    // should be told that is what they asked for rather than handed a
+    // degenerate geometry to crash on.
+    if (result.path.length < 2) {
+      return {
+        ok: false,
+        reason: 'same-place',
+        error: 'Start and destination are the same place — pick a destination further off.',
+      };
+    }
 
     return {
       ok: true,

@@ -144,8 +144,22 @@ Three non-answers, and they are not interchangeable:
 |---|---|
 | **400** | `from`/`to` missing or not a coordinate pair |
 | **404** | both ends are on the graph; nothing joins them |
-| **422** | an end is too far from the graph to snap to (`REACH_M`) |
+| **422** | the request is well-formed but does not describe a walk — see below |
 | **429** | too many route requests from one address — see `server/limit.js` |
+
+Two things come back 422, and the server's `error` sentence says which. The
+client shows it verbatim.
+
+- **`unreachable`** — an end is further than `REACH_M` from the graph.
+- **`same-place`** — both ends snap to the SAME vertex. `findPath` succeeds
+  there and returns a path of one coordinate with a weight of zero, which used
+  to be answered `200 OK`. Nothing downstream survives it: `lineString()` throws
+  outright on a single coordinate, so the browser's handler died mid-assignment
+  and left the panel on "Calculating…"; had it survived, `maneuvers.length - 2`
+  would have printed "-2 turns" underneath. Two taps inside one courtyard do it.
+
+The invariant, stated once: **an answered route has at least two coordinates and
+at least two maneuvers.** `test/router.test.js` holds the server to it.
 
 `/api/route` is the only endpoint here that is not a precomputed constant, which
 is why it is the only one that is rate limited and the only one not gzipped at

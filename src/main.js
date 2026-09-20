@@ -7,19 +7,10 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 // thing it is there to remove.
 import campusBoundary from './campus-boundary.json';
 import campusLamps from './lamps.json';
-import { point, lineString, featureCollection } from '@turf/helpers';
+import { point, featureCollection } from '@turf/helpers';
 import { nearestPoint } from '@turf/nearest-point';
 import { distance } from '@turf/distance';
-import { nearestPointOnLine } from '@turf/nearest-point-on-line';
-import { along } from '@turf/along';
-import { bearing } from '@turf/bearing';
-import {
-  cumulativeDistances,
-  instructionFor,
-  niceFeet,
-  FEET_PER_KM,
-} from './maneuvers.js';
-import { maneuverIcon } from './nav-icons.js';
+import { niceFeet, FEET_PER_KM } from './maneuvers.js';
 import { routeSummary, reachProblem, locationProblem } from './directions.js';
 import { mapboxRefusal, MAPBOX_HOST } from './basemap-problem.js';
 import {
@@ -44,7 +35,6 @@ import { createSheetStack } from './sheet-stack.js';
 import { googleGround } from './google-tiles.js';
 import { canFlyOver, framing, footprintExtent, roofOf, massOf } from './flyover.js';
 import { createFlyover } from './flyover-view.js';
-import { spin } from './spinner.js';
 import { paintIcons } from './g-icons.js';
 import { CATEGORIES, CATEGORY_BY_ID, collect } from './categories.js';
 import {
@@ -58,15 +48,25 @@ import { ringOf, centreOf, trimToCampus } from './campus-clip.js';
 import { bayRake } from './bay-rake.js';
 import { createGeolocation } from './geolocation.js';
 import { createDebugMenu } from './debug.js';
-import { lightPresetAt, nextCheckMs, sunAt, HORIZON_DEG } from './daylight.js';
+import { lightPresetAt, nextCheckMs } from './daylight.js';
 import { createLightingControl } from './lighting.js';
 import roomsData from './rooms.json';
 import { buildRoomIndex, lookupRoom } from './rooms.js';
-import { popularity, popularNames, recordVisit } from './popular.js';
-import { FONTS, SATELLITE, palette, styleKey, underPreset, followsClock, toward } from './palette.js';
+import { popularity, recordVisit } from './popular.js';
+import { FONTS, SATELLITE, palette, styleKey, underPreset, followsClock } from './palette.js';
 
 import { tokenRefusal, showSetupProblem } from './setup-problem.js';
 import { CAMPUS_BOUNDS, ROUTABLE_BOUNDS } from './campus-bounds.js';
+import { createRoute } from './route-state.js';
+import { createNavigation, SIM_TICK_MS } from './navigation.js';
+import { createLongPress } from './long-press.js';
+import { sunLights, assist } from './sun-lights.js';
+import { FIT_MARGIN, paddingAround, padBelowSheet, isVisible } from './viewport.js';
+import { createStatusLine } from './status-line.js';
+import { spin } from './spinner.js';
+import {
+  MAX_RESULTS, normalise, buildPlaceIndex, search, popularEntries,
+} from './search-rank.js';
 
 import {
   buildAreas,
@@ -117,47 +117,8 @@ const NETWORK_CASING_WIDTH = [
 const GOOGLE_GREEN = '#1e8e3e';
 const GOOGLE_RED = '#ea4335';
 
-// Comfortable campus walking pace. Used for the ETA and for the simulator.
-const WALK_FEET_PER_SEC = 4.6;
-// How close you must get before a maneuver is considered done, in km.
-const MANEUVER_REACHED_KM = 25 / FEET_PER_KM;
-const ARRIVED_FEET = 25;
-const SIM_TICK_MS = 200;
-const SIM_SPEED = 4;
-// How far up the route the camera aims. Clamped to the next maneuver, so this
-// only controls heading stability on long straights, never turn timing.
-const LOOK_AHEAD_KM = 60 / FEET_PER_KM;
-const MIN_AIM_KM = 8 / FEET_PER_KM;
-// Banner transition timing, in ms.
-// Must match --banner-swap in input.css: it is how long both signs are on
-// screen together before the outgoing one is removed from the DOM.
-const BANNER_SWAP_MS = 320;
-
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
-// Breathing room around the campus when it is framed, in px.
-const FIT_MARGIN = 40;
-
-/**
- * The least of the canvas a framed answer may be squeezed into, as a fraction
- * of its height.
- *
- * Measured on a 402x874 phone with a results panel open: the sheet leaves 39%
- * of the canvas at `half`, 29% at `rest` — where `rest` is content-sized, so it
- * is the taller list that makes it the smaller strip — and 1.9% at `full`. That
- * last one is 17 pixels, and it is what fitBounds was being asked to frame five
- * buildings into.
- *
- * So the line goes well below the two good numbers and well above the bad one.
- * Nothing lands between 0.019 and 0.29, which makes this a wide choice rather
- * than a fitted one — and it wants to be low, because the fallback is not
- * better: framing against the whole canvas centres the answer behind the sheet.
- * A small strip is worth using; a 17px one is not. See viewPadding.
- */
-const MIN_VIEW = 0.18;
-
-// The line everything of ours stops at. Same polygon the mask is cut from, so
-// the ground cover and the linework end together rather than a metre apart.
 const CAMPUS_RING = ringOf(campusBoundary);
 
 // Where the debug menu's virtual GPS fix stands. The centroid of that ring, so
@@ -260,49 +221,6 @@ function startApp() {
       applyLighting();
       watchDaylight();
     }, nextCheckMs(new Date(), CAMPUS_CENTRE[0], CAMPUS_CENTRE[1]));
-  }
-
-  /**
-   * How far the ambient light is raised under a low sun, in the LIGHT theme.
-   *
-   * COLOUR COULD NOT DO THIS, and the attempt is why the numbers are here. The
-   * campus is emissive and was matched to the city by repainting it; the city
-   * was supposed to be met half way by authoring its colours lighter. That works
-   * for a mid-tone and does nothing at all for `colorLand`, which is already
-   * #f3f3f1 — there is no headroom between it and white, so an 18% lift toward
-   * white moved it two values while Standard's dusk lighting was multiplying it
-   * down by a third. The result was a near-black city at dusk with a legible
-   * campus sitting inside it.
-   *
-   * So the LIGHT is raised instead, which is the thing actually doing the
-   * darkening. This is not a claim that dusk is bright: it is the same call the
-   * app already makes everywhere else, that a map is a document to be read
-   * before it is a picture of a time of day. Night keeps more of its darkness
-   * than dusk because a night map that looks like noon has stopped saying
-   * anything.
-   *
-   * Only in the LIGHT theme. Somebody who has chosen dark has asked for a dark
-   * map and should be given one.
-   */
-  const AMBIENT_ASSIST = {
-    dawn: { intensity: 0.85, color: '#fff1dd' },
-    dusk: { intensity: 0.85, color: '#ffeed6' },
-    night: { intensity: 0.62, color: '#c9d6ea' },
-  };
-
-  function assist(lights, preset) {
-    const want = currentTheme === 'light' ? AMBIENT_ASSIST[preset] : null;
-    if (!want) return lights;
-    for (const light of lights) {
-      // Ambient is the one that matters. Standard's night ambient is
-      // hsl(217,100%,11%) — very nearly black — and scaling a black light by any
-      // intensity leaves it black, which is why the colour is replaced and not
-      // only the number. Measured on the bench: ambient 0.5 to 1.0 at night
-      // moves a roof by about one L* until the colour moves too.
-      if (light.id !== 'ambient') continue;
-      light.properties = { ...light.properties, intensity: want.intensity, color: want.color };
-    }
-    return lights;
   }
 
   /**
@@ -418,18 +336,18 @@ function startApp() {
    */
   let lastFix = null;
 
-  // Navigation state
-  let routeCoords = null;      // the raw LineString coordinates
-  let routeLine = null;        // same, as a turf feature, for snapping
-  let cumulative = null;       // along-route distance (km) at every vertex
-  let maneuvers = null;        // supplied by the server
-  let stepIndex = 0;
-  let navActive = false;
-  let lastBearing = 0;
-  let userMarker = null;
-  let simTimer = null;
-  let simAlong = 0;
-
+  // The walk that is currently on the screen, and the turn-by-turn that
+  // reads it. Ten `let`s used to stand here describing one walk between
+  // them; see src/route-state.js and src/navigation.js for why that was a
+  // set pretending to be a scope.
+  //
+  // `nav` is null until the banner's elements have been looked up, which is
+  // why nothing reads it directly — `navigating()` is the question every
+  // other part of this file actually has, and it answers false before the
+  // object exists, which is the truth.
+  const route = createRoute();
+  let nav = null;
+  const navigating = () => nav?.isActive() === true;
   // The lighting bench, and whether anybody is standing at it. Both are read by
   // applyLighting and nothing else: `debugOpen` is the gate that keeps a bench
   // setting from following somebody out of the back room, and `benchLights` is
@@ -452,12 +370,6 @@ function startApp() {
   // This says the narrower thing the builders actually need: a style exists and
   // its layers are ours to write to.
   let styleBuilt = false;
-
-  // Banner transition state
-  let renderedStep = -1;
-  let bannerBusy = false;
-  let bannerTimers = [];
-  let liveCard = null;      // the sign currently showing; owns the countdown
 
   // GUI Elements
   // Three refs for one line of text: the paragraph carries the error class, the
@@ -515,59 +427,17 @@ function startApp() {
   const navStack = document.getElementById('nav-stack');
 
   /**
-   * Padding for framing the campus. The chrome floats over the west edge of the
-   * map, so an even margin centres the campus in the *container* and leaves it
-   * visibly pushed left in the part you can actually see. Reserving the real
-   * width of whatever is open fixes that, and it has to be measured rather than
-   * hard-coded because both cards come and go.
-   *
-   * Every card, not one. Three of them stack in the left column and the legend
-   * holds the right edge, and each is a strip of canvas the campus can be hidden
-   * under — framing a highlight beneath the legend row that asked for it is the
-   * one place the camera can put something where it cannot be seen.
-   *
-   * Mapbox throws if padding exceeds the canvas, so on a screen too narrow to
-   * hold both sides, fall back to an even margin and let the chrome overlap.
+   * Reserve the canvas the open cards are standing on. See viewport.js for
+   * what each rectangle costs and why a phone-width card costs height.
    */
   function campusPadding() {
-    const even = { top: FIT_MARGIN, bottom: FIT_MARGIN, left: FIT_MARGIN, right: FIT_MARGIN };
-    const canvas = map.getCanvas().getBoundingClientRect();
-    if (!canvas.width) return even;
-
     // buildingsPanel is not in this list and must not be: it is a section of
     // the debug card now, and the debug card is a thing you open, read and
     // close rather than a panel the map is framed around.
-    const boxes = [placePanel, categoryPanel, sidePanel, legendPanel]
+    const open = [placePanel, categoryPanel, sidePanel, legendPanel]
       .filter((card) => !card.classList.contains('hidden'))
-      .map((card) => card.getBoundingClientRect())
-      .filter((box) => box.width);
-    if (!boxes.length) return even;
-
-    // Below 640px the stylesheet turns the column into a bottom sheet spanning
-    // the full width, and there what a card costs is height, not width.
-    // Reserving its width would exceed the canvas and fall back to an even
-    // margin, which puts the campus underneath it. Either card can be the sheet
-    // — on a phone the legend replaces the route panel rather than stacking
-    // under it — so this asks the boxes, not one named element.
-    const sheet = boxes.filter((box) => box.width >= canvas.width * 0.6);
-    if (sheet.length) {
-      const bottom = canvas.bottom - Math.min(...sheet.map((box) => box.top)) + FIT_MARGIN;
-      return bottom + FIT_MARGIN < canvas.height ? { ...even, bottom } : even;
-    }
-
-    // Both edges now. A card in the right half used to be skipped outright,
-    // because until the legend moved over there nothing was ever in it.
-    let left = FIT_MARGIN;
-    let right = FIT_MARGIN;
-    for (const box of boxes) {
-      if (box.left - canvas.left > canvas.width / 2) {
-        right = Math.max(right, canvas.right - box.left + FIT_MARGIN);
-      } else {
-        left = Math.max(left, box.right - canvas.left + FIT_MARGIN);
-      }
-    }
-    if (left + right >= canvas.width) return even;
-    return { ...even, left, right };
+      .map((card) => card.getBoundingClientRect());
+    return paddingAround({ canvas: map.getCanvas().getBoundingClientRect(), boxes: open });
   }
 
   // The constructor framed the campus before these element refs existed, so it
@@ -613,6 +483,41 @@ function startApp() {
   const geolocation = createGeolocation();
   let geolocateControl = null;
 
+  // Everything the walk needs, handed over explicitly.
+  //
+  // The three callbacks are named for what navigation WANTS rather than for the
+  // function that happens to satisfy it. `restCamera` is "put the camera back",
+  // which today is a fitBounds over the campus; `releaseCameraLock` is "stop
+  // following the locate control", which is a trigger() on a control this
+  // module has never heard of. Naming them that way is what keeps navigation
+  // from knowing about CAMPUS_BOUNDS, the padding rules or the geolocate
+  // control — and what lets a test hand it three spies instead of a map.
+  nav = createNavigation({
+    map,
+    route,
+    geolocation,
+    dom: {
+      sidePanel,
+      banner: navBanner,
+      footer: navFooter,
+      stack: navStack,
+      signTemplate,
+      remaining: navRemaining,
+      eta: navEta,
+    },
+    buildings: { add: addBuildingsLayer, remove: removeBuildingsLayer },
+    onStart: () => { clearLegendHighlight(); deselectPin(); },
+    restCamera: () => map.fitBounds(CAMPUS_BOUNDS, {
+      padding: campusPadding(), pitch: 0, bearing: 0, duration: 800,
+    }),
+    releaseCameraLock: () => { if (locating) geolocateControl?.trigger(); },
+    makeUserDot: () => {
+      const dot = document.createElement('div');
+      dot.className = 'user-dot';
+      return new mapboxgl.Marker({ element: dot });
+    },
+  });
+
   /**
    * Write the three numbers, or clear them back to the panel's resting head.
    *
@@ -643,149 +548,23 @@ function startApp() {
    * Routing is a network call now, so "server is down" is a state the UI has to
    * show plainly — otherwise it looks like the buttons are simply broken.
    */
-  /**
-   * Whether the strip is currently holding something that went wrong.
-   *
-   * Read only by setIdleStatus below, and the reason it exists is a race that
-   * silently ate every boot-time error this app can raise. The overlays land
-   * about two seconds in and write the resting hint; a refused Mapbox token
-   * lands at about one, a refused Google key at about one and a half. Both were
-   * on screen, and both were painted over by "Tap a building or press and hold
-   * anywhere" before anyone could read them — which is how the README came to
-   * describe a Google error message that a visitor could not actually see.
-   *
-   * Cleared by any deliberate non-error status, not by a timer: once the app is
-   * telling you it is calculating a route, the earlier complaint has been
-   * superseded by something you are doing on purpose.
-   */
-  let problemStanding = false;
-
-  function setStatus(message, isError = false) {
-    problemStanding = isError;
-    // The panel starts closed, so an error written into it is an error nobody
-    // sees. "Routing server unreachable" and "Google basemap unavailable" are
-    // both states where the app looks merely broken until the sentence
-    // explaining it is on screen.
-    if (isError) showRoutePanel();
-    // A SENTENCE THAT CHANGED HAS TO BE SEEN TO HAVE CHANGED. This line is the
-    // app's whole voice — "Routing server unreachable", "Tap a building to walk
-    // there" — and swapping textContent is invisible as movement, so two
-    // problems in a row read as one problem that was there all along. The
-    // stylesheet has a three-pixel rise for it; this is what fires it, and only
-    // when the words actually differ, or every idle repaint would twitch.
-    //
-    // Remove, force a reflow, add: the standard restart for an animation that
-    // is already on the element, and the same three lines showPlaceCard uses.
-    if (instructionMessage.textContent !== message) {
-      instructionText.classList.remove('is-fresh');
-      void instructionText.offsetWidth;
-      instructionText.classList.add('is-fresh');
-    }
-    instructionMessage.textContent = message;
-    // One class rather than the five Tailwind toggles this used to need. The
-    // hint's normal and error colours are both stated in the stylesheet, so
-    // there is no specificity race between a muted class and a red one.
-    instructionText.classList.toggle('is-error', isError);
-  }
-
-  /**
-   * A message about something the app is doing on its own, rather than about
-   * anything you asked it for.
-   *
-   * Yields to a standing problem, which is the difference between this and
-   * setStatus. "Loading the campus…" goes up during boot, in a race with every
-   * failure the app can report, and it was winning: measured against a refused
-   * token at the same origin three times, the refusal survived once and "Tap a
-   * building or press and hold anywhere" won twice, over a map with no ground
-   * on it. Holding the flag but writing the text anyway was worse still — the
-   * hint was then suppressed correctly and the strip sat on "Loading the
-   * campus…" for good, which is a third wrong answer rather than a fix.
-   *
-   * So: a problem outranks progress. Why the ground is missing is worth more of
-   * this one line than the fact that something is still arriving, and the
-   * spinner beside it is already saying that much.
-   *
-   * A route being calculated is NOT this and goes through setStatus: you asked
-   * for that one, and an answer to what you just did has earned the strip.
-   */
-  function setProgress(message) {
-    if (problemStanding) return;
-    setStatus(message);
-  }
-
-  /**
-   * The resting message — what the strip says when nothing is happening and
-   * nothing is wrong.
-   *
-   * The second half of that sentence is the whole point: this is written from
-   * two places that both mean "we are ready now", and neither of them has any
-   * way of knowing whether something has already failed in a way that being
-   * ready does not fix. A black basemap is still black after the campus data
-   * lands.
-   */
-  function setIdleStatus() {
-    if (problemStanding) return;
-    setStatus(idleHint());
-  }
-
-  /**
-   * The spinner beside the status line.
-   *
-   * Two things use it and both are network waits with no knowable length: the
-   * campus data on the way in, and a route being computed by the server. The
-   * text already says what is happening in both cases; what it cannot say is
-   * that the app is still TRYING, which is the whole difference between a slow
-   * connection and a dead one.
-   *
-   * Reference-counted rather than a boolean, because the two overlap on a cold
-   * load: a route asked for before the overlays have landed would otherwise
-   * have its spinner switched off by the overlays finishing. Every caller pairs
-   * its `setBusy(true)` with a `setBusy(false)` in a `finally`, which is what
-   * keeps the count honest across the error paths.
-   */
-  let busyDepth = 0;
-  let stopBusy = null;
-
-  function setBusy(on) {
-    busyDepth = on ? busyDepth + 1 : Math.max(0, busyDepth - 1);
-    const wanted = busyDepth > 0;
-    if (wanted === Boolean(stopBusy)) return;
-    if (wanted) {
-      instructionBusy.classList.remove('hidden');
-      stopBusy = spin(instructionBusy, { size: 'sm' });
-    } else {
-      stopBusy();
-      stopBusy = null;
-      instructionBusy.classList.add('hidden');
-    }
-  }
-
-  /**
-   * What the map is waiting for when it is waiting for nothing.
-   *
-   * One sentence now rather than two. It used to branch on the virtual location
-   * — with a fix on the campus a hold meant "destination", without one it meant
-   * "start" — and that branch is gone because the gesture no longer means
-   * either: a hold drops a pin, and the pin's card is where you say what you
-   * wanted. Which is also why this can finally name the button. The old hint
-   * described a two-step positional flow and never mentioned the word
-   * "Directions" at all.
-   *
-   * "Press and hold" rather than "click", and this line is still carrying the
-   * whole discoverability of that gesture — see LONG_PRESS_MS. A hold is not a
-   * thing anybody tries unprompted on a map they have not used before. Shared
-   * with the end of the cold load, which is the other place this has to be
-   * said: the hint is wrong until the network has landed, so it is written
-   * again once it has.
-   *
-   * A function rather than a constant because both callers expect to call it,
-   * and because the day this needs to know something about the app's state
-   * again it should not also need its call sites rewritten.
-   */
-  const idleHint = () => 'Tap a building or press and hold anywhere, then press Directions.';
+  // The strip the app speaks in, and the spinner beside it. Which sentence
+  // outranks which is src/status-line.js; this is only where its three
+  // elements are.
+  const status = createStatusLine({
+    text: instructionText,
+    message: instructionMessage,
+    busy: instructionBusy,
+    onError: showRoutePanel,
+    spinner: spin,
+  });
+  const setStatus = (sentence, isError = false) => status.set(sentence, isError);
+  const setProgress = (sentence) => status.progress(sentence);
+  const setIdleStatus = () => status.rest();
+  const setBusy = (on) => status.setBusy(on);
 
   function resetMap() {
-    endNavigation();
+    nav.end();
 
     if (startMarker) startMarker.remove();
     if (endMarker) endMarker.remove();
@@ -795,10 +574,7 @@ function startApp() {
     startMarker = null;
     endMarker = null;
 
-    routeCoords = null;
-    routeLine = null;
-    cumulative = null;
-    maneuvers = null;
+    route.clear();
     requestSeq++;
 
     if (map.getSource('calculated-route')) {
@@ -873,8 +649,8 @@ function startApp() {
     resetMap();
     toggleRoutePanel(false);
   });
-  startNavBtn.addEventListener('click', () => startNavigation());
-  simulateBtn.addEventListener('click', () => startNavigation({ simulate: true }));
+  startNavBtn.addEventListener('click', () => nav.start());
+  simulateBtn.addEventListener('click', () => nav.start({ simulate: true }));
 
   // -------------------------------------------------------------------------
   // Routing API
@@ -904,9 +680,14 @@ function startApp() {
       body: JSON.stringify({ from, to }),
     });
     if (response.status === 404) return null;          // reachable, but no path
+    // 422 is "well-formed, but not a walk": an end too far from the network to
+    // snap to, or both ends in the same place. The server's own sentence is
+    // used verbatim, because it is the one that knows which. The fallback is
+    // deliberately vague — it only runs when the body could not be read at all,
+    // and a specific guess there would be a specific guess.
     if (response.status === 422) {
       const payload = await response.json().catch(() => null);
-      return { refused: payload?.error ?? 'That is too far from the campus paths to walk from.' };
+      return { refused: payload?.error ?? 'Those two points do not make a walk on the campus paths.' };
     }
     if (!response.ok) throw new Error(`route request failed (${response.status})`);
     return response.json();
@@ -1043,69 +824,8 @@ function startApp() {
    */
   const BUILDING_EMISSIVE = 0.2;
 
-  /**
-   * The sun over my campus right now, as Mapbox states a light.
-   *
-   * WHY THIS HAD TO EXIST. "Stand the buildings up" extruded the footprints and
-   * produced flat slabs with no shadows, and the reason turned out to be that
-   * there was no light in the scene at all: `map.getLights()` answered
-   * `[{ id: 'flat', type: 'flat' }]`. Google is the default provider, its style
-   * is BLANK_STYLE, and a blank style has no lighting model — so the campus was
-   * being asked to cast shadows in a world with no sun. Under Mapbox Standard
-   * there IS a sun, but the extrusions were opted three quarters out of it.
-   *
-   * So the app brings its own, and it points where the real one does. The
-   * azimuth and elevation come from the same NOAA solve that already decides
-   * whether it is dawn or dusk — see src/daylight.js — which means the shadows
-   * on the campus fall the way the shadows on the campus fall, and swing round
-   * over the course of a day rather than sitting at a fixed art-directed angle.
-   *
-   * BELOW THE HORIZON THERE IS NO SUN, and this refuses to invent one. `up`
-   * fades the directional light out over the last twelve degrees of the sky and
-   * reaches zero at sunset, because a directional light with the sun underneath
-   * the ground is a light shining upwards and every shadow in the scene points
-   * at the sky. What is left at night is ambient alone, lifted by the floor
-   * below so the buildings stay solid rather than becoming silhouettes.
-   */
-  const AMBIENT_FLOOR = 0.45;
-  const AMBIENT_SUN = 0.35;
-  const SUN_INTENSITY = 0.9;
-  /** How far above the horizon the sun has to climb to be at full strength. */
-  const SUN_RAMP_DEG = 12;
-
-  function sunLights() {
-    const { elevation, azimuth } = sunAt(new Date(), CAMPUS_CENTRE[0], CAMPUS_CENTRE[1]);
-    const up = Math.max(0, Math.min(1, (elevation - HORIZON_DEG) / SUN_RAMP_DEG));
-    // Warm at the horizon and white overhead, which is the one piece of this
-    // that is a colour decision rather than an astronomical one — but it is the
-    // decision every photograph of a low sun makes, and without it a dawn with
-    // long shadows is lit like noon.
-    const warm = toward('#ffffff', '#ffd2a0', 1 - up);
-    return [
-      {
-        id: 'ambient',
-        type: 'ambient',
-        // The sky rather than the sun: cool, because it is scattered light, and
-        // it never goes out.
-        properties: { color: toward('#ffffff', '#cdd9ee', 1 - up), intensity: AMBIENT_FLOOR + AMBIENT_SUN * up },
-      },
-      {
-        id: 'directional',
-        type: 'directional',
-        properties: {
-          color: warm,
-          intensity: SUN_INTENSITY * up,
-          // [azimuthal, polar], both degrees, describing where the light SOURCE
-          // is: clockwise from due north, and away from straight up. So a sun
-          // 70 degrees high is a polar angle of 20 and short shadows; a sun 5
-          // degrees up is 85, and the shadows run right across the campus.
-          direction: [azimuth, Math.max(1, 90 - elevation)],
-          'cast-shadows': true,
-          'shadow-intensity': up,
-        },
-      },
-    ];
-  }
+  // The sun itself is src/sun-lights.js — a date and a place in, a light array
+  // out, and no map anywhere in it.
 
   /**
    * Push the lighting bench onto the map, or take it back off.
@@ -1129,7 +849,7 @@ function startApp() {
 
     // The extrusions are navigation-only — see removeBuildingsLayer — and the
     // question this bench asks is entirely about the extrusions, so it is
-    // allowed to stand them up outside a walk. `!navActive` on the way down is
+    // allowed to stand them up outside a walk. `!navigating()` on the way down is
     // what keeps that from reaching into a real one: during navigation they are
     // the app's, and switching the bench off must not take them.
     //
@@ -1139,7 +859,7 @@ function startApp() {
     // the way in and true on the way back, so the second pass paints and stops.
     if (bench?.buildings) {
       if (!map.getLayer('campus-buildings')) addBuildingsLayer();
-    } else if (!navActive) {
+    } else if (!navigating()) {
       removeBuildingsLayer();
     }
 
@@ -1148,7 +868,7 @@ function startApp() {
     // you are trying to look at it. Never during navigation, which is pitched
     // to 60 and following somebody — that camera is not the bench's to take.
     const tilt = Boolean(bench?.tilt);
-    if (!navActive && tilt !== benchTilt) {
+    if (!navigating() && tilt !== benchTilt) {
       benchTilt = tilt;
       map.easeTo({ pitch: tilt ? 60 : 0, duration: 500 });
     }
@@ -1223,8 +943,8 @@ function startApp() {
     // lighting means the next revert has nothing to revert to.
     const standing = Boolean(map.getLayer('campus-buildings'));
     let lights = standing
-      ? sunLights()
-      : (benchLights ? assist(structuredClone(benchLights), wanted) : null);
+      ? sunLights(new Date(), CAMPUS_CENTRE)
+      : (benchLights ? assist(structuredClone(benchLights), wanted, currentTheme) : null);
     if (!lights) return;
     if (!bench?.lights) {
       map.setLights(lights);
@@ -1258,7 +978,7 @@ function startApp() {
   /**
    * Extrusion is for navigation only.
    *
-   * Everywhere else in this file the layer is guarded by `navActive`, but
+   * Everywhere else in this file the layer is guarded by `navigating()`, but
    * nothing ever took it down again — so ending a walk left the footprints
    * standing, which on the dark theme is a campus full of black blocks over a
    * map that is supposed to be flat.
@@ -3085,42 +2805,15 @@ function startApp() {
     map.fitBounds(bounds, { padding: pad, maxZoom, duration: 700 });
   }
 
-  /**
-   * campusPadding, told where the sheet is GOING rather than where it is.
-   *
-   * campusPadding measures the cards that are open, which is right for a
-   * sidebar — a sidebar's width changes the instant a card arrives — and half a
-   * frame late for a sheet. On a phone a card opening does two more things: the
-   * stack asks the sheet for at least the half detent, and the stylesheet then
-   * animates the height over 240ms. Measure during that and the answer is
-   * wherever the top edge happened to be passing, so the camera settles a
-   * fraction of a sheet too low and the thing it was framing ends up behind the
-   * glass.
-   *
-   * So the sheet is asked instead of measured. See `top` in src/sheet.js.
-   */
+  /** Which elements the padding has to clear. The arithmetic is in viewport.js. */
   function viewPadding() {
-    const pad = campusPadding();
-    const top = sheet.top;
-    if (top === null) return pad;
-
     const canvas = map.getCanvas();
-    const bottom = canvas.getBoundingClientRect().bottom - top + FIT_MARGIN;
-    // A strip has to be big enough to see a campus in, not merely bigger than
-    // nothing. The guard here used to be the one campusPadding makes — leave
-    // SOME canvas, because Mapbox throws when the padding eats all of it — and
-    // it let a sheet at `full` through with 110px to spare, into which fitBounds
-    // duly squeezed the whole athletics field: z11, forty miles of the county,
-    // and the five buildings you asked about as a smudge under the glass.
-    //
-    // The sheet is settled at `half` before a panel opens now (see onFront), so
-    // this should not be reached by the path that produced it. It stays because
-    // it is the floor rather than the fix: a short screen, a rotation, a card
-    // that grows after the sheet has settled — any of them can put the top edge
-    // somewhere nothing planned for, and the honest answer there is to frame
-    // against the whole canvas and let the sheet cover part of the result.
-    if (canvas.clientHeight - bottom - pad.top < canvas.clientHeight * MIN_VIEW) return pad;
-    return { ...pad, bottom };
+    return padBelowSheet({
+      pad: campusPadding(),
+      sheetTop: sheet.top,
+      canvasBottom: canvas.getBoundingClientRect().bottom,
+      canvasHeight: canvas.clientHeight,
+    });
   }
 
   /**
@@ -3134,9 +2827,12 @@ function startApp() {
    */
   function inView(coords, pad = viewPadding()) {
     const canvas = map.getCanvas();
-    const p = map.project(coords);
-    return p.x >= pad.left && p.x <= canvas.clientWidth - pad.right
-      && p.y >= pad.top && p.y <= canvas.clientHeight - pad.bottom;
+    return isVisible({
+      point: map.project(coords),
+      width: canvas.clientWidth,
+      height: canvas.clientHeight,
+      pad,
+    });
   }
 
   /**
@@ -3184,7 +2880,7 @@ function startApp() {
   function revealPoint(coords, { zoom = 0 } = {}) {
     // Navigation owns the camera outright — it is easing to the walker's
     // position several times a second, and a reveal would fight it.
-    if (!coords || navActive) return;
+    if (!coords || navigating()) return;
 
     const pad = viewPadding();
     const to = Math.max(map.getZoom(), zoom);
@@ -4310,50 +4006,10 @@ function startApp() {
   // switch, not just at startup.
   // ---------------------------------------------------------------------------
 
-  function routeFeature() {
-    if (!routeCoords) return EMPTY;
-    return { type: 'Feature', geometry: { type: 'LineString', coordinates: routeCoords } };
-  }
-
-  /** Below this a leg is a nub, not a walk, and is better left undrawn. */
-  const LEG_MIN_FEET = 12;
-
-  /**
-   * The last few metres at each end, which are not on the network.
-   *
-   * A route runs between GRAPH VERTICES, and neither end of a journey is one.
-   * my campus binds its destinations to their own node ids, which sit a metre or two
-   * off ours because this network is traced from the printed sheet rather than
-   * taken from their graph; an amenity is wherever its pictogram is, which for
-   * half of them is inside a building. So the blue line stopped short of the
-   * pin, by up to a few dozen feet, and looked like a routing failure.
-   *
-   * Drawn as a separate dotted layer rather than by extending routeCoords, and
-   * that distinction is the honest one: this is not path, it is the walk from
-   * the path to the door. Every mapping app draws it the same way and for the
-   * same reason. It also keeps the maneuver list and the simulator working off
-   * the network geometry alone, which is the only thing they can follow.
-   */
-  function legsFeature() {
-    if (!routeCoords || routeCoords.length < 2) return EMPTY;
-    const ends = [
-      [startPoint?.geometry.coordinates, routeCoords[0]],
-      [routeCoords[routeCoords.length - 1], endPoint?.geometry.coordinates],
-    ];
-    return {
-      type: 'FeatureCollection',
-      features: ends
-        .filter(([a, b]) => a && b && distance(point(a), point(b)) * FEET_PER_KM >= LEG_MIN_FEET)
-        .map(([a, b]) => ({
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'LineString', coordinates: [a, b] },
-        })),
-    };
-  }
-
   function paintLegs() {
-    map.getSource('route-legs')?.setData(legsFeature());
+    map.getSource('route-legs')?.setData(
+      route.legs(startPoint?.geometry.coordinates, endPoint?.geometry.coordinates),
+    );
   }
 
   /**
@@ -4525,10 +4181,13 @@ function startApp() {
       map.addSource('custom-network', { type: 'geojson', data: customNetwork ?? EMPTY });
     }
     if (!map.getSource('calculated-route')) {
-      map.addSource('calculated-route', { type: 'geojson', data: routeFeature() });
+      map.addSource('calculated-route', { type: 'geojson', data: route.feature() });
     }
     if (!map.getSource('route-legs')) {
-      map.addSource('route-legs', { type: 'geojson', data: legsFeature() });
+      map.addSource('route-legs', {
+        type: 'geojson',
+        data: route.legs(startPoint?.geometry.coordinates, endPoint?.geometry.coordinates),
+      });
     }
 
     // The network is drawn the way Google draws a road: one source, two line
@@ -4654,7 +4313,7 @@ function startApp() {
     addCategoryLayer();
     addLabelLayers();
 
-    if (navActive) addBuildingsLayer();
+    if (navigating()) addBuildingsLayer();
 
     // LAST, and it has to be. `lightPreset` used to be set at the top of this
     // function beside the other config keys, and moving it in here gave one
@@ -4664,284 +4323,6 @@ function startApp() {
     // earlier, a bench with the buildings switched on throws mid-rebuild and
     // takes the campus mask and the labels down with it, on every style load.
     applyLighting();
-  }
-
-  // -------------------------------------------------------------------------
-  // Navigation
-  // -------------------------------------------------------------------------
-
-  function startNavigation({ simulate = false } = {}) {
-    if (!routeCoords || routeCoords.length < 2) return;
-
-    navActive = true;
-    stepIndex = 0;
-    resetBannerAnimation();
-    addBuildingsLayer();
-    // The legend goes with the rest of the chrome here, and an outline with
-    // nothing left on screen explaining it is just a purple campus. Same for a
-    // lifted pin, whose card would float over the turn banner.
-    clearLegendHighlight();
-    deselectPin();
-
-    document.body.classList.add('navigating');
-    // Published so the sign can tell a simulated walk from a real one: the grid
-    // behind it runs at double speed and gains a second, stationary layer to
-    // drift against. See body.simulating in src/input.css.
-    document.body.classList.toggle('simulating', simulate);
-    sidePanel.classList.add('hidden');
-    navBanner.classList.remove('hidden');
-    navFooter.classList.remove('hidden');
-    map.resize();
-
-    // With the virtual location on, the control's blue dot IS the position —
-    // same argument as the start pin, and the same answer: ours would be a
-    // second dot sitting on the first. Removed rather than skipped, so a walk
-    // begun with the fixture off and resumed with it on does not leave one
-    // behind.
-    if (geolocation.fixture) {
-      userMarker?.remove();
-    } else {
-      if (!userMarker) {
-        const dot = document.createElement('div');
-        dot.className = 'user-dot';
-        userMarker = new mapboxgl.Marker({ element: dot });
-      }
-      userMarker.setLngLat(routeCoords[0]).addTo(map);
-    }
-
-    // The locate control recentres on every fix while it holds the camera, and
-    // navigation has a camera of its own — pitched to 60, zoomed in and turned
-    // to face the walk. Dropping the control to background is the one gesture
-    // that keeps the dot live and gives the camera up; it is what pressing its
-    // button while locked on does. `locating` is the control's own state, kept
-    // by its two track events rather than guessed at.
-    if (locating) geolocateControl?.trigger();
-
-    onUserMoved(routeCoords[0], { duration: 900 });
-
-    if (simulate) startSimulation();
-  }
-
-  function endNavigation() {
-    stopSimulation();
-    if (!navActive) return;
-    navActive = false;
-    resetBannerAnimation();
-
-    document.body.classList.remove('navigating');
-    document.body.classList.remove('simulating');
-    sidePanel.classList.remove('hidden');
-    navBanner.classList.add('hidden');
-    navFooter.classList.add('hidden');
-    if (userMarker) userMarker.remove();
-    removeBuildingsLayer();
-    map.resize();
-
-    // Flatten the pitched navigation camera and frame the whole campus again.
-    map.fitBounds(CAMPUS_BOUNDS, {
-      padding: campusPadding(), pitch: 0, bearing: 0, duration: 800,
-    });
-  }
-
-  /**
-   * Fold a new position into the navigation state. Position is snapped onto the
-   * route line rather than to a network vertex — snapping to vertices would
-   * make the dot jump between path endpoints instead of sliding along.
-   */
-  function onUserMoved(coords, { duration = SIM_TICK_MS } = {}) {
-    if (!navActive || !routeLine) return;
-
-    const snapped = nearestPointOnLine(routeLine, point(coords));
-    const distanceAlong = snapped.properties.location;  // km travelled so far
-    const here = snapped.geometry.coordinates;
-
-    advanceSteps(distanceAlong);
-    renderBanner(distanceAlong);
-    moveCamera(here, distanceAlong, duration);
-  }
-
-  /** Retire every maneuver we have already walked past. */
-  function advanceSteps(distanceAlong) {
-    while (
-      stepIndex < maneuvers.length - 1 &&
-      cumulative[maneuvers[stepIndex].index] - distanceAlong < MANEUVER_REACHED_KM
-    ) {
-      stepIndex++;
-    }
-  }
-
-  function clearBannerTimers() {
-    bannerTimers.forEach(clearTimeout);
-    bannerTimers = [];
-  }
-
-  function resetBannerAnimation() {
-    clearBannerTimers();
-    navStack.replaceChildren();
-    liveCard = null;
-    bannerBusy = false;
-    renderedStep = -1;
-  }
-
-  /** One complete sign, cloned from the template. Each carries its own End. */
-  function createSignCard() {
-    const el = signTemplate.content.firstElementChild.cloneNode(true);
-    el.querySelector('.nav-exit').addEventListener('click', endNavigation);
-    return {
-      el,
-      arrow: el.querySelector('.nav-arrow'),
-      distance: el.querySelector('.nav-distance'),
-      instruction: el.querySelector('.nav-instruction'),
-    };
-  }
-
-  function paintStep(card, step, feetToStep, arrived) {
-    card.arrow.innerHTML = maneuverIcon(step.type);
-    if (arrived) {
-      card.distance.textContent = 'Arrived';
-      card.instruction.textContent = 'You have reached your destination';
-    } else {
-      card.distance.textContent = niceFeet(feetToStep);
-      card.instruction.textContent = instructionFor(step.type);
-    }
-  }
-
-  /**
-   * Build a whole new sign and run it in from the left while the finished one
-   * runs out to the right — both at once, so two complete banners are on screen
-   * for the length of the swap.
-   */
-  function swapStep(step, feetToStep, arrived, isFirst) {
-    clearBannerTimers();
-    // Clearing the timers also cancelled whatever removal was pending, so any
-    // sign still mid-exit has to be swept up here or it leaks into the DOM.
-    navStack.querySelectorAll('.nav-sign--out').forEach((stale) => stale.remove());
-
-    const incoming = createSignCard();
-    paintStep(incoming, step, feetToStep, arrived);
-
-    const outgoing = isFirst ? null : liveCard;
-    if (outgoing) {
-      // Taking it out of flow lets the incoming card land in the same box.
-      outgoing.el.classList.remove('nav-sign--in', 'nav-sign--first');
-      outgoing.el.classList.add('nav-sign--out');
-    }
-
-    incoming.el.classList.add(outgoing ? 'nav-sign--in' : 'nav-sign--first');
-    navStack.appendChild(incoming.el);
-    liveCard = incoming;
-    bannerBusy = true;
-
-    bannerTimers.push(setTimeout(() => {
-      if (outgoing) outgoing.el.remove();
-      incoming.el.classList.remove('nav-sign--in', 'nav-sign--first');
-      bannerBusy = false;
-    }, BANNER_SWAP_MS));
-  }
-
-  function renderBanner(distanceAlong) {
-    const totalKm = cumulative[cumulative.length - 1];
-    const step = maneuvers[stepIndex];
-
-    const feetToStep = Math.max(0, (cumulative[step.index] - distanceAlong) * FEET_PER_KM);
-    const feetRemaining = Math.max(0, (totalKm - distanceAlong) * FEET_PER_KM);
-    const arrived = feetRemaining <= ARRIVED_FEET;
-
-    if (arrived) stopSimulation();
-
-    if (stepIndex !== renderedStep) {
-      const isFirst = renderedStep === -1;
-      renderedStep = stepIndex;
-      swapStep(step, feetToStep, arrived, isFirst);
-    } else if (!bannerBusy && liveCard) {
-      // Between turns only the countdown moves — never re-run the animation.
-      if (arrived) paintStep(liveCard, step, feetToStep, true);
-      else liveCard.distance.textContent = niceFeet(feetToStep);
-    }
-
-    navRemaining.textContent = niceFeet(feetRemaining);
-    const minutes = feetRemaining / WALK_FEET_PER_SEC / 60;
-    navEta.textContent = minutes < 1 ? '< 1 min' : `${Math.round(minutes)} min`;
-  }
-
-  function moveCamera(here, distanceAlong, duration) {
-    const totalKm = cumulative[cumulative.length - 1];
-
-    // Aim a short way up the route so the heading is stable, but never past the
-    // maneuver we are walking toward — looking beyond the corner would start
-    // swinging the camera while you are still travelling straight at it.
-    const nextManeuverKm = cumulative[maneuvers[stepIndex].index];
-    const lookAheadKm = Math.min(distanceAlong + LOOK_AHEAD_KM, nextManeuverKm, totalKm);
-
-    // Within a stride of the corner the aim point collapses onto us and the
-    // bearing goes unstable, so hold the last good one until the step flips.
-    if (lookAheadKm - distanceAlong > MIN_AIM_KM) {
-      const ahead = along(routeLine, lookAheadKm);
-      lastBearing = bearing(point(here), ahead);
-    }
-
-    map.easeTo({
-      center: here,
-      zoom: 18.5,
-      pitch: 60,
-      bearing: lastBearing,
-      duration,
-      essential: true,
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // Simulator — walk the route without leaving your desk
-  // -------------------------------------------------------------------------
-
-  /**
-   * Walk the route.
-   *
-   * TWO WAYS THROUGH, and which one runs is decided by whether the virtual
-   * location is standing in for the GPS.
-   *
-   *   WITH THE FIXTURE ON, this moves the FIXTURE and nothing else. The
-   *   geolocation object delivers the new position to the watch the control
-   *   already has open, the control fires its own `geolocate`, and that is what
-   *   advances the navigation — so the blue dot, the accuracy ring and the
-   *   heading wedge move because the position they are drawn from moved. This is
-   *   what the fixture is for: from inside the control nothing about the walk is
-   *   made up. It is also the only arrangement where there is ONE dot on the
-   *   screen rather than a stationary blue one and a moving grey one.
-   *
-   *   WITHOUT IT there is no fix to move, so the marker is driven directly, as
-   *   it always was.
-   *
-   * The fixture is left wherever the walk ended rather than being put back. You
-   * walked there; a route started afterwards should start from where you are.
-   * Toggling the switch off and on again returns it to the centre of campus.
-   */
-  function startSimulation() {
-    stopSimulation();
-    simAlong = 0;
-    const totalKm = cumulative[cumulative.length - 1];
-    const perTickKm =
-      (WALK_FEET_PER_SEC * SIM_SPEED * (SIM_TICK_MS / 1000)) / FEET_PER_KM;
-    const viaFixture = Boolean(geolocation.fixture);
-
-    simTimer = setInterval(() => {
-      simAlong = Math.min(simAlong + perTickKm, totalKm);
-      const position = along(routeLine, simAlong).geometry.coordinates;
-      if (viaFixture) {
-        // The wedge points where the camera is already facing, which is the
-        // direction of travel — onUserMoved works it out a stride ahead.
-        geolocation.useFixture(position, { heading: lastBearing });
-      } else {
-        if (userMarker) userMarker.setLngLat(position);
-        onUserMoved(position);
-      }
-      if (simAlong >= totalKm) stopSimulation();
-    }, SIM_TICK_MS);
-  }
-
-  function stopSimulation() {
-    if (simTimer) clearInterval(simTimer);
-    simTimer = null;
   }
 
   // -------------------------------------------------------------------------
@@ -5977,8 +5358,8 @@ function startApp() {
       // has to finish inside one tick. At a second apiece every fix would
       // interrupt the last and the dot would slide along a route the camera
       // never catches up with.
-      onUserMoved([e.coords.longitude, e.coords.latitude],
-        { duration: simTimer ? SIM_TICK_MS : 1000 });
+      nav.moved([e.coords.longitude, e.coords.latitude],
+        { duration: nav.isSimulating() ? SIM_TICK_MS : 1000 });
     });
 
     // What `locating` is kept in step with — see startLocating for why guessing
@@ -6020,7 +5401,7 @@ function startApp() {
 
     const buildingsReady = fetchOverlay('buildings').then((data) => {
       campusBuildings = data;
-      if (navActive) addBuildingsLayer();
+      if (navigating()) addBuildingsLayer();
       buildLegendIndex();
     }, orElse());
 
@@ -6412,20 +5793,16 @@ function startApp() {
       return;
     }
 
-    routeCoords = result.geometry.coordinates;
-    routeLine = lineString(routeCoords);
-    cumulative = cumulativeDistances(routeCoords);
-    maneuvers = result.maneuvers;
-    stepIndex = 0;
+    // `stepIndex` used to be zeroed here too. It is navigation's, it is only
+    // ever read while a walk is running, and nav.start() zeroes it — so this
+    // was resetting a counter nothing could have read.
+    route.set(result);
 
-    map.getSource('calculated-route').setData({
-      type: 'Feature',
-      geometry: result.geometry,
-    });
+    map.getSource('calculated-route').setData(route.feature());
     paintLegs();
 
     setRouteSummary(result.distanceFeet);
-    const turns = maneuvers.length - 2;
+    const turns = route.maneuvers.length - 2;
     setStatus(`Route calculated — ${turns} turn${turns === 1 ? '' : 's'}.`);
     setNavButtonsEnabled(true);
 
@@ -6433,7 +5810,7 @@ function startApp() {
     // in, and half a route running off the top of the screen is the same bug as
     // a category whose pins are behind the panel. Same helper, so it leaves the
     // camera alone when the whole thing is already in front of you.
-    frame(routeCoords, { maxZoom: 17 });
+    frame(route.coords, { maxZoom: 17 });
   }
 
   /**
@@ -6552,7 +5929,7 @@ function startApp() {
       .filter((id) => map.getLayer(id));
 
   map.on('mousemove', (e) => {
-    if (navActive) return;
+    if (navigating()) return;
     const layers = POINTER_LAYERS();
     const [hit] = layers.length ? map.queryRenderedFeatures(e.point, { layers }) : [];
     map.getCanvas().style.cursor = hit ? 'pointer' : '';
@@ -6579,11 +5956,11 @@ function startApp() {
   });
 
   map.on('click', (e) => {
-    if (navActive || !networkPoints) return;
+    if (navigating() || !networkPoints) return;
     // The release at the end of a press-and-hold. That gesture has already done
     // its work; without this the same finger would drop a route point and then
     // immediately clear the selection on the way back up.
-    if (swallowClick) { swallowClick = false; return; }
+    if (longPress.consumeClick()) return;
 
     // A tap on a pin lifts it rather than dropping a second one beside it.
     // Tested before buildings because pins sit on top of them and half of them
@@ -6633,48 +6010,12 @@ function startApp() {
   // -------------------------------------------------------------------------
   // Dropping a route point
   //
-  // Press and hold, the way Apple Maps does it, rather than on a plain tap.
-  //
-  // A tap used to place a start or an end, and it was the wrong gesture for a
-  // map at this zoom: the two things a finger most wants to do to a campus are
-  // "what is that" and "get closer", and both of them were spending a route
-  // marker to find out. Double-tapping to zoom in was actively broken by it —
-  // the first tap dropped a start point, the second dropped an end point, and
-  // the map zoomed while drawing a route between two places nobody chose.
-  //
-  // Making the deliberate thing deliberate fixes both at once. A tap is now
-  // free to mean "tell me about this", a double-tap is free to mean "closer",
-  // and the one gesture that changes state is the one you have to mean.
+  // The gesture itself is src/long-press.js — how long a hold is, how far a
+  // finger may travel first, the ring that shows it happening and the six
+  // events that end one. What a completed hold MEANS is here, because it
+  // reaches into the marker, the place card and both route endpoints, and
+  // none of that is the recogniser's business.
   // -------------------------------------------------------------------------
-
-  /** How long the press has to be held. Apple's own is around half a second. */
-  const LONG_PRESS_MS = 500;
-
-  /**
-   * ...and how far the finger may travel first, in px.
-   *
-   * Generous, because this is competing with dragging the map and the two are
-   * told apart by intent rather than by distance: somebody panning moves a long
-   * way immediately, and somebody holding still on a phone in one hand wobbles
-   * by a few pixels the whole time. Under about 8 the gesture is unusable while
-   * walking, which is the condition this app is used in.
-   */
-  const LONG_PRESS_SLOP = 10;
-
-  let pressTimer = 0;
-  let pressAt = null;
-  let swallowClick = false;
-
-  /** The growing ring under the finger. Removed by whichever end comes first. */
-  let pressRing = null;
-
-  function endPress() {
-    clearTimeout(pressTimer);
-    pressTimer = 0;
-    pressAt = null;
-    pressRing?.remove();
-    pressRing = null;
-  }
 
   /**
    * What a completed hold does: it drops a pin, and a pin is a PLACE.
@@ -6735,70 +6076,14 @@ function startApp() {
     ), null, { at: snapped, zoom: 0 });
   }
 
-  function beginPress(e) {
-    if (navActive || !networkPoints) return;
-    endPress();
-    // A new gesture starts clean. This is also the recovery path for a hold
-    // that ended without a click at all — a finger lifted over the sidebar, or
-    // outside the window — where the flag would otherwise still be set and
-    // would eat the next real tap.
-    swallowClick = false;
-    pressAt = e.point;
-
-    // Feedback, and it is not decoration: a gesture with no visible response
-    // until it has already fired is a gesture nobody discovers. The ring grows
-    // for exactly as long as the hold lasts, so the animation IS the progress
-    // bar — let go early and you can see you let go early.
-    pressRing = document.createElement('div');
-    pressRing.className = 'g-press-ring';
-    pressRing.style.left = `${e.point.x}px`;
-    pressRing.style.top = `${e.point.y}px`;
-    pressRing.style.animationDuration = `${LONG_PRESS_MS}ms`;
-    map.getContainer().append(pressRing);
-
-    pressTimer = window.setTimeout(() => {
-      endPress();
-      // Set before the call, not after: dropRoutePoint is asynchronous and the
-      // finger comes up long before it settles, so a flag set on the far side
-      // of it would be set after the click it exists to swallow.
-      //
-      // Cleared by that click, or by the next press if none arrives. NOT on a
-      // timer — the fire happens while the finger is still down, and there is
-      // no upper bound on how long somebody holds it there, so any timeout
-      // short enough to be useful is one a slow hand beats.
-      swallowClick = true;
-      // A hold does not clear a category or open a building the way a tap does
-      // — it is a different gesture and means only one thing.
-      dropPin(e.lngLat);
-    }, LONG_PRESS_MS);
-  }
-
-  map.on('mousedown', (e) => {
-    // Left button only. A right-press is the context menu, and on a trackpad a
-    // two-finger press arrives here as button 2 while the hand is still.
-    if (e.originalEvent.button === 0) beginPress(e);
-  });
-  map.on('touchstart', (e) => {
-    // One finger. Two is a pinch or a two-finger rotate, and both of those are
-    // held still for a moment at the start.
-    if (e.points.length === 1) beginPress(e);
+  const longPress = createLongPress({
+    map,
+    // Not during a walk, and not before the network has landed — there is
+    // nothing to snap a dropped pin to until it has.
+    enabled: () => !navigating() && Boolean(networkPoints),
+    onHold: dropPin,
   });
 
-  // Any travel past the slop is a drag, and a drag is panning.
-  for (const moved of ['mousemove', 'touchmove']) {
-    map.on(moved, (e) => {
-      if (!pressAt) return;
-      const at = e.point ?? e.points?.[0];
-      if (at && Math.hypot(at.x - pressAt.x, at.y - pressAt.y) > LONG_PRESS_SLOP) endPress();
-    });
-  }
-
-  // Every way a press can stop being one. `dragstart` and `zoomstart` are not
-  // redundant with the movement test above: a momentum pan or a pinch can move
-  // the map without the pointer itself travelling anywhere.
-  for (const over of ['mouseup', 'touchend', 'touchcancel', 'dragstart', 'zoomstart']) {
-    map.on(over, endPress);
-  }
 
   // -------------------------------------------------------------------------
   // Destination search
@@ -6818,7 +6103,6 @@ function startApp() {
   const searchClear = document.getElementById('place-clear');
   const placeShortcuts = document.getElementById('place-shortcuts');
 
-  const MAX_RESULTS = 8;
   // Built once from the committed artifact, which is static — unlike the place
   // index below, which waits on a fetch.
   const roomIndex = buildRoomIndex(roomsData);
@@ -6889,86 +6173,20 @@ function startApp() {
   let searchHits = [];
   let activeHit = -1;
 
-  const normalise = (s) => (s ?? '')
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-
   function buildSearchIndex() {
-    // my campus lists a class like "Defibrillator" once per node, which build-places
-    // splits into one feature each. Six identical rows in a result list is
-    // noise, so they collapse to one entry holding every position.
-    const groups = new Map();
-    for (const feature of campusPlaces.features) {
-      const { name, description } = feature.properties;
-      const group = groups.get(name) ?? { name, description, points: [] };
-      group.points.push(feature.geometry.coordinates);
-      groups.set(name, group);
-    }
-    searchIndex = [...groups.values()].map((group) => ({
-      ...group,
-      nameKey: normalise(group.name),
-      haystack: normalise(`${group.name} ${group.description ?? ''}`),
-    }));
+    searchIndex = buildPlaceIndex(campusPlaces.features);
+    // The field is disabled in the markup and opened here, so nobody types into
+    // a box that has nothing to search yet.
     searchInput.disabled = false;
   }
 
-  /** 0 when a term is absent. Higher is a better place for it to have matched. */
-  function scoreTerm(entry, term) {
-    if (entry.nameKey === term) return 100;
-    if (entry.nameKey.startsWith(`${term} `) || entry.nameKey === term) return 80;
-    if (entry.nameKey.split(' ').some((w) => w.startsWith(term))) return 60;
-    if (entry.nameKey.includes(term)) return 35;
-    if (entry.haystack.includes(term)) return 12;
-    return 0;
-  }
-
-  /**
-   * Rooms and courses first, then places.
-   *
-   * Ahead rather than interleaved, and not because they score higher — they are
-   * not scored at all. Typing "320" or "ACCT 101" is a different kind of act
-   * from typing "library": it is a lookup with a right answer, and the place
-   * index cannot produce that answer at any score because it has never heard of
-   * a room. Ranking them together would let a fuzzy name match on some place
-   * whose description happens to contain "320" outrank the room itself.
-   *
-   * They still share the budget, so a query that is both — "STEM 213" is a
-   * building with that room AND a course code — cannot bury the ordinary
-   * results entirely.
-   */
   function runSearch(query) {
-    const rooms = lookupRoom(query, roomIndex).slice(0, MAX_RESULTS - 2);
-    const terms = normalise(query).split(' ').filter(Boolean);
-    if (!terms.length) return rooms;
-    const scored = [];
-    for (const entry of searchIndex) {
-      let total = 0;
-      // Every term has to land somewhere, so "student center" cannot match a
-      // row that only has "student".
-      for (const term of terms) {
-        const score = scoreTerm(entry, term);
-        if (!score) { total = 0; break; }
-        total += score;
-      }
-      // Then two tie-breaks, in the order they deserve. WHERE PEOPLE ACTUALLY
-      // GO first: one keystroke matches thirty rows at an identical lexical
-      // score, and spelling has nothing left to say about which of them you
-      // meant. Bounded well under the gap between two kinds of match, so it can
-      // only reorder within a band — see MAX_BONUS in src/popular.js.
-      //
-      // Shorter names settle what is left, so "Library" beats "Lockers for
-      // Library" among two places nobody has been to.
-      if (total) {
-        scored.push({
-          entry,
-          score: total + popularBonus(entry.name) - entry.nameKey.length / 1000,
-        });
-      }
-    }
-    const places = scored.sort((a, b) => b.score - a.score).map((s) => s.entry);
-    return [...rooms, ...places].slice(0, MAX_RESULTS);
+    return search({
+      index: searchIndex,
+      query,
+      rooms: lookupRoom(query, roomIndex).slice(0, MAX_RESULTS - 2),
+      bonus: popularBonus,
+    });
   }
 
   /**
@@ -6985,10 +6203,11 @@ function startApp() {
    * a building the two spell differently is a row that would go nowhere.
    */
   function popularHits() {
-    const byName = new Map(searchIndex.map((entry) => [entry.name, entry]));
-    return popularNames({ directory: campusDirectory, limit: MAX_RESULTS - 2 })
-      .map((name) => byName.get(name))
-      .filter(Boolean);
+    return popularEntries({
+      index: searchIndex,
+      directory: campusDirectory,
+      limit: MAX_RESULTS - 2,
+    });
   }
 
   function closeResults() {

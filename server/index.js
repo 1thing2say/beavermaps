@@ -189,7 +189,11 @@ function route(req, res) {
   // the coordinate is nowhere near anything this server knows how to walk on.
   // The client tells them apart to decide what to say, so the wire has to.
   if (!result.ok) {
-    const status = result.reason === 'unreachable' ? 422 : 404;
+    // 404 is "the graph does not join these two", which is a fact about the
+    // network. 422 is "the request itself does not describe a walk", which is
+    // a fact about what was asked — too far to snap, or both ends in the same
+    // place. Only the second kind is worth putting in front of a person.
+    const status = UNPROCESSABLE.has(result.reason) ? 422 : 404;
     return res.status(status).json({ error: result.error, reason: result.reason });
   }
 
@@ -200,6 +204,9 @@ function route(req, res) {
     snapped: result.snapped,
   });
 }
+
+/** Reasons that mean "well-formed, but not a walk" rather than "no such path". */
+const UNPROCESSABLE = new Set(['unreachable', 'same-place']);
 
 app.get('/api/route', route);
 app.post('/api/route', route);
