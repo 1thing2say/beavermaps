@@ -443,6 +443,7 @@ function startApp() {
   });
   const setStatus = (sentence, isError = false) => status.set(sentence, isError);
   const setProgress = (sentence) => status.progress(sentence);
+  const setNotice = (sentence) => status.notice(sentence);
   const setIdleStatus = () => status.rest();
   const setBusy = (on) => status.setBusy(on);
 
@@ -899,6 +900,7 @@ function startApp() {
     setStyleBuilt: (on) => { styleBuilt = on; },
     litPalette,
     setStatus: (sentence, isError) => setStatus(sentence, isError),
+    setNotice: (sentence) => setNotice(sentence),
     rebuild: () => addNetworkLayers(),
     clearHover: () => pins.clearHover(),
     standBuildings: () => addBuildingsLayer(),
@@ -1040,6 +1042,18 @@ function startApp() {
 
   legendOpen.addEventListener('click', onLegendPressed);
   debugLegend.addEventListener('click', onLegendPressed);
+
+  // ...and the breakpoint itself is a thing that happens, not only a thing that
+  // is true at startup. A phone crosses it by being turned over, and everything
+  // this width decides — the column being a sheet rather than a sidebar, the
+  // legend being a panel rather than a card over the map — was decided once and
+  // never again. `refit` puts the sheet's own numbers back (a rotation also
+  // fires `resize`, so that half was covered); `refitLegend` is the half that
+  // was not, and the comment on it in src/panels.js is the long version.
+  phone.addEventListener('change', () => {
+    refitSheet();
+    panels.refitLegend();
+  });
 
   layersBtn.addEventListener('click', () => toggleSheet(layersMenu, layersBtn));
   // Click-away, the way every menu of this shape behaves. Bound on the document
@@ -1497,8 +1511,42 @@ function startApp() {
     ['category-pins', 'campus-amenities', ...POI_LABEL_LAYERS, 'campus-directory-hit']
       .filter((id) => map.getLayer(id));
 
+  /**
+   * When a finger last touched the map.
+   *
+   * A TAP IS ALSO A MOUSE EVENT, which is the whole problem. Measured on an
+   * emulated phone: one tap on the canvas produces `mouseover, mousemove,
+   * mousedown, mouseup, click` — the compatibility events every browser still
+   * sends after a touch, so that pages written before touch existed keep
+   * working. Mapbox turns the mousemove into a MapMouseEvent like any other and
+   * the handler below duly hovers whatever was under the finger: the pin grows
+   * by HOVER_SCALE and its name goes to the accent colour.
+   *
+   * And it stays there. `mouseout` is what puts a hover down, and a finger
+   * never leaves the canvas — it lifts off it — so nothing fires. The pin was
+   * left big and tinted after the hand was gone, on a map where being big and
+   * tinted is how a pin says it is under the pointer, and there was no pointer.
+   *
+   * A TIMESTAMP RATHER THAN A FLAG, because a device can have both. A tablet
+   * with a trackpad, a laptop with a touchscreen: latching "this is a touch
+   * device" off the first tap would cost them hover for the rest of the
+   * session. The compatibility events arrive immediately after the release, so
+   * a window measured from the last touch closes on its own and a real pointer
+   * moved a moment later is answered normally.
+   */
+  let lastTouch = 0;
+  /** How long after a finger a mouse event is still that finger's. */
+  const TOUCH_MOUSE_MS = 700;
+  for (const ended of ['touchstart', 'touchend', 'touchcancel']) {
+    // `touchstart` as well as the ends, so a hover a mouse left behind earlier
+    // is taken down the moment the map is touched rather than surviving
+    // underneath the finger.
+    map.on(ended, () => { lastTouch = Date.now(); hoverPin(null); });
+  }
+
   map.on('mousemove', (e) => {
     if (navigating()) return;
+    if (Date.now() - lastTouch < TOUCH_MOUSE_MS) return;
     const layers = POINTER_LAYERS();
     const [hit] = layers.length ? map.queryRenderedFeatures(e.point, { layers }) : [];
     map.getCanvas().style.cursor = hit ? 'pointer' : '';

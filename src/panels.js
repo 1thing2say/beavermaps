@@ -43,6 +43,18 @@ export function createPanels({
   legendClose,
   clearLegendHighlight,
 }) {
+  /**
+   * Whether the legend is up, or down, because somebody said so.
+   *
+   * False while it is the LAYOUT's: above the breakpoint the legend holds the
+   * right edge and is furniture, below it the same panel is a sheet over the
+   * map and starts closed — which is the rule main.js applies at startup, and
+   * the rule `refitLegend` re-applies every time that breakpoint is crossed.
+   * True the moment a person touches it either way, after which crossings leave
+   * it exactly where they put it.
+   */
+  let legendAsked = false;
+
   /** Show or hide a floating card, keeping the button that owns it in step. */
   function toggleSheet(sheet, button, force) {
     const open = force ?? sheet.classList.contains('hidden');
@@ -99,6 +111,12 @@ export function createPanels({
   function toggleLegendPanel(force) {
     const was = !legendPanel.classList.contains('hidden');
     const open = toggleSheet(legendPanel, legendOpen, force);
+    // Every path that opens or closes the legend deliberately comes through
+    // here — the layers row, the panel's own close, the sheet stack's dismiss —
+    // so this is the one place that can record that the decision was somebody's
+    // rather than the layout's. `refitLegend` is the exception and puts it
+    // straight back; see there for what the flag is for.
+    legendAsked = true;
     // The debug menu's row is a second surface on this one piece of state, like
     // its map-type and look buttons are on theirs. Only the attribute is
     // repeated here; the panel's own class is still the single source of truth,
@@ -134,11 +152,50 @@ export function createPanels({
     // campus squeezed into the strip above it.
     if (isPhone()) toggleRoutePanel(false);
   }
+
+  /**
+   * Re-decide the legend for a layout that has changed under it.
+   *
+   * THE BUG THIS EXISTS TO FIX. The legend's opening state was decided once, at
+   * startup, from the width the page happened to load at — and a phone changes
+   * that width by being turned over. Open the app in landscape, where 844px is
+   * above the breakpoint and the legend is the panel down the right edge, then
+   * rotate to portrait: the same panel is now a bottom sheet, sitting in the
+   * stack behind whatever else is open, and closing that reveals 442px of
+   * legend over the map on a 390x844 screen. Which is precisely what the note
+   * beside the startup line says must not happen — "where it is a sheet over
+   * the map it is not furniture, so on a phone it stays closed" — happening
+   * anyway, because nothing was listening for the width to change.
+   *
+   * The other direction was wrong too and more quietly: a phone that loaded in
+   * portrait and was turned to landscape never got the legend at all, because
+   * the one line that opens it had already run.
+   *
+   * ONLY WHILE NOBODY HAS SAID OTHERWISE. A legend somebody opened from the
+   * layers menu on a phone is one they asked for and it stays through a
+   * rotation; a legend that is merely where the last layout left it is the
+   * layout's to move. `toggleLegendPanel` raises that flag and this is the one
+   * caller that puts it back down, because this is the one call that is not a
+   * person.
+   */
+  function refitLegend() {
+    if (legendAsked) return;
+    const want = !isPhone();
+    if (want === !legendPanel.classList.contains('hidden')) return;
+    // The outline goes with the panel, for the reason the close button gives:
+    // a highlight with its legend gone is a purple campus and nothing on screen
+    // saying why.
+    if (!want) clearLegendHighlight();
+    toggleLegendPanel(want);
+    legendAsked = false;
+  }
+
   return {
     toggleSheet,
     toggleRoute: toggleRoutePanel,
     showRoute: showRoutePanel,
     toggleLegend: toggleLegendPanel,
     onLegendPressed,
+    refitLegend,
   };
 }

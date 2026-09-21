@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { snapTo } from '../src/sheet.js';
+import { claims, snapTo } from '../src/sheet.js';
 
 /** A phone-shaped set: collapsed head, half the screen, most of the screen. */
 const DETENTS = [122, 422, 748];
@@ -17,6 +17,40 @@ const [REST, HALF, FULL] = DETENTS;
 
 const release = (height, velocity, from = REST) =>
   snapTo({ height, velocity, detents: DETENTS, from });
+
+// THE HEIGHT A DRAG STARTED FROM IS NOT ONE OF THE DETENTS, quite.
+//
+// `from` is read off getBoundingClientRect() and the detents are rounded, so on
+// a real phone the drag that started exactly at rest starts at 523.28 and rest
+// is 523. Both halves of the flick rescue compared the two as if they were the
+// same number: the guard never matched, and when it did, indexOf answered -1
+// and the step landed on the lowest stop. A sheet thrown open settled shut.
+
+test('a flick out of a detent is rescued even from a fractional height', () => {
+  // Straight off a phone: rest measured at 523.28, thrown upward at 0.53px/ms
+  // from a height the max-height cap had pinned at rest. Projected it reaches
+  // 587, which is nearest rest — so the rescue is the only thing that can carry
+  // it, and it has to recognise 523.28 as rest to do so.
+  assert.equal(
+    snapTo({ height: 523, velocity: 0.53, detents: [523, 748], from: 523.28 }),
+    748,
+    'a sheet thrown open settled back shut',
+  );
+  // ...and the same the other way, off the top detent.
+  assert.equal(
+    snapTo({ height: 748, velocity: -0.53, detents: [523, 748], from: 748.4 }),
+    523,
+  );
+});
+
+test('a fractional start does not invent a step that was not asked for', () => {
+  // Slow, so there is no flick to rescue: it lands where it is nearest and the
+  // fractional `from` changes nothing.
+  assert.equal(
+    snapTo({ height: 530, velocity: 0.1, detents: [523, 748], from: 523.28 }),
+    523,
+  );
+});
 
 test('a slow release lands at the nearest detent', () => {
   assert.equal(release(140, 0), REST, 'a sheet barely lifted did not fall back');
@@ -68,4 +102,75 @@ test('the detents need not arrive in order', () => {
   const tall = [523, 422, 748];
   assert.equal(snapTo({ height: 430, velocity: 0, detents: tall, from: 523 }), 422);
   assert.equal(snapTo({ height: 520, velocity: 0, detents: tall, from: 523 }), 523);
+});
+
+// ---------------------------------------------------------------------------
+// ...and who the gesture belonged to in the first place.
+//
+// `snapTo` decides where a drag ends. This decides whether there is a drag at
+// all, and until it existed as a function the answer was reached twice: once in
+// `onMove` for us, and — because a scroller claims a vertical drag at the
+// compositor before any handler is consulted — never at all for the browser,
+// which took every touch gesture off the sheet and cancelled the pointer. The
+// sheet answered a finger nowhere but its 26px grabber.
+//
+// So the rules are here, one copy, read by both callers. The cases below are
+// the four corners of the thing: a scroller at its top, at its bottom, in the
+// middle, and not a scroller at all.
+
+/** A sheet holding a long list: 900px of content in a 400px box. */
+const LONG = { fromGrip: false, scrolled: 0, room: 500 };
+/** ...and one holding less than it can show. */
+const SHORT = { fromGrip: false, scrolled: 0, room: 0 };
+
+const down = { dx: 0, dy: 40 };
+const up = { dx: 0, dy: -40 };
+
+test('at the top of a long list, down is the sheet and up is the scroller', () => {
+  assert.equal(claims({ ...LONG, ...down }), true, 'a full sheet could not be dragged shut');
+  assert.equal(claims({ ...LONG, ...up }), false, 'the list could not be scrolled');
+});
+
+test('at the bottom of a long list, the two swap over', () => {
+  const end = { ...LONG, scrolled: 500 };
+  assert.equal(claims({ ...end, ...up }), true);
+  assert.equal(claims({ ...end, ...down }), false);
+});
+
+test('in the middle of a long list, neither direction is the sheet', () => {
+  const mid = { ...LONG, scrolled: 250 };
+  assert.equal(claims({ ...mid, ...up }), false);
+  assert.equal(claims({ ...mid, ...down }), false);
+});
+
+test('a sheet with nothing to scroll takes both directions', () => {
+  assert.equal(claims({ ...SHORT, ...up }), true);
+  assert.equal(claims({ ...SHORT, ...down }), true);
+});
+
+test('the grabber is always the sheet, whatever is under it', () => {
+  // The case the grabber exists for: a list scrolled into its middle, where
+  // every rule above gives the gesture away.
+  const mid = { fromGrip: true, scrolled: 250, room: 500 };
+  assert.equal(claims({ ...mid, ...up }), true);
+  assert.equal(claims({ ...mid, ...down }), true);
+});
+
+test('sideways is never the sheet, not even off the grabber', () => {
+  // The shortcut shelf across the sheet's head scrolls horizontally, and it
+  // sits close enough to the grabber that a flick along it can start inside
+  // one. Either way it has to reach the browser: the sheet has no answer for a
+  // sideways drag, and swallowing one stops the chips moving.
+  assert.equal(claims({ ...SHORT, dx: 40, dy: 4 }), false);
+  assert.equal(claims({ fromGrip: true, scrolled: 0, room: 0, dx: -40, dy: 4 }), false);
+  // Equal parts is not sideways: a diagonal drag on a sheet that owns both
+  // directions is still a drag on the sheet.
+  assert.equal(claims({ ...SHORT, dx: 20, dy: 20 }), true);
+});
+
+test('the first move of a gesture is only a pixel or two', () => {
+  // This is asked before START, on whatever the first touchmove reports, so it
+  // has to answer off numbers far too small to threshold.
+  assert.equal(claims({ ...LONG, dx: 0, dy: 1 }), true, 'a downward gesture was given away');
+  assert.equal(claims({ ...LONG, dx: 1, dy: -1 }), false);
 });

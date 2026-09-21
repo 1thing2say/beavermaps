@@ -83,10 +83,23 @@ mkdirSync(pub, { recursive: true });
 writeFileSync(resolve(pub, 'favicon.ico'), Buffer.concat([dir, png]));
 console.log(`favicon.ico          ${width}x${height}  ${dir.length + png.length} bytes`);
 
-// ------------------------------------------------------- apple-touch-icon.png
+// ------------------------------------------------------------- the tile icons
 //
-// 180 square, which is the size an iPhone at 3x asks for, and the one every
-// smaller ask is scaled down from.
+// THREE SIZES OUT OF ONE DRAWING, for three things that ask differently.
+//
+//   180  apple-touch-icon.png, which is the size an iPhone at 3x asks for, and
+//        the one every smaller ask is scaled down from. Found by iOS at the
+//        origin root whether or not anything links it.
+//   192  the smallest an installable web app may offer, and what Android draws
+//        on the home screen. Named by public/manifest.webmanifest.
+//   512  what the same manifest is asked for by the install prompt and the app
+//        switcher, where the icon is shown several times larger than anything
+//        above.
+//
+// The manifest is the reason the last two exist. There was one tile here and it
+// was Apple's, so telling Android to install this app offered it a 180 — under
+// the floor Chrome will accept for an installable icon, which is how a mark
+// built on purpose ends up replaced by the letter B on a coloured circle.
 //
 // PAINTED GROUND, ROUNDED THE WAY APPLE ROUNDS IT.
 //
@@ -108,29 +121,34 @@ console.log(`favicon.ico          ${width}x${height}  ${dir.length + png.length}
 // the usual guess and it is wrong in a way you can see: it is tangent to each
 // side at one point, so the flat part of every edge is half-transparent. The
 // shape is a rectangle with a smoothed corner — straight edges, and inside a
-// corner square of side MASK_R a superellipse of exponent MASK_N. Both numbers
-// were solved against the alpha channel of maps.apple.com's own
-// maps-app-icon-180x180.png, and reproduce it to a mean of 0.6 in 255.
+// corner square of side 0.328 of the tile a superellipse of exponent MASK_N.
+// Both numbers were solved against the alpha channel of maps.apple.com's own
+// maps-app-icon-180x180.png, and reproduce it to a mean of 0.6 in 255. The
+// radius is a fraction rather than a count of pixels so the same corner comes
+// out of a 192 and a 512 as out of the 180 it was fitted to.
 //
-// SCALED BY 5, NOT BY 180/32. 5.625 source pixels per icon pixel is the exact
-// case the .ico above refuses to touch — every sixth row of a drawing with no
-// anti-aliasing in it comes out a different weight from its neighbours, and on
-// a mark this small that reads as a wobble in the stroke. 5 is a whole number,
-// so every source pixel becomes a clean 5x5 block and the drawing survives; the
-// 20px that 160 leaves over becomes margin, which the tile wanted anyway.
+// SCALED BY A WHOLE NUMBER, NOT BY size/32. 5.625 source pixels per icon pixel
+// is the exact case the .ico above refuses to touch — every sixth row of a
+// drawing with no anti-aliasing in it comes out a different weight from its
+// neighbours, and on a mark this small that reads as a wobble in the stroke. A
+// whole number makes every source pixel a clean square block and the drawing
+// survives; what the scale leaves over becomes margin, which the tile wanted
+// anyway.
+//
+// So each size below names its own scale rather than deriving one. The three
+// are the largest whole number that still leaves the mark near 78% of the tile
+// — 5 into 180 and 192, 14 into 512 — and the assertion in `tile` is what
+// catches a logo redrawn larger than the pair can hold.
 //
 // CENTRED ON THE INK, not on the source canvas. The mark sits in its 32 box
 // with a spare column on the right and three spare rows under the pin's stem —
 // fine in a navbar, where it is one item in a row, and visible on a tile, where
 // it is the only thing there. Centring the drawn pixels puts the margin evenly
-// around it. At this scale that leaves the ink 78% of the tile tall, which
-// clears the corner everywhere — checked against the fitted mask below, and
-// against masks rounder than it, rather than eyeballed.
+// around it. At these scales that leaves the ink between 73% and 78% of the
+// tile tall, which clears the corner everywhere — checked against the fitted
+// mask below, and against masks rounder than it, rather than eyeballed.
 
-const TILE = 180;
-const SCALE = 5;
 const GROUND = [0xff, 0xff, 0xff];
-const MASK_R = TILE * 0.328;
 const MASK_N = 2.7;
 // Samples per axis inside each pixel when working out how much of it the mask
 // covers. 4 is 16 samples, which is enough to keep the curve from stepping.
@@ -138,52 +156,67 @@ const MASK_SAMPLES = 4;
 
 const mark = decode(png);
 const box = inkBox(mark);
-const inkW = (box.right - box.left) * SCALE;
-const inkH = (box.bottom - box.top) * SCALE;
-if (inkW > TILE || inkH > TILE) throw new Error(`the mark is ${inkW}x${inkH} at ${SCALE}x, which will not fit a ${TILE} tile`);
 
-// Where the source's own origin lands once the ink is centred.
-const originX = Math.round(TILE / 2 - (box.left * SCALE + inkW / 2));
-const originY = Math.round(TILE / 2 - (box.top * SCALE + inkH / 2));
-
-const tile = Buffer.alloc(TILE * TILE * 4);
-for (let i = 0; i < tile.length; i += 4) {
-  tile.set(GROUND, i);
-  tile[i + 3] = 0xff;
+for (const [name, size, scale] of [
+  ['apple-touch-icon.png', 180, 5],
+  ['icon-192.png', 192, 5],
+  ['icon-512.png', 512, 14],
+]) {
+  const image = tile(size, scale);
+  writeFileSync(resolve(pub, name), image);
+  const ink = `${(box.right - box.left) * scale}x${(box.bottom - box.top) * scale}`;
+  console.log(`${name.padEnd(20)} ${size}x${size}  ${image.length} bytes  (mark at ${scale}x, ${ink})`);
 }
 
-for (let y = 0; y < TILE; y++) {
-  const sy = Math.floor((y - originY) / SCALE);
-  if (sy < 0 || sy >= mark.height) continue;
-  for (let x = 0; x < TILE; x++) {
-    const sx = Math.floor((x - originX) / SCALE);
-    if (sx < 0 || sx >= mark.width) continue;
-    const s = (sy * mark.width + sx) * 4;
-    const a = mark.pixels[s + 3] / 255;
-    if (a === 0) continue;
-    const d = (y * TILE + x) * 4;
-    // Over white. The mark is hard-edged, so this only ever runs at a === 1,
-    // but a redrawn logo with a soft edge should land on the ground, not on
-    // whatever the alpha channel happened to be multiplied into.
-    for (let c = 0; c < 3; c++) {
-      tile[d + c] = Math.round(mark.pixels[s + c] * a + GROUND[c] * (1 - a));
+/** One tile: white ground, the mark centred on it, Apple's corner cut out. */
+function tile(size, scale) {
+  const inkW = (box.right - box.left) * scale;
+  const inkH = (box.bottom - box.top) * scale;
+  if (inkW > size || inkH > size) throw new Error(`the mark is ${inkW}x${inkH} at ${scale}x, which will not fit a ${size} tile`);
+
+  const radius = size * 0.328;
+
+  // Where the source's own origin lands once the ink is centred.
+  const originX = Math.round(size / 2 - (box.left * scale + inkW / 2));
+  const originY = Math.round(size / 2 - (box.top * scale + inkH / 2));
+
+  const pixels = Buffer.alloc(size * size * 4);
+  for (let i = 0; i < pixels.length; i += 4) {
+    pixels.set(GROUND, i);
+    pixels[i + 3] = 0xff;
+  }
+
+  for (let y = 0; y < size; y++) {
+    const sy = Math.floor((y - originY) / scale);
+    if (sy < 0 || sy >= mark.height) continue;
+    for (let x = 0; x < size; x++) {
+      const sx = Math.floor((x - originX) / scale);
+      if (sx < 0 || sx >= mark.width) continue;
+      const s = (sy * mark.width + sx) * 4;
+      const a = mark.pixels[s + 3] / 255;
+      if (a === 0) continue;
+      const d = (y * size + x) * 4;
+      // Over white. The mark is hard-edged, so this only ever runs at a === 1,
+      // but a redrawn logo with a soft edge should land on the ground, not on
+      // whatever the alpha channel happened to be multiplied into.
+      for (let c = 0; c < 3; c++) {
+        pixels[d + c] = Math.round(mark.pixels[s + c] * a + GROUND[c] * (1 - a));
+      }
     }
   }
-}
 
-// The corner, last, so it cuts the finished tile rather than the ground it was
-// painted on.
-for (let y = 0; y < TILE; y++) {
-  for (let x = 0; x < TILE; x++) {
-    const covered = coverage(x, y);
-    if (covered === 1) continue;
-    tile[(y * TILE + x) * 4 + 3] = Math.round(covered * 0xff);
+  // The corner, last, so it cuts the finished tile rather than the ground it
+  // was painted on.
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const covered = coverage(x, y, size, radius);
+      if (covered === 1) continue;
+      pixels[(y * size + x) * 4 + 3] = Math.round(covered * 0xff);
+    }
   }
-}
 
-const touch = encode(TILE, TILE, tile);
-writeFileSync(resolve(pub, 'apple-touch-icon.png'), touch);
-console.log(`apple-touch-icon.png ${TILE}x${TILE}  ${touch.length} bytes  (mark at ${SCALE}x, ${inkW}x${inkH})`);
+  return encode(size, size, pixels);
+}
 
 // ------------------------------------------------------------------ PNG parts
 
@@ -247,7 +280,7 @@ function paeth(a, b, c) {
 // How much of the pixel at x,y falls inside the mask, from 0 to 1. Sampled on a
 // grid rather than solved, because the answer only has to be good to a 255th
 // and this runs 32400 times once.
-function coverage(x, y) {
+function coverage(x, y, size, radius) {
   let inside = 0;
   for (let sy = 0; sy < MASK_SAMPLES; sy++) {
     for (let sx = 0; sx < MASK_SAMPLES; sx++) {
@@ -255,11 +288,11 @@ function coverage(x, y) {
       // does for all four.
       const px = x + (sx + 0.5) / MASK_SAMPLES;
       const py = y + (sy + 0.5) / MASK_SAMPLES;
-      const dx = Math.min(px, TILE - px);
-      const dy = Math.min(py, TILE - py);
-      if (dx >= MASK_R || dy >= MASK_R) { inside++; continue; }
-      const u = (MASK_R - dx) / MASK_R;
-      const v = (MASK_R - dy) / MASK_R;
+      const dx = Math.min(px, size - px);
+      const dy = Math.min(py, size - py);
+      if (dx >= radius || dy >= radius) { inside++; continue; }
+      const u = (radius - dx) / radius;
+      const v = (radius - dy) / radius;
       if (u ** MASK_N + v ** MASK_N <= 1) inside++;
     }
   }
