@@ -3,7 +3,61 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- `viewport-fit=cover` is the line that makes env() mean anything.
+         ==================================================================
+         The stylesheet asks for the safe-area insets in two places in the phone
+         block — the control stack's ceiling at --g-layers-top, and the padding
+         that keeps the sheet's last row off the home indicator, whose own note
+         says "without this the last row sits under the indicator on an iPhone".
+         Both were dead. iOS reports every inset as 0 unless a page has said it
+         wants the whole screen, and this is where a page says it: without it
+         the viewport stops at the safe area, env() answers zero, and work
+         written against a notch never runs.
+
+         It is opt-in for a reason and the reason applies to us: the page now
+         extends under the notch, the indicator and — in landscape — the curved
+         corners, so anything that hugs an edge has to inset itself. The chrome
+         does, in the `safe area` block of src/input.css. Everything else here
+         floats over a map that is supposed to reach the glass. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- THE BROWSER'S OWN CHROME, painted to match.
+         ==================================================================
+         Android's URL bar and iOS's toolbars take their colour from this, and
+         with no value they stay the browser's default white — a bright strip
+         across the top of a map that is otherwise entirely dark, on the one
+         theme where it is most obvious.
+
+         Two of them, keyed on the OS preference, so the very first paint is
+         already right. That is only half the answer, because this app's theme
+         is `data-theme` and a person can set it against what the OS asked for;
+         the boot script below overwrites the content of whichever tag applies,
+         and src/theme.js does the same on every change after that. Same
+         division of labour as the theme attribute itself. -->
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <!-- ADD TO HOME SCREEN, and then what.
+         ==================================================================
+         There was already an icon for this — see apple-touch-icon below, which
+         exists precisely so a web clip is the mark rather than a screenshot of
+         a map. What there was not was anything saying what should HAPPEN when
+         the clip is opened, so it opened a browser tab: the mark on the home
+         screen, and behind it an address bar, a toolbar and a share button
+         standing on a map that is the whole point of the page.
+
+         `standalone`, through both spellings, because the two are not
+         interchangeable — Apple reads only the prefixed one and Chrome only the
+         unprefixed one, and a manifest's `display` does not reach iOS at all.
+
+         `black-translucent` puts the clock and the battery over the map rather
+         than on a bar above it, which is what every map app does and what the
+         safe-area insets above are for: the status bar's height arrives as
+         env(safe-area-inset-top) and the control stack is already measured down
+         from it. -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="beavermaps">
+    <link rel="manifest" href="/manifest.webmanifest">
     <title>beavermaps</title>
     <!-- THE TAB ICON. Three links for two reasons.
 
@@ -66,7 +120,15 @@
          happening anyway, out of a script written to prevent it.
 
          theme.js stores the mode and applies the THEME — see applyThemeAttribute
-         — so "auto" was never a value this attribute should hold. -->
+         — so "auto" was never a value this attribute should hold.
+
+         AND THE BROWSER'S CHROME WITH IT. The two theme-color tags above are
+         keyed on the OS preference, which is the right default and the wrong
+         answer for exactly the case this script exists to serve: somebody who
+         picked dark on a light phone gets a dark page under a white URL bar.
+         Both tags are written here so whichever one the browser is honouring
+         already carries the resolved theme before the first paint — the same
+         thing this does for the attribute, one layer out. -->
     <script>
         (function () {
             var theme = 'light';
@@ -80,6 +142,9 @@
                 /* Private mode can throw on localStorage; light is the default. */
             }
             document.documentElement.dataset.theme = theme;
+            var chrome = theme === 'dark' ? '#1c1c1e' : '#ffffff';
+            var tags = document.querySelectorAll('meta[name="theme-color"]');
+            for (var i = 0; i < tags.length; i++) tags[i].content = chrome;
         }());
     </script>
     <!-- AND THE LOOK, FOR THE SAME REASON AND WITH A LOUDER SYMPTOM.
@@ -574,7 +639,25 @@
                 <div class="g-panel-head g-panel-head--section">
                     <div>
                         <h2 class="g-panel-title">Legend</h2>
-                        <p class="g-panel-sub">Point to preview · press to keep</p>
+                        <!-- Two sentences for two kinds of hand, and only one
+                             of them is ever on screen — see .g-hover-only in
+                             src/input.css.
+
+                             "Point to preview" is the truth on a machine with a
+                             pointer: hovering a row previews its pins and
+                             pressing keeps them, which is two halves worth
+                             naming because the first is not discoverable. On a
+                             phone there is no pointing, the preview half does
+                             not exist, and the line was describing an
+                             interaction the device cannot perform — under a
+                             list whose rows are the one thing on that screen
+                             you might actually need in a hurry. The touch
+                             sentence names what a finger can do instead, which
+                             is the other half of the same control. -->
+                        <p class="g-panel-sub">
+                            <span class="g-hover-only">Point to preview · press to keep</span>
+                            <span class="g-touch-only">Tap to show · tap again to clear</span>
+                        </p>
                     </div>
                     <button id="legend-close" type="button" class="g-icon-btn" aria-label="Close legend">
                         <span class="g-icon" data-icon="close"></span>

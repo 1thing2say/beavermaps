@@ -33,6 +33,7 @@ import { CAMPUS_BOUNDS } from './campus-bounds.js';
  * @param {Function} deps.setStyleBuilt
  * @param {Function} deps.litPalette
  * @param {Function} deps.setStatus
+ * @param {Function} deps.setNotice  for a refusal the app recovered from
  * @param {Function} deps.rebuild             re-run every layer builder
  * @param {Function} deps.clearHover          a hover cannot survive a style swap
  * @param {Function} deps.standBuildings
@@ -50,6 +51,7 @@ export function createGround({
   setStyleBuilt,
   litPalette,
   setStatus,
+  setNotice,
   rebuild,
   clearHover,
   standBuildings,
@@ -164,12 +166,22 @@ export function createGround({
         map.getStyle().layers[0]?.id,
       );
     } catch (error) {
-      // A refused key is not a bug the user can see the shape of — the map just
-      // stays empty. Google's own message names the cause (API not enabled,
-      // referrer not allowed, key invalid), so it goes straight to the panel,
-      // and the toggle drops back to a provider that works.
+      // A refused key is not a bug the user can see the shape of, and Google's
+      // own message names the cause (API not enabled, referrer not allowed, key
+      // invalid), so the sentence goes to the strip — for the person who
+      // deployed this, who is the only one who can act on it and may well be
+      // reading it on a phone with no console to look in.
+      //
+      // A NOTICE RATHER THAN A REFUSAL, though, and the two lines below are why:
+      // the toggle drops back to a provider that works, so by the time this is
+      // said there is a map again. An error opens the panel it is written into
+      // — which on a phone is not a card in a sidebar, it is the bottom sheet,
+      // so announcing a successful fallback cost a third of the screen and the
+      // app came up with a panel over the campus. See `notice` in
+      // src/status-line.js: it holds the strip the way a problem does and
+      // leaves the layout alone.
       console.error('Google basemap unavailable:', error);
-      setStatus(`Google basemap unavailable: ${error.message}`, true);
+      setNotice(`Google basemap unavailable: ${error.message}`);
       if (generation !== groundGeneration) return;
       setProvider('mapbox');
       providerControl()?.revert();

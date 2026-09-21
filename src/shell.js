@@ -49,8 +49,26 @@ export function createShell({ map, panels, isPhone, onSettle, dismiss }) {
    */
   const measured = new ResizeObserver((entries) => {
     for (const entry of entries) {
+      // THE BORDER BOX, not the content box, and the two are not the same box
+      // here. Tailwind's preflight puts `box-sizing: border-box` on everything,
+      // so `contentRect` is the element less its padding — and the sheet's
+      // padding is where the phone layout keeps the 1px overshoot that covers
+      // the seam at the bottom of the screen, plus the home indicator's inset
+      // under it. What reads this is `bottom` on Mapbox's control stack, which
+      // lifts the stack by exactly this number to sit on top of the sheet: a
+      // number short by the padding is a stack sitting that far INSIDE it.
+      //
+      // One pixel of that was already happening and was invisible. The inset is
+      // the part that is not — about 34px on a notched iPhone once
+      // `viewport-fit=cover` makes `env()` answer with anything, which it now
+      // does. `contentRect` was right when the sheet had no padding to lose.
+      //
+      // Fallback for the property rather than the box: `borderBoxSize` is
+      // everywhere that matters, and an older engine reporting only the older
+      // shape should still get a number rather than `undefined` px.
+      const box = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
       document.documentElement.style.setProperty(
-        entry.target.dataset.heightVar, `${Math.round(entry.contentRect.height)}px`,
+        entry.target.dataset.heightVar, `${Math.round(box)}px`,
       );
     }
   });

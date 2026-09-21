@@ -95,6 +95,27 @@
        measured from it. The rail is gone and so is the variable: they measure
        from the edge now. */
     --g-gap: 10px;
+
+    /* THE GAP, PLUS WHATEVER THE SCREEN IS KEEPING FOR ITSELF.
+       ------------------------------------------------------------------
+       Four tokens for the four edges, and they exist because index.html now
+       carries `viewport-fit=cover`: the page reaches the glass on a phone, so
+       the corner the chrome is inset by is no longer only a design decision.
+       A notch, a status bar over the map, a home indicator, and — the one that
+       is easy to forget because a desk never shows it — the curved corners and
+       the sensor housing down the SIDE of a phone held in landscape, which is
+       the width at which this app's chrome is a sidebar rather than a sheet.
+
+       env() is zero on every screen without one, and zero plus the gap is the
+       gap, so nothing a desktop browser has ever measured moves.
+
+       `--g-layers-top` below is the same idea, written before these were and
+       for one corner; it is now the top edge like everything else. */
+    --g-edge-top: calc(var(--g-gap) + env(safe-area-inset-top, 0px));
+    --g-edge-right: calc(var(--g-gap) + env(safe-area-inset-right, 0px));
+    --g-edge-bottom: calc(var(--g-gap) + env(safe-area-inset-bottom, 0px));
+    --g-edge-left: calc(var(--g-gap) + env(safe-area-inset-left, 0px));
+
     --g-col-w: 400px;
     /* A --g-legend-w sat beside these, the width of a second column down the
        right edge that held nothing but the legend. The legend is a section of
@@ -255,11 +276,16 @@
        A gap, because there is nothing above this button in either layout: on a
        desktop the column is a sidebar on the other side of the window, and on a
        phone the field is down in the bottom sheet and the top of the screen is
-       map all the way to the edge. The phone block restates it anyway, because
-       it has been three different things — a bar's height, a bar plus a shelf —
-       and the token is what let each of those move four rules that never
-       mention any of it. */
-    --g-layers-top: var(--g-gap);
+       map all the way to the edge. It has been three different things — a bar's
+       height, a bar plus a shelf — and the token is what let each of those move
+       four rules that never mention any of it.
+
+       THE EDGE TOKEN RATHER THAN THE GAP, which the phone block used to restate
+       here for itself and no longer has to: the status bar is over the map in a
+       web clip now (see index.html's `black-translucent`), and this is the one
+       thing pinned under it. One definition, both layouts — a phone in
+       landscape is the sidebar layout and needs the inset just as much. */
+    --g-layers-top: var(--g-edge-top);
 
     /* THE MOTION VOCABULARY, so that everything that moves moves the same way.
        ------------------------------------------------------------------
@@ -748,8 +774,10 @@
         transition: background-color 150ms ease;
     }
 
-    .nav-end-btn:hover {
-        background-color: var(--sign-btn-hover);
+    @media (hover: hover) {
+        .nav-end-btn:hover {
+            background-color: var(--sign-btn-hover);
+        }
     }
 
     /* A step change slides two complete signs at once. The pair moves in the
@@ -1042,9 +1070,62 @@ body.navigating .app-chrome {
         transform var(--g-t-press) var(--g-ease-out);
 }
 
-.g-icon-btn:hover {
-    background: var(--g-hover);
-    color: var(--g-text);
+/* A HOVER IS A PROMISE A TOUCH SCREEN CANNOT KEEP, and every rule in this file
+   that makes one is gated the same way.
+   ---------------------------------------------------------------------------
+   The note beside `.g-results li` further down has the long version and was,
+   for a while, the only place acting on it: `:hover` on a touch screen is not a
+   state, it is a residue. A tap sets it and nothing clears it until something else is tapped,
+   so the button you just pressed stays lit — under a finger that has already
+   gone, on a control that has already done its work. One list was fixed and the
+   other thirty rules in this file were not, which meant a phone kept a shaded
+   row wherever it had last been touched: a legend category, a place action, a
+   layer tile, the row in the sheet you opened a building from.
+
+   `@media (hover: hover)` asks the device rather than guessing from width, for
+   the reason the 44px targets further down give: a laptop with a touch screen
+   and a phone in landscape are the same question and a width test answers it
+   wrong. The feedback a finger gets instead is the press scale at the bottom of
+   this file, which is legible under the fingertip covering it and stops when
+   the finger lifts because `:active` actually ends.
+
+   NOT gated, deliberately: the `:not(:hover)` rules that exist to win a
+   specificity tie, and every `:focus-visible` beside a hover. Neither is a
+   hover effect — the first is a checked state and the second is a keyboard
+   ring — and putting either behind this query would take it away from the
+   device that needs it most. */
+@media (hover: hover) {
+    .g-icon-btn:hover {
+        background: var(--g-hover);
+        color: var(--g-text);
+    }
+}
+
+/* ...and the same question asked of WORDS rather than of a fill.
+   ---------------------------------------------------------------------------
+   Some of what this app says is about a gesture, and a gesture is not the same
+   on both kinds of device — the legend's own subtitle read "Point to preview ·
+   press to keep" on a phone, which names an interaction a finger cannot
+   perform and then offers no other. Hiding half a sentence is not the answer
+   either: what a touch screen loses is the preview, and what it needs told is
+   what the press does instead.
+
+   So both are written in the markup and the device picks one. The touch
+   wording is the default and the pointer wording is what a pointer asks for,
+   which is the way round everything else in this file is built — a phone gets
+   the plain answer and does not depend on a query it might not support. */
+.g-hover-only {
+    display: none;
+}
+
+@media (hover: hover) {
+    .g-hover-only {
+        display: inline;
+    }
+
+    .g-touch-only {
+        display: none;
+    }
 }
 
 /* --- the floating column: search, panels ----------------------------------- */
@@ -1057,11 +1138,11 @@ body.navigating .app-chrome {
 
 .g-topleft {
     position: absolute;
-    top: var(--g-gap);
-    left: var(--g-gap);
+    top: var(--g-edge-top);
+    left: var(--g-edge-left);
     z-index: 20;
     width: var(--g-col-w);
-    max-width: calc(100vw - var(--g-gap) * 2);
+    max-width: calc(100vw - var(--g-edge-left) - var(--g-edge-right));
     /* Bounded so a long list scrolls inside the column instead of running off
        the bottom of the viewport, and so it stops short of the credit strip in
        the corner below — attribution is a licence term, not decoration.
@@ -1199,9 +1280,11 @@ body.navigating .app-chrome {
     cursor: pointer;
 }
 
-.g-search-clear:hover {
-    background: var(--g-hover);
-    color: var(--g-text);
+@media (hover: hover) {
+    .g-search-clear:hover {
+        background: var(--g-hover);
+        color: var(--g-text);
+    }
 }
 
 .g-search-sep {
@@ -1225,8 +1308,10 @@ body.navigating .app-chrome {
     cursor: pointer;
 }
 
-.g-search-icon:hover {
-    background: var(--g-hover);
+@media (hover: hover) {
+    .g-search-icon:hover {
+        background: var(--g-hover);
+    }
 }
 
 /* The blue circle Google puts at the end of the field. */
@@ -1246,8 +1331,10 @@ body.navigating .app-chrome {
     transition: filter var(--g-t-state) ease, transform var(--g-t-press) var(--g-ease-out);
 }
 
-.g-directions:hover {
-    filter: brightness(1.08);
+@media (hover: hover) {
+    .g-directions:hover {
+        filter: brightness(1.08);
+    }
 }
 
 .g-directions[aria-pressed="true"] {
@@ -1289,8 +1376,10 @@ body.navigating .app-chrome {
    pressed. Two different mechanisms, the same wrong picture: a list that opens
    with a choice apparently already made in it.
 
-   Hover is gated on a device that has one. The render-time highlight is kept
-   HERE, because on a machine with a keyboard always attached it is telling the
+   Hover is gated on a device that has one — as it now is everywhere in this
+   file, which it was not when this was written; see the block above
+   `.g-icon-btn:hover` for the other thirty rules that needed the same thing.
+   The render-time highlight is kept HERE, because on a machine with a keyboard always attached it is telling the
    truth — Enter takes the first row, and a row that says so is worth having —
    and given up in the phone branch, where there is no key to press and the
    only thing it can mean is a choice you did not make. main.js sets
@@ -1582,8 +1671,10 @@ body.navigating .app-chrome {
     background: var(--g-surface-2);
 }
 
-.g-place .g-icon-btn:hover {
-    background: var(--g-line);
+@media (hover: hover) {
+    .g-place .g-icon-btn:hover {
+        background: var(--g-line);
+    }
 }
 
 .g-place-body {
@@ -1700,8 +1791,10 @@ body.navigating .app-chrome {
     cursor: pointer;
 }
 
-.g-place-action:hover {
-    background: var(--g-hover);
+@media (hover: hover) {
+    .g-place-action:hover {
+        background: var(--g-hover);
+    }
 }
 
 /* A fixed box either way, so the two tiles' labels sit on the same baseline
@@ -1736,8 +1829,10 @@ body.navigating .app-chrome {
     color: #fff;
 }
 
-.g-place-action--primary:hover {
-    background: color-mix(in srgb, var(--g-blue) 88%, #000);
+@media (hover: hover) {
+    .g-place-action--primary:hover {
+        background: color-mix(in srgb, var(--g-blue) 88%, #000);
+    }
 }
 
 .g-place-action--primary .g-place-action-disc {
@@ -1954,8 +2049,10 @@ body.navigating .app-chrome {
     color: var(--g-text);
 }
 
-.g-row:hover {
-    background: var(--g-hover);
+@media (hover: hover) {
+    .g-row:hover {
+        background: var(--g-hover);
+    }
 }
 
 .g-row-disc {
@@ -2173,8 +2270,10 @@ body.navigating .app-chrome {
         transform var(--g-t-press) var(--g-ease-out);
 }
 
-.g-go:hover:not(:disabled) {
-    filter: brightness(1.06);
+@media (hover: hover) {
+    .g-go:hover:not(:disabled) {
+        filter: brightness(1.06);
+    }
 }
 
 .g-go:disabled {
@@ -2235,8 +2334,10 @@ body.navigating .app-chrome {
     color: var(--g-on-blue);
 }
 
-.g-btn--primary:hover:not(:disabled) {
-    filter: brightness(1.08);
+@media (hover: hover) {
+    .g-btn--primary:hover:not(:disabled) {
+        filter: brightness(1.08);
+    }
 }
 
 .g-btn--ghost {
@@ -2245,8 +2346,10 @@ body.navigating .app-chrome {
     border-color: var(--g-tint-line);
 }
 
-.g-btn--ghost:hover:not(:disabled) {
-    background: var(--g-hover);
+@media (hover: hover) {
+    .g-btn--ghost:hover:not(:disabled) {
+        background: var(--g-hover);
+    }
 }
 
 .g-btn:disabled {
@@ -2449,8 +2552,10 @@ body.navigating .app-chrome {
     min-height: 44px;
 }
 
-.g-layer-btn:hover {
-    background: var(--g-hover);
+@media (hover: hover) {
+    .g-layer-btn:hover {
+        background: var(--g-hover);
+    }
 }
 
 /* The chosen appearance. Google marks the selected one in their blue rather
@@ -2533,7 +2638,14 @@ body.navigating .app-chrome {
     cursor: pointer;
 }
 
-.g-legend-row:hover:not(:disabled),
+@media (hover: hover) {
+    .g-legend-row:hover:not(:disabled) {
+        background: var(--g-hover);
+    }
+}
+
+/* Split off the hover above rather than left beside it: a focus ring is not a
+   hover effect and a phone with a keyboard plugged into it still needs one. */
 .g-legend-row:focus-visible {
     background: var(--g-hover);
 }
@@ -3177,9 +3289,11 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     color: var(--g-text-dim);
 }
 
-[data-skin="apple"] .g-search-icon:hover {
-    background: transparent;
-    color: var(--g-text);
+@media (hover: hover) {
+    [data-skin="apple"] .g-search-icon:hover {
+        background: transparent;
+        color: var(--g-text);
+    }
 }
 
 [data-skin="apple"] .g-search-icon .g-icon {
@@ -3191,8 +3305,10 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     display: none;
 }
 
-[data-skin="apple"] .g-icon-btn:hover {
-    background: var(--g-surface-2);
+@media (hover: hover) {
+    [data-skin="apple"] .g-icon-btn:hover {
+        background: var(--g-surface-2);
+    }
 }
 
 /* Two rules for the chip strip lived here: it was the one floating control that
@@ -3426,8 +3542,10 @@ body.simulating .nav-sign::after {
     font-weight: 600;
 }
 
-[data-skin="apple"] .nav-end-btn:hover {
-    background-color: color-mix(in srgb, var(--g-blue) 26%, transparent);
+@media (hover: hover) {
+    [data-skin="apple"] .nav-end-btn:hover {
+        background-color: color-mix(in srgb, var(--g-blue) 26%, transparent);
+    }
 }
 
 /* --- the debug menu --------------------------------------------------------
@@ -3447,11 +3565,11 @@ body.simulating .nav-sign::after {
    block keeps beating it. */
 .g-debug {
     position: absolute;
-    right: var(--g-gap);
-    top: var(--g-gap);
+    right: var(--g-edge-right);
+    top: var(--g-edge-top);
     z-index: 22;
     width: 300px;
-    max-width: calc(100vw - var(--g-gap) * 2);
+    max-width: calc(100vw - var(--g-edge-left) - var(--g-edge-right));
     max-height: calc(100dvh - var(--g-gap) * 2 - var(--g-credit-h));
     overflow-y: auto;
     padding: 12px;
@@ -3559,8 +3677,10 @@ body.simulating .nav-sign::after {
     cursor: pointer;
 }
 
-.g-seg:hover {
-    background: var(--g-hover);
+@media (hover: hover) {
+    .g-seg:hover {
+        background: var(--g-hover);
+    }
 }
 
 /* :not(:hover) for the reason the layer buttons carry it — a 0-2-0 hover rule
@@ -3854,14 +3974,31 @@ body.no-dirbutton .g-directions {
 }
 
 .g-endpoint-input {
+    /* ...and the size the row asks for, rather than the one `inherit` brought.
+       `font` is a shorthand, so `font: inherit` above resets font-size along
+       with everything else — quietly putting the card's 16px back over the 14px
+       `.g-endpoint-value` sets on the very same element, at equal specificity
+       and a thousand lines earlier. These two fields have been rendering two
+       pixels larger than every other value in the panel ever since the
+       shorthand was written.
+
+       Restated here rather than reordered, because what `font: inherit` is FOR
+       is the family and the weight: an <input> inherits neither on its own, and
+       without it these are the browser's own UI face in the middle of a card
+       set in the app's. The coarse-pointer block puts this back to 16 where a
+       finger is involved — see the note there; that is not this bug, it is the
+       one that makes iOS zoom the page. */
+    font-size: 14px;
     transition: background-color var(--g-t-state) ease, outline-color var(--g-t-state) ease;
     /* Same reason as the search pill above: a width to animate from. */
     outline: 2px solid transparent;
     outline-offset: -1px;
 }
 
-.g-endpoint-input:hover {
-    background: var(--g-hover);
+@media (hover: hover) {
+    .g-endpoint-input:hover {
+        background: var(--g-hover);
+    }
 }
 
 .g-endpoint-input:focus {
@@ -4236,10 +4373,12 @@ body.no-dirbutton .g-directions {
        --g-layers-top stays a token even though it is now a single term. Four
        rules read it — the button, locate, the menu's height cap and the control
        stack's ceiling in the opposite corner — and the point of the token was
-       always that none of them has to know what is above it. */
-    :root {
-        --g-layers-top: calc(env(safe-area-inset-top, 0px) + var(--g-gap));
-    }
+       always that none of them has to know what is above it.
+
+       It is not restated here any more. This block used to redefine it as the
+       safe-area inset plus a gap, which is exactly what the base definition is
+       now that every edge carries its inset — see --g-edge-top. Two spellings
+       of one number is one of them to forget. */
 
     .g-topleft {
         top: auto;
@@ -4555,14 +4694,14 @@ body.no-dirbutton .g-directions {
            button — so this is the whole of that column plus a gap either side.
            Without it the wordmark ran under the zoom buttons: the two corners
            are independently positioned and neither knows the other is there. */
-        left: var(--g-gap);
+        left: var(--g-edge-left);
         /* THE WHOLE WIDTH, because there is no longer anything in the opposite
            corner to keep clear of. This was inset by a control column that has
            since moved to the top-right, and then by a scale bar that is gone
            (see below) — so the reservation outlived both things it was
            reserving for, and it was the only reason the notice and the wordmark
            could not sit on one line. 252 + 88 needs 348; this gives 370. */
-        right: var(--g-gap);
+        right: var(--g-edge-right);
         display: flex;
         flex-wrap: wrap;
         align-items: center;
@@ -4713,6 +4852,30 @@ body.no-dirbutton .g-directions {
        behaviour every measurement in this block was tuned against. */
     .g-topleft[data-detent="half"],
     .g-topleft[data-detent="full"] {
+        max-height: none;
+    }
+
+    /* ...AND WHILE A FINGER IS ON IT, which the attributes above cannot cover
+       and which is the case the cap was silently eating.
+       ------------------------------------------------------------------
+       `data-detent` names where the sheet IS, not where it is being dragged to,
+       so it still says `rest` for the whole length of a drag that starts there
+       — and a drag that starts at rest is the one people make, because rest is
+       what the sheet is when you go to open it. src/sheet.js was writing 541px,
+       595px, 649px, 703px onto an element this rule was holding at 523. The
+       finger moved and the sheet did not. Measured, frame by frame, with the
+       inline height climbing and `getBoundingClientRect()` answering 523.28
+       every time.
+
+       It got worse at the release: `onUp` asks the box how tall it is to decide
+       which detent to land on, and the box had never left rest, so a deliberate
+       upward flick settled the sheet back down where it started. Two symptoms,
+       one cause.
+
+       The cap is not needed here in any case. A drag's height is clamped in the
+       script to `full`, which is the viewport less MAP_STRIP — a tighter bound
+       than this one and the one that is actually about the gesture. */
+    .g-topleft.is-dragging {
         max-height: none;
     }
 
@@ -5124,7 +5287,7 @@ body.no-dirbutton .g-directions {
        against Mapbox's corner container. */
     .g-layers {
         position: fixed;
-        right: var(--g-gap);
+        right: var(--g-edge-right);
         top: var(--g-layers-top);
     }
 
@@ -5176,9 +5339,9 @@ body.no-dirbutton .g-directions {
     .g-debug {
         position: fixed;
         top: auto;
-        left: var(--g-gap);
-        right: var(--g-gap);
-        bottom: calc(var(--g-gap) + var(--g-credit-h));
+        left: var(--g-edge-left);
+        right: var(--g-edge-right);
+        bottom: calc(var(--g-edge-bottom) + var(--g-credit-h));
         width: auto;
         max-width: none;
         max-height: 70dvh;
@@ -5208,10 +5371,10 @@ body.no-dirbutton .g-directions {
 @media (min-width: 641px) and (max-height: 640px) {
     .g-layers-menu {
         position: fixed;
-        top: var(--g-gap);
+        top: var(--g-edge-top);
         bottom: auto;
-        right: calc(var(--g-gap) + var(--g-layers-btn) + var(--g-layers-drop));
-        max-height: calc(100dvh - var(--g-gap) * 2);
+        right: calc(var(--g-edge-right) + var(--g-layers-btn) + var(--g-layers-drop));
+        max-height: calc(100dvh - var(--g-edge-top) - var(--g-edge-bottom));
     }
 }
 
@@ -5291,6 +5454,53 @@ body.no-dirbutton .g-directions {
         min-height: 44px;
     }
 
+    /* ...and the two fields in the route form, which were 26px and were not in
+       this list at all.
+       ------------------------------------------------------------------
+       Measured at 390x844: 294x26 and 334x26, against a floor this block sets
+       at 44 for six controls around them. They are the fields you type a start
+       and an end into — the only two places in the app where a phone is asked
+       to hit a text input rather than a button — so they were the targets in
+       here that mattered most and the ones that had been left out.
+
+       `min-height` on the input, not padding on the row: the label sits above
+       it and the suggestion list below it in the same column, and growing the
+       box is what moves the hit area without moving either. */
+    .g-endpoint-input {
+        min-height: 44px;
+    }
+
+    /* SIXTEEN PIXELS, OR IOS ZOOMS THE PAGE.
+       ------------------------------------------------------------------
+       Safari magnifies the whole document when it focuses a field whose text is
+       under 16px, and it does not undo it afterwards: tap the search box, and
+       the map, the sheet and the controls are all left scaled up with the
+       viewport scrolled somewhere nobody chose. There is no fix for it at the
+       far end — the only thing that stops it happening is the size.
+
+       BOTH OF THESE WERE UNDER IT, in different ways and one of them by
+       default. `.g-search-input` is 16 in the base rules, and the Apple skin —
+       which is what an empty localStorage resolves to — takes it to 14 above
+       the 641px breakpoint. That breakpoint reads as "desktop" and is not: an
+       iPhone SE in landscape is 667 wide, a 15 is 852, a Pixel 8 is 915. Every
+       phone on its side was getting the 14px rule, which is to say the default
+       skin zoomed the page on the default gesture, and only when the phone was
+       turned over. Measured at 844x390 before this existed: 14px computed.
+
+       The endpoint fields are the same story without the skin: 14 everywhere,
+       from the rule two thousand lines up.
+
+       Listed with the `[data-skin]` prefix as well as without it because
+       specificity does not care that this block comes later in the file — a
+       bare `.g-search-input` at 0-1-0 loses to `[data-skin="apple"]
+       .g-search-input` at 0-2-0 wherever it is written. Matching the shape and
+       arriving afterwards is what wins the tie. */
+    .g-search-input,
+    [data-skin="apple"] .g-search-input,
+    .g-endpoint-input {
+        font-size: 16px;
+    }
+
     /* LOCATE JOINS THE LAYERS BUTTON AT THE TOP OF THE SCREEN.
        ------------------------------------------------------------------
        Lifting the whole stack above the sheet works on a roomy phone and runs
@@ -5317,7 +5527,7 @@ body.no-dirbutton .g-directions {
     .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group:has(.mapboxgl-ctrl-geolocate) {
         position: fixed;
         top: calc(var(--g-layers-top) + var(--g-layers-btn));
-        right: var(--g-gap);
+        right: var(--g-edge-right);
         /* The bottom of one box. The hairline is the top edge rather than a
            separate element, and it is the same line the layers menu rules its
            own sections with. */
@@ -5399,7 +5609,18 @@ body.no-dirbutton .g-directions {
     align-items: center;
     gap: 16px;
     height: var(--g-navbar-h);
-    padding: 0 16px;
+    /* The insets on the padding rather than on the box, because this is the one
+       piece of chrome that spans an edge instead of floating off it: the white
+       strip has to keep reaching the top and both sides, or a web clip shows a
+       band of map above it. What has to move in from the notch is what is
+       INSIDE — see --g-edge-top for why any of this is non-zero now. The height
+       grows with it, since `height` is the bar without its status strip. */
+    padding:
+        env(safe-area-inset-top, 0px)
+        calc(16px + env(safe-area-inset-right, 0px))
+        0
+        calc(16px + env(safe-area-inset-left, 0px));
+    box-sizing: content-box;
     background: #ffffff;
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
@@ -5506,8 +5727,10 @@ body.no-dirbutton .g-directions {
     cursor: pointer;
 }
 
-.g-navbar-legend:hover {
-    background: #f1f3f4;
+@media (hover: hover) {
+    .g-navbar-legend:hover {
+        background: #f1f3f4;
+    }
 }
 
 .g-navbar-legend[aria-expanded="true"] {

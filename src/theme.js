@@ -35,8 +35,34 @@ export function preferredTheme() {
   return resolveTheme(preferredThemeMode());
 }
 
+/**
+ * What the browser paints its own chrome with, per theme.
+ *
+ * Not tokens, because nothing in the page reads them: these are handed to the
+ * browser for the URL bar and the status bar, which live outside the document
+ * and cannot see a custom property. They are `--g-surface` spelled out — the
+ * ground the map fades in over — so the bar above the page and the page agree
+ * about where the app starts.
+ *
+ * The Apple skin's pair, and only that pair. Classic's dark surface is #202124
+ * rather than #1c1c1e, and keying this on the skin as well would be two axes of
+ * state for a strip of browser furniture nobody is comparing side by side.
+ * Apple is what an empty localStorage resolves to, so it is the one to be right
+ * about. Restated in index.html's boot script as well, for the same reason the
+ * theme itself is: anything importable arrives after the first paint by
+ * definition.
+ */
+const CHROME = { light: '#ffffff', dark: '#1c1c1e' };
+
 export function applyThemeAttribute(theme) {
   document.documentElement.dataset.theme = theme;
+  // Every tag, not the first: there is one per `prefers-color-scheme`, and
+  // which of them the browser is honouring depends on the OS rather than on
+  // this app's theme — so the in-app choice has to overwrite both or it only
+  // takes on the phones that already agreed with it.
+  for (const tag of document.querySelectorAll('meta[name="theme-color"]')) {
+    tag.content = CHROME[theme] ?? CHROME.light;
+  }
 }
 
 /**

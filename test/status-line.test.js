@@ -196,3 +196,48 @@ test('it works without a DOM beyond the three elements it was handed', () => {
     assert.equal(h.message.textContent, 'No document needed');
   });
 });
+
+// A REFUSAL THE APP RECOVERED FROM IS NOT A REFUSAL, and the difference is a
+// whole screen on a phone.
+//
+// `set(…, true)` calls `onError`, which opens the panel the strip lives in —
+// correct for "the routing server is down", where nothing you asked for
+// happened. The Google basemap falling back to Mapbox is the other thing: by
+// the time the sentence is written there is a working map underneath it, and
+// opening the panel to say so pushed the bottom sheet up over the campus. It
+// still has to HOLD the strip, though, or the resting hint paints over it
+// within the second and the person who deployed this with the wrong key never
+// reads the sentence naming it.
+
+test('a notice holds the strip without opening the panel', () => withDocument(() => {
+  const { status, message, state } = harness();
+  status.notice('Google basemap unavailable: referrer not allowed');
+  assert.equal(message.textContent, 'Google basemap unavailable: referrer not allowed');
+  assert.equal(state.opened, 0, 'a recovered failure opened the panel over the map');
+  assert.equal(status.hasProblem(), true, 'a notice did not stand');
+}));
+
+test('a notice outranks progress and the resting hint, exactly as a refusal does', () => withDocument(() => {
+  const { status, message } = harness();
+  status.notice('Google basemap unavailable: API not enabled');
+  status.progress('Loading the campus…');
+  assert.equal(message.textContent, 'Google basemap unavailable: API not enabled');
+  status.rest();
+  assert.equal(message.textContent, 'Google basemap unavailable: API not enabled');
+}));
+
+test('...and is cleared by something you did on purpose, as a refusal is', () => withDocument(() => {
+  const { status, message } = harness();
+  status.notice('Google basemap unavailable: key invalid');
+  status.set('Calculating…');
+  assert.equal(message.textContent, 'Calculating…');
+  assert.equal(status.hasProblem(), false);
+  status.rest();
+  assert.equal(message.textContent, IDLE_HINT);
+}));
+
+test('a notice is not painted as an error', () => withDocument(() => {
+  const { status, text } = harness();
+  status.notice('Google basemap unavailable: quota exceeded');
+  assert.equal(text.classList.contains('is-error'), false);
+}));

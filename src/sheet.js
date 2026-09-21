@@ -29,7 +29,33 @@
 // The pure half of this file is `snapTo`, which is where the feel lives and is
 // the only part worth testing without a browser: given where the finger let go
 // and how fast it was moving, which of the three heights does the sheet belong
-// at. See test/sheet.test.js.
+// at. See test/sheet.test.js. `claims` is the other half of the same idea — who
+// the gesture belongs to — and is tested the same way.
+//
+// AND THE THING THAT MAKES ANY OF IT REACH A FINGER. Pointer events are how the
+// drag is driven, and on a touch screen they are not enough on their own: the
+// sheet is a scroller, a scroller claims a vertical drag at the compositor, and
+// the moment it does the browser sends `pointercancel` and stops sending
+// moves. Measured on an emulated phone before `onTouchMove` below existed, on
+// every drag that did not start on the grabber:
+//
+//   pointerdown → pointermove → pointercancel          (and nothing after)
+//
+// One move, which is under START, so `onMove` had not yet decided anything —
+// every rule it holds about who owns the gesture was unreachable, and the sheet
+// answered a finger nowhere except the 26px grabber, which is the one strip
+// with `touch-action: none` on it. Dragging a full sheet down over its own list
+// to close it, which is the gesture this file is mostly for, did nothing at
+// all.
+//
+// So the ownership question is now ANSWERED TO THE BROWSER as well as to us,
+// on the first touchmove of the sequence, while a preventDefault can still stop
+// the scroll from starting. `claims` is that answer and `onMove` reads the same
+// function, so the two cannot drift apart. What is deliberately NOT done here
+// is `touch-action: none` on the sheet itself: that would take the gesture back
+// from the scroller in both directions and leave this file owing the list a
+// scroll implementation, momentum and all, which is a worse sheet than a
+// browser's own.
 
 /** How far a press has to travel before it is a drag rather than a tap. */
 const START = 8;
@@ -93,11 +119,65 @@ export function snapTo({ height, velocity, detents, from }) {
   // A flick always gets you somewhere. Without this, a fast short throw from
   // the middle of a long gap projects only 54px and lands back where it
   // started, which reads as the sheet refusing the gesture.
-  if (Math.abs(velocity) >= FLICK && target === from) {
-    const next = stops.indexOf(from) + (velocity > 0 ? 1 : -1);
+  //
+  // WHICH STOP THE DRAG BEGAN AT, rather than the raw number it began at, and
+  // that distinction is the whole of the rescue rather than a tidy-up. `from`
+  // is read straight off getBoundingClientRect() and comes back fractional —
+  // 523.28 on a 390x844 phone — while the detents arrive rounded, because that
+  // is what `measure` hands out. So `target === from` compared 523 against
+  // 523.28 and was false, the branch was never entered at all, and on the one
+  // occasion it was, `indexOf(523.28)` answered -1 and a step of +1 made that
+  // index 0: the LOWEST stop, rather than the next one up.
+  //
+  // Both spellings of the same mistake, and the same symptom out of either —
+  // drag the sheet open, throw it, watch it settle back shut.
+  const origin = nearest(from);
+  if (Math.abs(velocity) >= FLICK && target === origin) {
+    const next = stops.indexOf(origin) + (velocity > 0 ? 1 : -1);
     if (next >= 0 && next < stops.length) target = stops[next];
   }
   return target;
+}
+
+/**
+ * WHO OWNS THIS GESTURE, and the answer is the scroller unless the scroller has
+ * nothing to do with it.
+ *
+ * Dragging down inside a list that is scrolled is scrolling; dragging down at
+ * the top of that list is collapsing the sheet. Dragging up while there is
+ * still list below is scrolling; dragging up with the list already at its end —
+ * which includes the ordinary case of a sheet holding less than a screenful —
+ * is the sheet growing.
+ *
+ * THE SCROLLER WINS THE TIE, deliberately, and this is where a bottom sheet is
+ * usually got wrong in the other direction. Apple's takes an upward drag as
+ * "expand first, scroll once expanded", which is lovely and requires the
+ * content to be unscrollable below the full detent. Ours caps at 62dvh and has
+ * a place card that can be twice that, so making the content unscrollable until
+ * the sheet was full would mean a card you have to drag the sheet open before
+ * you can read. The grabber is what guarantees the gesture instead: it is never
+ * a scroller and always the sheet, whatever is underneath it.
+ *
+ * SIDEWAYS IS NEVER THE SHEET'S, and that is not a detail — the shortcut shelf
+ * across the sheet's head is a horizontal scroller, and a flick along it has to
+ * reach the browser or the chips stop moving. Compared rather than thresholded
+ * because this is asked on the FIRST move of a gesture, where both numbers are
+ * a pixel or two and only their ratio means anything yet.
+ *
+ * @param {object} gesture
+ * @param {boolean} gesture.fromGrip did the press land on the grabber
+ * @param {number} gesture.scrolled  the scroller's position when it started
+ * @param {number} gesture.room      how far the scroller can travel in total
+ * @param {number} gesture.dx        how far the finger has gone sideways
+ * @param {number} gesture.dy        ...and down; negative is up
+ * @returns {boolean} true when the sheet should take it
+ */
+export function claims({ fromGrip, scrolled, room, dx, dy }) {
+  if (Math.abs(dx) > Math.abs(dy)) return false;
+  if (fromGrip) return true;
+  if (dy > 0 && scrolled > 0) return false;
+  if (dy < 0 && scrolled < room - 1) return false;
+  return true;
 }
 
 /**
@@ -228,15 +308,39 @@ export function createSheet({ el, grip, enabled, onSettle }) {
   function onDown(event) {
     if (!enabled()) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    // ONE FINGER OWNS THE SHEET AT A TIME, and the one that got here first
+    // keeps it. Without this a second finger landing anywhere on the sheet
+    // overwrote `drag` wholesale, and since every handler below is keyed on
+    // `drag.id`, the moves still arriving from the finger actually doing the
+    // dragging were then dropped as somebody else's. Measured: the sheet froze
+    // mid-gesture at 287px, the release never reached `snapTo`, and what was
+    // left was an inline height matching no detent under a `data-detent` that
+    // still named the old one — which is the arbitrary height the detents at
+    // the top of this file exist to prevent, arrived at from the other side.
+    //
+    // Bracing a phone with a second thumb is enough to do it, so this is not an
+    // edge case; it is how the thing is held.
+    //
+    // `isPrimary` rather than `if (drag) return`, which is the obvious spelling
+    // and gives up something worth keeping: a drag whose release never arrived
+    // — a capture that could not be taken, a finger lifted off the edge of the
+    // screen — would then block every gesture after it, for good. The first
+    // finger of a sequence is the primary one, so a stale drag is still
+    // replaced by the next real press while the extra fingers of a live one are
+    // turned away. Compared against `false` because only a browser that has
+    // actually answered the question gets to refuse anything; a synthetic event
+    // with no such property is a press like any other.
+    if (event.isPrimary === false) return;
     const heights = measure();
     drag = {
       id: event.pointerId,
+      x0: event.clientX,
       y0: event.clientY,
       h0: el.getBoundingClientRect().height,
       heights,
       // A press on the grabber is always a sheet gesture. A press anywhere else
       // is a sheet gesture only when the scroller underneath it has nothing to
-      // do with it — see onMove.
+      // do with it — see `claims`.
       fromGrip: grip.contains(event.target),
       scrolled: el.scrollTop,
       room: el.scrollHeight - el.clientHeight,
@@ -244,36 +348,63 @@ export function createSheet({ el, grip, enabled, onSettle }) {
       at: event.timeStamp,
       velocity: 0,
       active: false,
+      // What `onTouchMove` decided, so it is decided once per gesture: null
+      // until the finger has moved at all, then true while the sheet is holding
+      // the browser off and false once the scroller has been given it.
+      owner: null,
     };
+  }
+
+  /**
+   * Tell the BROWSER who owns the gesture, while telling it still means
+   * something.
+   *
+   * Non-passive, and the `preventDefault` is the whole point: a scroller claims
+   * a vertical drag at the compositor on the first move, and after that no
+   * amount of handling stops it — the page gets `pointercancel` and the drag is
+   * over before `onMove` has seen enough travel to have an opinion. So the
+   * question is asked here, one move earlier, off the state captured at
+   * pointerdown. Pointer events fire ahead of touch events for the same finger
+   * (`pointerdown`, `touchstart`, `pointermove`, `touchmove`), so `drag` is
+   * already populated by the time this runs.
+   *
+   * Under the threshold on purpose. START is about when the sheet starts
+   * MOVING, which is a question about intent; this is about who the browser
+   * should let move it, which has to be settled before the first frame of
+   * scrolling or not at all.
+   *
+   * Two fingers are nobody's: that is a pinch, and the page is still
+   * zoomable.
+   */
+  function onTouchMove(event) {
+    if (!drag || event.touches.length !== 1) return;
+    if (drag.owner === false) return;
+    if (drag.owner === true) { event.preventDefault(); return; }
+
+    const touch = event.touches[0];
+    const dx = touch.clientX - drag.x0;
+    const dy = touch.clientY - drag.y0;
+    // A move that has not moved says nothing about direction yet; wait for one
+    // that has rather than guessing and being stuck with it.
+    if (dx === 0 && dy === 0) return;
+
+    drag.owner = claims({ ...drag, dx, dy });
+    if (drag.owner) event.preventDefault();
   }
 
   function onMove(event) {
     if (!drag || event.pointerId !== drag.id) return;
+    const dx = event.clientX - drag.x0;
     const dy = event.clientY - drag.y0;
 
     if (!drag.active) {
       if (Math.abs(dy) < START) return;
-      // WHO OWNS THIS GESTURE, and the answer is the scroller unless the
-      // scroller has nothing to do with it. Dragging down inside a list that is
-      // scrolled is scrolling; dragging down at the top of that list is
-      // collapsing the sheet. Dragging up while there is still list below is
-      // scrolling; dragging up with the list already at its end — which
-      // includes the ordinary case of a sheet holding less than a screenful —
-      // is the sheet growing.
-      //
-      // THE SCROLLER WINS THE TIE, deliberately, and this is where a bottom
-      // sheet is usually got wrong in the other direction. Apple's takes an
-      // upward drag as "expand first, scroll once expanded", which is lovely
-      // and requires the content to be unscrollable below the full detent. Ours
-      // caps at 62dvh and has a place card that can be twice that, so making
-      // the content unscrollable until the sheet was full would mean a card you
-      // have to drag the sheet open before you can read. The grabber is what
-      // guarantees the gesture instead: it is never a scroller and always the
-      // sheet, whatever is underneath it.
-      if (!drag.fromGrip) {
-        if (dy > 0 && drag.scrolled > 0) { drag = null; return; }
-        if (dy < 0 && drag.scrolled < drag.room - 1) { drag = null; return; }
-      }
+      // See `claims` for the rules, and `onTouchMove` for why a finger has
+      // already been asked this one move earlier. Read through `drag.owner`
+      // when there is one so a gesture cannot be answered two different ways
+      // over its own length: the browser was told something on the first move
+      // and has been acting on it ever since.
+      if (!(drag.owner ?? claims({ ...drag, dx, dy }))) { drag = null; return; }
       drag.active = true;
       el.classList.add('is-dragging');
       // Capture so the sheet keeps the gesture when the finger leaves it, which
@@ -301,6 +432,20 @@ export function createSheet({ el, grip, enabled, onSettle }) {
     if (!drag || event.pointerId !== drag.id) return;
     const done = drag;
     drag = null;
+    // WHERE THE FINGER LET GO, READ BEFORE THE CLASS COMES OFF.
+    //
+    // `is-dragging` carries `max-height: none` — see the note beside it for the
+    // cap it is lifting and why a drag has to be out from under it — so taking
+    // the class away puts a 62dvh ceiling back on the element in this same
+    // frame. Measure after that and a sheet dragged to 703px answers 523.27,
+    // which is not where the finger is, and `snapTo` is then asked which detent
+    // a sheet that never moved belongs at. It says the one it started from, and
+    // the gesture reads as the sheet refusing to open.
+    //
+    // Two lines in the wrong order, and nothing about it was visible while the
+    // cap applied during the drag as well: the box answered 523 either way,
+    // wrongly but consistently.
+    const released = el.getBoundingClientRect().height;
     el.classList.remove('is-dragging');
 
     // A press that never became a drag. On the grabber that is a tap, and a tap
@@ -313,7 +458,7 @@ export function createSheet({ el, grip, enabled, onSettle }) {
     }
 
     const height = snapTo({
-      height: el.getBoundingClientRect().height,
+      height: released,
       velocity: done.velocity,
       detents: stops(done.heights),
       from: done.h0,
@@ -324,15 +469,30 @@ export function createSheet({ el, grip, enabled, onSettle }) {
   function onCancel(event) {
     if (!drag || event.pointerId !== drag.id) return;
     const heights = drag.heights;
+    const moved = drag.active;
     drag = null;
     el.classList.remove('is-dragging');
-    apply(detent, heights);
+    // A cancel on a gesture that never moved the sheet is the SCROLLER being
+    // handed the drag, which is the ordinary way a touch gesture ends here now
+    // — `onTouchMove` declined it and the browser took it. Nothing moved, so
+    // there is nothing to put back, and writing the detent's height here would
+    // be a layout in the middle of somebody else's scroll.
+    //
+    // A cancel mid-drag is the other thing entirely: the system took the
+    // gesture away (an edge swipe, a call arriving) and the sheet is sitting at
+    // whatever height the last move left it at. That one does have to be put
+    // back on a detent.
+    if (moved) apply(detent, heights);
   }
 
   el.addEventListener('pointerdown', onDown);
   el.addEventListener('pointermove', onMove);
   el.addEventListener('pointerup', onUp);
   el.addEventListener('pointercancel', onCancel);
+  // `passive: false` spelled out, because a listener that cannot preventDefault
+  // is exactly the listener this must not be — and the default for touchmove is
+  // only passive on the document and the body, which is close enough to bite.
+  el.addEventListener('touchmove', onTouchMove, { passive: false });
 
   // The grabber is a button, so it already answers Enter and Space by firing a
   // click — which is the same "next detent" the tap gives. The arrows are the

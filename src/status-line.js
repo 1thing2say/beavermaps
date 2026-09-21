@@ -121,6 +121,31 @@ export function createStatusLine({
   }
 
   /**
+   * Something went wrong and the app carried on anyway.
+   *
+   * THE THIRD THING, between `set(…, true)` and `progress`. A refusal that
+   * leaves nothing working is one you have to be shown: `set`'s error branch
+   * calls `onError`, which opens the panel the strip lives in, because a
+   * sentence written into a closed card explains nothing. A refusal the app
+   * ALREADY RECOVERED FROM is not that, and on a phone the difference is the
+   * whole screen — the panel is not a card in a sidebar there, it is the bottom
+   * sheet, so "Google basemap unavailable" pushed a sheet up over the map to
+   * announce a fallback that had already succeeded and left a map you could see
+   * less of than before the message arrived.
+   *
+   * Standing, though, which is why this is not simply `set(sentence)`: the
+   * resting hint and every progress line would otherwise paint over it within
+   * the second, and the person this sentence is written for — whoever deployed
+   * it with a key the origin is not listed on — would never see it. It holds
+   * the strip exactly as a problem does. It just does not go and fetch an
+   * audience.
+   */
+  function notice(sentence) {
+    set(sentence);
+    problemStanding = true;
+  }
+
+  /**
    * The resting message — what the strip says when nothing is happening and
    * nothing is wrong.
    *
@@ -169,6 +194,7 @@ export function createStatusLine({
   return {
     set,
     progress,
+    notice,
     rest,
     setBusy,
     idle,
