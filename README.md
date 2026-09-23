@@ -1193,9 +1193,9 @@ beavermaps/
 
 ### Campus data
 
-Everything drawn inside the campus boundary is traced out of my campus
-College's own wayfinding basemap rather than taken from Mapbox, whose data for
-this campus is close to empty. The extraction lives in `scripts/`:
+Everything drawn inside the campus boundary is traced out of my campus's own
+wayfinding basemap rather than taken from Mapbox, whose data for this campus is
+close to empty. The extraction lives in `scripts/`:
 
 | script | output |
 |---|---|
