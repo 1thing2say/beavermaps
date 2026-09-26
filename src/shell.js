@@ -18,6 +18,13 @@ import { createSheet } from './sheet.js';
 import { createSheetStack } from './sheet-stack.js';
 
 /**
+ * Map left showing between the pinned controls and a fully drawn-up sheet, in
+ * px. The gap the rest of the chrome keeps between neighbours (--g-gap), so the
+ * sheet stops short of locate the way everything else does.
+ */
+const TOP_CLEARANCE = 10;
+
+/**
  * @param {object} deps
  * @param {object} deps.map
  * @param {object} deps.panels    the four cards, by name
@@ -163,18 +170,46 @@ export function createShell({ map, panels, isPhone, onSettle, dismiss }) {
     // Collapsing moves nothing either — the visible rectangle only grows, so
     // the point is still inside it and revealPoint leaves the camera alone.
     onSettle,
+    // Where the controls pinned to the top of a phone end, so the full detent
+    // stops under them rather than over them. Measured, not stated: both are
+    // placed by the stylesheet off the safe-area inset, which is 0 in a Safari
+    // tab and 47–59px on a notched iPhone once the app is on the home screen,
+    // and neither number is something this file should be restating.
+    //
+    // Only controls in the top half count. The stylesheet pins them up there
+    // on a phone, and a control anywhere lower is not one this sheet could
+    // reach without covering most of the screen anyway.
+    reserve: () => {
+      let bottom = 0;
+      // The button rather than `.mapboxgl-ctrl-group:has(...)`: this runs on
+      // every press, and a selector an older engine cannot parse would throw
+      // here and take the drag down with it.
+      for (const el of document.querySelectorAll('.g-layers-btn, .mapboxgl-ctrl-geolocate')) {
+        const box = el.getBoundingClientRect();
+        if (box.height && box.top < window.innerHeight / 2) bottom = Math.max(bottom, box.bottom);
+      }
+      return bottom ? bottom + TOP_CLEARANCE : 0;
+    },
   });
   sheet.refit();
 
   /**
-   * ...and make it show one thing at a time.
+   * ...and make it show one thing at a time, at every width.
    *
-   * The sheet's children are a column, which is what a sidebar is and what a
-   * phone is not: full width, a place card, a category's results and a route
-   * form all up at once is a pile with two close buttons in it and no way to
-   * tell which one the sheet is about. See src/sheet-stack.js — it keeps the
-   * order they were opened in and shows the last, so each panel's own dismiss
-   * is also the way back to the one underneath it.
+   * The column's children are a list of panels, and all of them up at once is
+   * a pile with three close buttons in it and no way to tell which one the
+   * column is about. See src/sheet-stack.js — it keeps the order they were
+   * opened in and shows the last, so each panel's own dismiss is also the way
+   * back to the one underneath it.
+   *
+   * THIS WAS PHONE-ONLY, on the reasoning that a sidebar has room for
+   * everything. It does, and that was the problem: the same three presses —
+   * Food & drink, a vending machine, Directions — left a phone showing the
+   * route with × going back to the list, and a desktop showing the list
+   * squeezed into 290px over a route panel over the legend, with × on each.
+   * Two apps. Apple's sidebar and Google's are both one panel with a way back,
+   * because that is what makes "where am I in this" answerable, and it is
+   * the same answer on both of them whatever the width.
    *
    * The closes are named here rather than found in the DOM because they are not
    * interchangeable: clearing a category repaints a highlight and closes an
@@ -184,7 +219,7 @@ export function createShell({ map, panels, isPhone, onSettle, dismiss }) {
    */
   const sheetStack = createSheetStack({
     el: document.getElementById('top-left'),
-    enabled: () => isPhone(),
+    enabled: () => true,
     panels: [
       { el: placePanel, dismiss: dismiss.place },
       { el: categoryPanel, dismiss: dismiss.category },

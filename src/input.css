@@ -1243,7 +1243,13 @@ body.navigating .app-chrome {
     transition: outline-color var(--g-t-state) ease;
 }
 
-.g-search:focus-within {
+/* THE FIELD'S focus, not the head's. `.g-search:focus-within` was the same
+   thing while the head held nothing but the field; it holds the front page
+   now — two grids and the shortcuts — and every tile in them is a button that
+   takes focus when it is pressed. Keyed on the head, pressing Restrooms rang
+   the search field in blue. See the phone block for what the same slip did
+   to a tap. */
+.g-search:has(.g-search-field:focus-within) {
     outline-color: var(--g-blue);
 }
 
@@ -3235,11 +3241,11 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
         transition: outline-color var(--g-t-state) ease;
     }
 
-    [data-skin="apple"] .g-search:focus-within {
+    [data-skin="apple"] .g-search:has(.g-search-field:focus-within) {
         outline-color: transparent;
     }
 
-    [data-skin="apple"] .g-search:focus-within .g-search-field {
+    [data-skin="apple"] .g-search-field:focus-within {
         outline-color: var(--g-blue);
     }
 }
@@ -4088,10 +4094,10 @@ body.no-dirbutton .g-directions {
 
 /* --- what the sheet holds when it is open ----------------------------------
 
-   OFF EVERYWHERE BUT A PHONE, like the grabber and the wordmark above. On a
-   desktop this column is a sidebar and the same eleven categories are the
-   legend panel further down it; two copies of one list in one column is one
-   list too many, and the sidebar has no detents to reveal a second state. */
+   OFF BY DEFAULT, and turned on by whichever layout is showing it: the phone
+   at its open detents, the sidebar whenever nothing has been asked yet. See
+   "One column, one workflow, at every width" below. They were phone-only while
+   the desktop's front page was the legend panel; it is not any more. */
 .g-browse,
 .g-shelf-title {
     display: none;
@@ -4819,6 +4825,39 @@ body.no-dirbutton .g-directions {
            the band reads as a dead zone above the wordmark rather than as the
            top of the sheet you can take hold of. */
         cursor: grab;
+        /* STUCK TO THE TOP OF THE SHEET, not to the top of what is in it.
+           ------------------------------------------------------------------
+           It is the first child of the scroller, so it scrolled like one: a
+           third of the way down a building's card, or back on a front page
+           left scrolled to Browse buildings, the one strip that is always a
+           sheet gesture was above the top edge of the sheet with the content,
+           and the only way to put the sheet down was to scroll all the way
+           up first. A sheet's grabber is on the sheet.
+
+           Clear until something is under it, then filled — see the rule
+           after this one. */
+        position: sticky;
+        top: 0;
+        /* Over the head, which is where it does not look like it needs to be:
+           .g-search is `position: static` here but it is a FLEX ITEM, and a
+           flex item's z-index applies whether it is positioned or not — so its
+           5 is a stacking context, and at 1 the grabber was drawn on top of the
+           tiles scrolling under it while every tap on it went to them. */
+        z-index: 6;
+        transition: background-color var(--g-t-state) ease, box-shadow var(--g-t-state) ease;
+    }
+
+    /* ...and the band becomes material only while content is passing under
+       it: the sheet's own fill and a hairline, which is how an iOS bar marks
+       its scroll edge. Not a blur — a backdrop filter inside the sheet's own
+       backdrop filter did not reliably draw, and the rows passing under the
+       grabber stayed perfectly legible through it. And not a fill at all
+       times, which is the sheet's colour laid over the sheet a second time: a
+       band a shade off from the glass around it with nothing under it at all.
+       `data-scrolled` is src/sheet.js's. */
+    .g-topleft[data-scrolled] .g-sheet-grip {
+        background-color: var(--g-card-bg-thick);
+        box-shadow: 0 1px 0 var(--g-line);
     }
 
     .g-topleft.is-dragging .g-sheet-grip {
@@ -4962,29 +5001,6 @@ body.no-dirbutton .g-directions {
         margin-top: 22px;
     }
 
-    /* ...and it gets out of the way the moment there is an answer.
-       ------------------------------------------------------------------
-       The same two conditions that hide the wordmark, for the same reason:
-       a front page is what you look at while you have not asked anything.
-       Once there is a list of matches or a card for a place, the sheet is
-       showing you the thing you asked for and everything above it is
-       furniture. Written as `:has()` rather than a class main.js toggles,
-       so no path can open a card and forget to say so. */
-    .g-search:has(#place-results:not(.hidden)) .g-browse,
-    .g-search:has(#place-results:not(.hidden)) .g-shelf-title,
-    .g-topleft:has(> .g-panel:not(.hidden)) .g-browse,
-    .g-topleft:has(> .g-panel:not(.hidden)) .g-shelf-title,
-    /* THE SHELF GOES WITH THEM, and it did not. This rule listed the heading
-       and the grid and left the four shortcut rows behind it, so picking
-       Restrooms off the grid gave you a sheet holding four buildings you were
-       not looking at, and then, under them, the restrooms you asked for. */
-    .g-topleft:has(> .g-panel:not(.hidden)) .g-shortcuts,
-    /* No shelf, no heading for it. renderShortcuts hides the row when the
-       suggestion list holds the same names. */
-    .g-search:has(#place-shortcuts.hidden) .g-shelf-title {
-        display: none;
-    }
-
     /* A PANEL'S HEAD IS THE SHEET'S TITLE NOW, so it is set like one.
        ------------------------------------------------------------------
        16px medium is right for a card in a sidebar, where it is one heading
@@ -5005,21 +5021,6 @@ body.no-dirbutton .g-directions {
     .g-topleft > .g-panel .g-panel-sub {
         margin-top: 3px;
         font-size: 13px;
-    }
-
-    /* ONE PANEL AT A TIME.
-       ------------------------------------------------------------------
-       `data-front` is written by src/sheet-stack.js onto whichever panel was
-       opened last, and only while the column is a sheet — above the breakpoint
-       the attribute is not written at all, which is why this rule lives inside
-       the phone block and not beside .g-panel.
-
-       Everything else that is open stays open and keeps its state; it is simply
-       not the thing the sheet is currently about. Closing the front one is what
-       brings it back, which is why there is no back button: the dismiss in each
-       panel's head already is one. */
-    .g-topleft[data-depth] > .g-panel:not(.hidden):not([data-front]) {
-        display: none;
     }
 
     .g-topleft[data-detent="half"] .g-shortcuts .g-shortcut,
@@ -5060,11 +5061,11 @@ body.no-dirbutton .g-directions {
        sheet now, holding a wordmark and a row and a list, and a 2px outline
        round all of that reads as the top half of the app being selected rather
        than as a cursor being somewhere. */
-    .g-search:focus-within {
+    .g-search:has(.g-search-field:focus-within) {
         outline-color: transparent;
     }
 
-    .g-search:focus-within .g-search-field {
+    .g-search-field:focus-within {
         outline: 2px solid var(--g-blue);
         outline-offset: 1px;
     }
@@ -5105,7 +5106,16 @@ body.no-dirbutton .g-directions {
         scroll-padding-left: 12px;
     }
 
-    .g-search:focus-within .g-shortcuts:not(.hidden) {
+    /* The field's ROW, not the whole head — and this is the one where the
+       difference cost a tap. The tiles of the front page are inside the head,
+       and a pressed button takes focus: `.g-search:focus-within` turned the
+       open sheet's list of four shortcuts back into a chip row the moment a
+       tile was touched, the page lost 156px under the finger, and at the
+       bottom of the scroll the release landed on the gap between two tiles.
+       Measured on Campus buildings, the last tile: pointerdown on its name,
+       click on the grid. Same specificity as before, so the detent rules and
+       the front page's own hiding rules still outrank it exactly as they did. */
+    .g-search-row:focus-within ~ .g-shortcuts:not(.hidden) {
         display: flex;
     }
 
@@ -5345,6 +5355,222 @@ body.no-dirbutton .g-directions {
         width: auto;
         max-width: none;
         max-height: 70dvh;
+    }
+}
+
+/* AFTER THE PHONE BLOCK, and the position is load-bearing. The rules below
+   that take the front page away when there is an answer tie on specificity
+   with the phone's own "show it at the open detents" rules, and a tie goes to
+   whichever comes later. Above the phone block they lost, and a route panel
+   opened at the half detent had the shortcut list stacked on top of it. */
+/* ===========================================================================
+   One column, one workflow, at every width
+   ===========================================================================
+   The column down the left of a desktop and the sheet up the bottom of a phone
+   are the same element with the same children, and until this they were two
+   different apps. The phone showed one panel at a time with × going back; the
+   desktop showed every open panel at once. The phone opened onto a front page
+   of Find nearby and Browse buildings; the desktop opened onto the legend and
+   had no Browse buildings at all. Pick Food & drink, then a vending machine,
+   then Directions, and a phone was showing the route with the list one × away
+   while a desktop was showing the list squeezed into 290px between the route
+   and the legend, with a close button on all three.
+
+   So the rules that made the phone make sense are stated once, here, for both:
+   one panel at a time, a front page while nothing has been asked, and nothing
+   on it once something has. What still differs is only the SHAPE — a sheet
+   with detents against a sidebar that scrolls — and that is what the phone
+   block and the sidebar block are for. */
+
+/* ONE PANEL AT A TIME.
+   ---------------------------------------------------------------------------
+   `data-front` is written by src/sheet-stack.js onto whichever panel was
+   opened last. Everything else that is open stays open and keeps its state; it
+   is simply not the thing the column is currently about. Closing the front one
+   is what brings it back, which is why there is no back button: the dismiss in
+   each panel's head already is one. */
+.g-topleft[data-depth] > .g-panel:not(.hidden):not([data-front]) {
+    display: none;
+}
+
+/* ...AND THE ONE BEING REPLACED LEAVES AT ONCE.
+   ---------------------------------------------------------------------------
+   Every panel fades out over --g-t-panel, `display` held back until the fade
+   is done — see the Motion block — and that is right for the last panel
+   leaving an empty column. It is wrong for one panel giving way to another,
+   because for that quarter second BOTH are laid out. Measured on a phone:
+   pressing a row in a results list left the list fully opaque where it was
+   while the route panel arrived invisible underneath it, off the bottom of the
+   sheet, and then the two swapped in a single frame — so the entrance never
+   showed and the press read as lag. Going back was worse: the route panel's
+   fade ran below the list that had come back above it, so it dropped 132px
+   down the sheet before it vanished.
+
+   So while there is still a panel in front, a panel that is not the front one
+   leaves with no transition and the incoming one makes the entrance on its
+   own. With nothing left in front — `data-depth="0"`, the column going back to
+   its front page — the fade is untouched. */
+.g-topleft[data-depth]:not([data-depth="0"]) > .g-panel:not([data-front]) {
+    transition: none;
+}
+
+/* THE FRONT PAGE GETS OUT OF THE WAY THE MOMENT THERE IS AN ANSWER.
+   ---------------------------------------------------------------------------
+   The same two conditions that hide the phone's wordmark, for the same reason:
+   a front page is what you look at while you have not asked anything. Once
+   there is a list of matches or a panel, the column is showing you the thing
+   you asked for and everything above it is furniture. Written as `:has()`
+   rather than a class main.js toggles, so no path can open a card and forget
+   to say so. */
+.g-search:has(#place-results:not(.hidden)) .g-browse,
+.g-search:has(#place-results:not(.hidden)) .g-shelf-title,
+.g-topleft:has(> .g-panel:not(.hidden)) .g-browse,
+.g-topleft:has(> .g-panel:not(.hidden)) .g-shelf-title,
+/* THE SHELF GOES WITH THEM, and it did not. This rule listed the heading and
+   the grid and left the four shortcut rows behind it, so picking Restrooms off
+   the grid gave you a sheet holding four buildings you were not looking at,
+   and then, under them, the restrooms you asked for. */
+.g-topleft:has(> .g-panel:not(.hidden)) .g-shortcuts,
+/* No shelf, no heading for it. renderShortcuts hides the row when the
+   suggestion list holds the same names. */
+.g-search:has(#place-shortcuts.hidden) .g-shelf-title {
+    display: none;
+}
+
+/* THE LAYERS MENU OVER EVERYTHING, WHILE IT IS OPEN.
+   ---------------------------------------------------------------------------
+   The menu is a Mapbox control — main.js hands it to addControl so it spaces
+   with the rest of the stack — and Mapbox's corners are stacking contexts at
+   z-index 2. So nothing inside one can rise past the column at 20, however it
+   is positioned. On a phone that put the menu BEHIND the sheet the moment the
+   sheet was pulled up: at the half detent the Look and Legend sections were
+   under it, at the full detent everything below "Map type" was, and
+   `elementFromPoint` on the Map legend row answered with the sheet. The
+   credit line, which rides over the top of a full sheet, lay across what was
+   left. On a desktop window narrow enough for the menu to reach the sidebar,
+   the sidebar covered its corner the same way.
+
+   The whole corner goes up while the menu is open, which is safe because
+   everything else in it is a 44px control pinned where the menu drops from,
+   and comes back down when it closes. 21 clears the column and stays under
+   the debug card and the top bar. 0-3-0 because mapbox-gl.css arrives after
+   this file and wins every tie. */
+.mapboxgl-control-container .mapboxgl-ctrl-bottom-right:has(#layers-menu:not(.hidden)) {
+    z-index: 21;
+}
+
+/* THE FRONT PAGE ON A DESKTOP.
+   ---------------------------------------------------------------------------
+   It was phone-only, on the grounds that "the same eleven categories are the
+   legend panel further down" the sidebar. They were, and that was the
+   inconsistency rather than the reason: the legend was the desktop's front
+   page and a grid was the phone's, Browse buildings existed on one of them,
+   and which you got depended on the width of the window. The grid is the front
+   of the column at every width now, and the legend is a panel you open from
+   the layers menu on both.
+
+   No detents here, so no `data-detent` to key it on: it is simply on, and the
+   rules above take it away when there is an answer. The shortcut shelf is the
+   list the open sheet makes of it, for the reason that note gives — these are
+   building names, and a sideways strip of them in a 400px sidebar truncates the
+   very names it scrolls to avoid truncating. */
+@media (min-width: 641px) {
+    .g-browse {
+        display: block;
+        margin-top: 18px;
+    }
+
+    .g-shelf-title {
+        display: block;
+        margin-top: 22px;
+    }
+
+    .g-browse-grid,
+    .g-kind-grid {
+        margin-top: 10px;
+    }
+
+    /* A section head in a 400px sidebar, where the phone's 20px would be the
+       loudest thing in the column. */
+    .g-browse-title {
+        font-size: 17px;
+    }
+
+    .g-shortcuts:not(.hidden) {
+        display: grid;
+        gap: 8px;
+        margin: 10px 0 0;
+        padding: 0;
+        overflow: visible;
+    }
+
+    .g-shortcuts .g-shortcut {
+        height: 40px;
+        text-align: left;
+        padding: 0 14px;
+        border-radius: var(--g-radius-sm);
+        font-size: 14px;
+    }
+
+    /* THE CLASSIC PILL BECOMES THE HEAD OF A CARD.
+       ------------------------------------------------------------------
+       It was a 48px row with the field in it, and every child of the head
+       was a flex item on that row — which the shortcut shelf became when it
+       moved inside the head. Measured at 1440x900 under classic: the shelf's
+       chips took the whole row, the field was 0px wide, and the magnifier
+       sat on top of "Welcome and Support Center". There was no way to type a
+       search. The Apple sidebar was already a column and never showed it.
+
+       A column here too, then: the field is the first row at the pill's own
+       height, and whatever else the head holds goes underneath it. With
+       nothing under it the box is 48px of pill exactly as before, and the
+       suggestion list still hangs off its bottom edge, which is where
+       `position: absolute` on .g-results puts it. */
+    .g-search {
+        flex-direction: column;
+        align-items: stretch;
+        height: auto;
+    }
+
+    .g-search-row {
+        height: 48px;
+        flex: none;
+    }
+
+    /* ...and a card's corners and a card's bottom edge while the front page
+       is in it, because a pill's 24px radius on a box 900px tall is a
+       lozenge, not a card. */
+    [data-skin="classic"] .g-topleft:not(:has(> .g-panel:not(.hidden))) > .g-search:not(:has(#place-results:not(.hidden))) {
+        padding-bottom: 14px;
+        border-radius: var(--g-radius);
+        /* ...AND IT SCROLLS, because it is the whole column now. The head is
+           `flex: none` so the field can never be squeezed, which is right for
+           a pill and wrong for a card holding two grids: it ran past the
+           bottom of a 900px window, over the credit line, with Places you go
+           below the edge and nothing to scroll. Only in this state, since the
+           suggestion list hangs OUTSIDE the pill and a scroller would clip it
+           — and the list and this front page are never up together. */
+        flex: 0 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    /* The pill is inset 16px on the left and 8px on the right, where the
+       magnifier sits in its own hit area. The front page is text and tiles,
+       and wants the same margin on both sides. */
+    [data-skin="classic"] .g-search > .g-browse,
+    [data-skin="classic"] .g-search > .g-shelf-title,
+    [data-skin="classic"] .g-search > .g-shortcuts {
+        margin-right: 8px;
+    }
+
+    /* The top bar is one line. Its field has nowhere to put a front page, and
+       with the bar on, the column below it is panels only. */
+    .has-navbar .g-browse,
+    .has-navbar .g-shelf-title,
+    .has-navbar .g-shortcuts {
+        display: none;
     }
 }
 

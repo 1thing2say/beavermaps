@@ -259,29 +259,29 @@ function startApp() {
   const buildingsPanel = document.getElementById('buildings-panel');
   const buildingsList = document.getElementById('buildings-list');
   const buildingsCount = document.getElementById('buildings-count');
+  // The column all four stand in — the sidebar, or the sheet. campusPadding
+  // measures it whole on a desktop, so it is looked up with them.
+  const topLeft = document.getElementById('top-left');
   // Same reason, one step further out: setStatus opens the route panel to say
   // anything that has gone wrong, and setStatus is reachable from the Google
   // basemap's failure path — which can resolve before the chrome block below is
   // ever reached.
   const directionsBtn = document.getElementById('directions-btn');
 
-  // Below this width the left column becomes a bottom sheet and the legend
-  // becomes one too. Must match the media query in src/input.css.
+  // Below this width the left column becomes a bottom sheet. Must match the
+  // media query in src/input.css.
   const phone = window.matchMedia('(max-width: 640px)');
-  // ...and where the legend holds the right edge it is furniture, where it is a
-  // sheet over the map it is not, so on a phone it stays closed. Set here and
-  // not with the rest of the chrome because campusPadding measures this panel
-  // and the first fitBounds is a few lines below — opening it afterwards would
-  // frame the campus around a card that is not there. The button that closes it
-  // again is told about this where it is declared.
+  // THE LEGEND IS CLOSED ON ARRIVAL AT EVERY WIDTH, and this is where a desktop
+  // used to open it. It held the sidebar on a desktop and hid behind the layers
+  // menu on a phone, which made the same key two different things depending
+  // on the window: furniture in one, a panel you asked for in the other, and a
+  // rotation had to re-decide which (that was `refitLegend`, now gone).
   //
-  // OPENING, not closing, and the direction is the whole point. This read
-  // `if (phone.matches) legendPanel.classList.add('hidden')` — the panel was
-  // open in the markup and a phone shut it here, which is a line that cannot
-  // run until the bundle has parsed. Everything before that moment painted an
-  // empty Legend panel across the bottom sheet. The markup carries `hidden` now
-  // and a desktop is what asks for it back.
-  if (!phone.matches) legendPanel.classList.remove('hidden');
+  // What it was doing on a desktop is done by the Find nearby grid now, which
+  // is the front of the column at every width — the same eleven categories,
+  // pointable and pressable, in the shape the phone already had. The legend
+  // proper is one door away on both, Layers → Map legend, and opens as a
+  // panel like any other.
   const navBanner = document.getElementById('nav-banner');
   const navFooter = document.getElementById('nav-footer');
   const navStack = document.getElementById('nav-stack');
@@ -291,13 +291,31 @@ function startApp() {
    * what each rectangle costs and why a phone-width card costs height.
    */
   function campusPadding() {
+    const canvas = map.getCanvas().getBoundingClientRect();
+    // THE WHOLE COLUMN ON A DESKTOP. It used to be the open panels alone, which
+    // was the same thing while the column was nothing but panels — but at rest
+    // it is the search field and the front page under it now, 400px of it down
+    // the left edge, and framing the campus as though that were not there put
+    // the west half of it under the sidebar. Its width does not change with
+    // what is in it, so opening and closing panels no longer moves the framing
+    // sideways at all.
+    //
+    // Only when it has height: with the top bar on, the field lives up there
+    // and an empty column is a 400px-wide box of nothing.
+    if (!phone.matches) {
+      const column = topLeft.getBoundingClientRect();
+      return paddingAround({ canvas, boxes: column.height ? [column] : [] });
+    }
+    // On a phone it is the panel showing in the sheet, as it always was. The
+    // stack has hidden the rest, and a hidden panel measures zero wide.
+    //
     // buildingsPanel is not in this list and must not be: it is a section of
     // the debug card now, and the debug card is a thing you open, read and
     // close rather than a panel the map is framed around.
     const open = [placePanel, categoryPanel, sidePanel, legendPanel]
       .filter((card) => !card.classList.contains('hidden'))
       .map((card) => card.getBoundingClientRect());
-    return paddingAround({ canvas: map.getCanvas().getBoundingClientRect(), boxes: open });
+    return paddingAround({ canvas, boxes: open });
   }
 
   // The constructor framed the campus before these element refs existed, so it
@@ -428,7 +446,6 @@ function startApp() {
   const navbarSlot = document.getElementById('navbar-search');
   const navbarLegend = document.getElementById('navbar-legend');
   const searchHome = document.querySelector('.g-search');
-  const topLeft = document.getElementById('top-left');
   let navbarShown = false;
 
   // The strip the app speaks in, and the spinner beside it. Which sentence
@@ -707,11 +724,16 @@ function startApp() {
     panels: { placePanel, categoryPanel, sidePanel, legendPanel },
     isPhone: () => phone.matches,
     onSettle: () => revealPoint(camera.focus()),
+    // What going BACK from each panel does — Escape, today — and it is the
+    // same thing the panel's own × does in every case, so the two ways out of
+    // a panel cannot leave the map in two different states. They were not
+    // quite: this closed a place card without putting its pin down, and hid the
+    // route panel with the ribbon still across the campus.
     dismiss: {
-      place: () => closePlaceCard(),
+      place: () => clearSelection(),
       category: () => clearResults(),
-      route: () => toggleRoutePanel(false),
-      legend: () => toggleLegendPanel(false),
+      route: () => { resetMap(); toggleRoutePanel(false); },
+      legend: () => { clearLegendHighlight(); toggleLegendPanel(false); },
     },
   });
   const sheet = shell.sheet;
@@ -743,7 +765,6 @@ function startApp() {
     activeFlyover: () => activeFlyover,
   });
   const showPlaceCard = (card, flyover, options) => cards.showPlace(card, flyover, options);
-  const closePlaceCard = () => cards.closePlace();
   const closeBuildingCard = () => cards.closeBuilding();
   const showBuildingCard = (raw) => cards.showBuilding(raw);
   const renderBuildings = () => cards.renderBuildings();
@@ -991,11 +1012,10 @@ function startApp() {
   // Small, and none of it touches the map — it opens and closes things. Kept
   // together so the "what does this button do" question has one place to look.
   //
-  //   the LEGEND holds the right edge and is open on arrival at desktop widths,
-  //   because it is the map's key and a key you have to go and find is not one.
-  //   Its close button and the layers-menu row are the two halves of a toggle
-  //   for the people who want the whole canvas, and on a phone — where a
-  //   right-hand column would be most of the screen — closed is where it starts.
+  //   the LEGEND is a panel in the column like the others, closed on arrival
+  //   at every width, and opened from the layers menu's Map legend row on a
+  //   desktop and a phone alike. The key a visitor meets first is the Find
+  //   nearby grid at the front of the column, which is the same eleven rows.
   //
   //   the ROUTE PANEL is closed on arrival, and opens from the top bar's
   //   directions button or from anything that actually sets an endpoint. See
@@ -1029,7 +1049,6 @@ function startApp() {
     legendClose,
     debugLegend,
     directionsBtn,
-    isPhone: () => phone.matches,
     campusPadding: () => campusPadding(),
     routingEnabled: () => routingEnabled,
     clearLegendHighlight: () => clearLegendHighlight(),
@@ -1044,15 +1063,15 @@ function startApp() {
   debugLegend.addEventListener('click', onLegendPressed);
 
   // ...and the breakpoint itself is a thing that happens, not only a thing that
-  // is true at startup. A phone crosses it by being turned over, and everything
-  // this width decides — the column being a sheet rather than a sidebar, the
-  // legend being a panel rather than a card over the map — was decided once and
-  // never again. `refit` puts the sheet's own numbers back (a rotation also
-  // fires `resize`, so that half was covered); `refitLegend` is the half that
-  // was not, and the comment on it in src/panels.js is the long version.
+  // is true at startup. A phone crosses it by being turned over, and the one
+  // thing this width still decides — the column being a sheet rather than a
+  // sidebar — has to be decided again. `refit` puts the sheet's own numbers
+  // back; the camera is re-framed because the two layouts reserve their room
+  // differently (see campusPadding). What is showing in the column does NOT
+  // change: it is the same panels in the same order either side of the line.
   phone.addEventListener('change', () => {
     refitSheet();
-    panels.refitLegend();
+    map.easeTo({ padding: campusPadding(), duration: 300 });
   });
 
   layersBtn.addEventListener('click', () => toggleSheet(layersMenu, layersBtn));
@@ -1138,6 +1157,11 @@ function startApp() {
       fps: document.getElementById('debug-fps'),
       twopoint: document.getElementById('debug-twopoint'),
       navbar: document.getElementById('debug-navbar'),
+      // Missing from this list, so the switch was in the menu and did nothing:
+      // never checked, never enabled with the rest, and its `change` fell on
+      // the floor. The flag it would have set is read by debug-apply.js, which
+      // hid the button for good because the answer was always "off".
+      dirbutton: document.getElementById('debug-dirbutton'),
     },
     onChange: applyDebug,
   });
@@ -1177,9 +1201,8 @@ function startApp() {
     map,
     litPalette,
     elements: {
-      legendList, browseGrid, kindsGrid, legendPanel, categoryPanel,
+      legendList, browseGrid, kindsGrid, categoryPanel,
     },
-    isPhone: () => phone.matches,
     data: {
       amenities: () => campusAmenities,
       places: () => campusPlaces,
@@ -1195,10 +1218,12 @@ function startApp() {
     },
     playSwap: () => choreo.swap(),
     playClear: () => choreo.clear(),
-    toggleSheet: (panel, button, force) => toggleSheet(panel, button, force),
-    legendOpen,
+    // Not passed at all until this, so a row in a Browse buildings list threw
+    // "openBuilding is not a function" and opened nothing — every one of them,
+    // on every device. Lost when main.js was split into modules.
+    openBuilding: (props) => cards.openBuilding(props),
+    openPlace: (place) => openPlace(place),
     addCategoryLayer: () => markers.addCategory(),
-    setDestination: (coords, name) => setDestination(coords, name),
     buildingSub: (props) => buildingSub(props),
   });
   const shownCategory = () => legend.shownCategory();
@@ -1565,11 +1590,29 @@ function startApp() {
   // stays big and tinted while the pointer is over the sidebar.
   map.on('mouseout', () => hoverPin(null));
 
-  // Esc puts a selection back, which is the one thing every card on every map
-  // agrees on. Both halves of it: a tap on a footprint opens a card without
-  // lifting anything, so an Esc that only put pins down would leave that one up.
+  // Esc is BACK: one step, whatever the step is, at every width.
+  //
+  // It used to put a selection down and nothing else, so it closed a place
+  // card and ignored everything around it — the layers menu stayed open over
+  // the map, a results list stayed up, the route panel stayed up. Now it walks
+  // the same path the ×s do, in the order they are stacked: the menu that is
+  // floating over everything first, then whichever panel is in front, and only
+  // then — with the column empty — a selection that has no card of its own (a
+  // tap on a footprint opens a card without lifting anything, so both halves
+  // still go).
+  //
+  // Not from inside a field. Its own Escape closes its own list, and taking a
+  // panel away as well would be one keypress doing two things.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') clearSelection();
+    if (e.key !== 'Escape' || navigating()) return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (!layersMenu.classList.contains('hidden')) {
+      toggleSheet(layersMenu, layersBtn, false);
+      layersBtn.focus();
+      return;
+    }
+    if (shell.stack.depth) { shell.stack.back(); return; }
+    clearSelection();
   });
 
   map.on('click', (e) => {
@@ -1648,22 +1691,55 @@ function startApp() {
    * two-point walk survives whole and is now explicit rather than positional:
    * "Start here" on one pin, "Directions" on the next.
    */
+  /** The red pin a place stands under while its card is open. */
+  function plantPin(coords, title) {
+    // Takes the previous one with it — see clearSelection.
+    clearSelection();
+    droppedMarker = new mapboxgl.Marker({
+      element: routePin(GOOGLE_RED, { title }),
+      anchor: 'bottom',
+      offset: liftedOffset(ROUTE_PIN_W),
+    })
+      .setLngLat(coords)
+      .addTo(map);
+  }
+
+  /**
+   * Open whatever a list row or a search result names: its card, the way a tap
+   * on it out on the map does.
+   *
+   * THE ONE ANSWER TO "I PICKED A PLACE". Before this there were three. The map
+   * gave you a card; a Browse buildings row gave you a card; a search result, a
+   * shortcut and a Find nearby row went straight into routing — which on a
+   * phone that had no fix yet meant pressing "Library" and being told the
+   * device could not find itself. Every one of those paths ends here now, and
+   * the card they all end at has Directions on it, which is the one way into
+   * a route.
+   *
+   * A building gets the building card, which is the same card its footprint
+   * opens, outline and aerial view included. Anything else gets the card a pin
+   * gets, standing under a red pin at the spot — the pin a long press drops,
+   * and the same red the destination will be, so pressing Directions swaps one
+   * for the other where it stands.
+   */
+  function openPlace({ coords, name, sub = null, kind = null }) {
+    const building = directoryRow(name);
+    if (building) { cards.openBuilding(building); return; }
+    plantPin(coords, name);
+    showPlaceCard(pinCard({ coords, kind, name, sub }, {
+      onStart: (at) => { clearSelection(); placeStart(at, name); },
+      onEnd: (at) => { clearSelection(); setDestination(at, name); },
+      onClose: clearSelection,
+    }), null, { at: coords });
+  }
+
   function dropPin(lngLat) {
     const clicked = point([lngLat.lng, lngLat.lat]);
     // Snapping the click locally keeps the marker instant; the server snaps
     // again on its own side, and lands on the same vertex.
     const snapped = nearestPoint(clicked, networkPoints).geometry.coordinates;
 
-    // Takes the previous dropped pin with it — see clearSelection.
-    clearSelection();
-
-    droppedMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Dropped pin' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(snapped)
-      .addTo(map);
+    plantPin(snapped, 'Dropped pin');
 
     showPlaceCard(pinCard(
       // The coordinates are the subtitle because they are the only true thing
@@ -1718,7 +1794,7 @@ function startApp() {
     places: () => campusPlaces,
     directory: () => campusDirectory,
     afterExit: (el, empty) => afterExit(el, empty),
-    setDestination: (coords, name) => setDestination(coords, name),
+    openPlace: (place) => openPlace(place),
     directoryRow: (name) => directoryRow(name),
     buildingSub: (props) => buildingSub(props),
     setStatus: (sentence, isError) => setStatus(sentence, isError),

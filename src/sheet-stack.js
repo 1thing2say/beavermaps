@@ -1,4 +1,4 @@
-// One thing at a time, on a phone.
+// One thing at a time — on a phone, and in the sidebar above it.
 //
 // THE BUG THIS EXISTS TO FIX. The sheet's children are a column: the search
 // head, then a place card, then a category's results, then the route panel,
@@ -24,6 +24,14 @@
 // with the stack underneath it that dismiss already IS back — close the place
 // card and the list you picked it from is there again. A second control that
 // did the same thing would be a second control to explain.
+//
+// THE SIDEBAR GETS IT TOO, which it did not at first. "In a 400px sidebar
+// that is right", above, was the reasoning, and the room was real — what it
+// bought was the pile this file was written against, one breakpoint up: three
+// panels and three dismisses stacked down the left edge of a desktop, with the
+// list you were reading squeezed to fit between the other two. See src/shell.js
+// for the measurement. The rule is the same at every width now, so the question
+// "what does × do" has one answer rather than one per screen size.
 //
 // It watches rather than being told. Four panels are opened from six places in
 // src/main.js — some through `toggleSheet`, some by writing the class directly
@@ -51,6 +59,28 @@ export function createSheetStack({ el, panels, enabled, onFront }) {
   const isOpen = (panel) => !panel.el.classList.contains('hidden');
   const front = () => order[order.length - 1] ?? null;
 
+  /**
+   * How far down the column was scrolled under each panel, and under `null`
+   * for the front page with nothing open.
+   *
+   * THE WAY BACK GOES BACK TO WHERE YOU WERE. Scroll down the front page to
+   * Browse buildings, open Library, close it: the grid you pressed should be
+   * under your thumb, not the search field. And the other way — a card opened
+   * from a scrolled page is read from its title, so a panel arriving starts at
+   * the top rather than wherever the page it replaced had been left.
+   *
+   * RECORDED AS IT SCROLLS rather than read when the front changes, because by
+   * then it is often already gone: the front page hides itself the moment a
+   * panel is un-hidden (a `:has()` rule, see src/input.css), the place card
+   * forces a layout straight after it un-hides, and a column that has just
+   * lost most of its content clamps its scroll to fit before this ever runs.
+   * The browser fires the scroll event for that clamp on the next frame,
+   * after the front has changed here, so it is filed under the new panel and
+   * cannot overwrite the old one's.
+   */
+  const scrolledTo = new Map();
+  el.addEventListener('scroll', () => scrolledTo.set(front(), el.scrollTop), { passive: true });
+
   function refresh() {
     const before = front();
     for (const panel of panels) {
@@ -64,14 +94,21 @@ export function createSheetStack({ el, panels, enabled, onFront }) {
       if (open) order.push(panel);
     }
     paint();
-    if (front() !== before) onFront?.(front()?.el ?? null);
+    const after = front();
+    if (after === before) return;
+    // A panel that has closed is forgotten, so opening it again starts fresh.
+    for (const panel of scrolledTo.keys()) {
+      if (panel && !order.includes(panel)) scrolledTo.delete(panel);
+    }
+    el.scrollTop = scrolledTo.get(after) ?? 0;
+    onFront?.(after?.el ?? null);
   }
 
   function paint() {
-    // Above the breakpoint this is a sidebar and the whole idea is off: every
-    // open panel shows, which is what a sidebar is for. Everything written here
-    // is removed rather than left inert, so the stylesheet's own rules are the
-    // only ones in play there.
+    // `enabled` is always true in the app now — see src/shell.js — and is kept
+    // as a switch so the arrangement can be turned off whole: everything
+    // written here is removed rather than left inert, and with it gone every
+    // open panel shows, which is how the column behaved before this existed.
     const on = enabled();
     const top = on ? front() : null;
     for (const panel of panels) {
@@ -95,10 +132,10 @@ export function createSheetStack({ el, panels, enabled, onFront }) {
     /**
      * Dismiss whatever is on top, through the app's own close for it.
      *
-     * Not used by a control yet — each panel's own dismiss button is the back
-     * button, which is the point of the arrangement. It is here for the paths
-     * that need to unwind the sheet without knowing what is in it: a hardware
-     * back gesture, or a swipe-down on a sheet that is already collapsed.
+     * Each panel's own dismiss button is the back button, which is the point
+     * of the arrangement; this is for the paths that need to unwind the column
+     * without knowing what is in it. Escape is the first — see main.js — and a
+     * hardware back gesture would be the next.
      */
     back() {
       front()?.dismiss();
