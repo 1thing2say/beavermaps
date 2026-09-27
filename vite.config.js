@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { hostname } from 'node:os';
 import { defineConfig } from 'vite';
 import compression from 'compression';
@@ -36,8 +37,23 @@ const useHttps = process.env.HTTPS === '1';
  * macbook-pro.local.local — a name nothing resolves, so the certificate is
  * issued for it, allowedHosts lists it, and the real https://<host>.local URL
  * is refused with "Blocked request" by the very config meant to allow it.
+ *
+ * On macOS os.hostname() is not the mDNS name at all: it is whatever DNS or
+ * DHCP last called the machine ("Mac.lan" on a home router), while Bonjour
+ * advertises LocalHostName ("MacBook-Pro" → macbook-pro.local). So on a Mac,
+ * ask scutil for the name Bonjour actually publishes, and fall back to
+ * hostname() only where that is unavailable.
  */
-const LAN_HOST = `${hostname().replace(/\.local$/i, '')}.local`.toLowerCase();
+function mdnsName() {
+  if (process.platform === 'darwin') {
+    try {
+      const name = execFileSync('scutil', ['--get', 'LocalHostName'], { encoding: 'utf8' }).trim();
+      if (name) return name;
+    } catch { /* LocalHostName unset — fall through */ }
+  }
+  return hostname().replace(/\.local$/i, '');
+}
+const LAN_HOST = `${mdnsName()}.local`.toLowerCase();
 
 /**
  * Gzip what the dev server sends, which matters here far more than it sounds.
