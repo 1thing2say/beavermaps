@@ -188,8 +188,11 @@ export function claims({ fromGrip, scrolled, room, dx, dy }) {
  * @param {HTMLElement} parts.grip  the always-draggable strip across its top
  * @param {() => boolean} parts.enabled whether the sheet is a sheet right now
  *                                  (it is a sidebar above the phone breakpoint)
+ * @param {(name: string) => void} [parts.onSettle] told when the detent changes
+ * @param {() => number} [parts.reserve] how far down the screen the full detent
+ *                                  must stop, in px — never less than MAP_STRIP
  */
-export function createSheet({ el, grip, enabled, onSettle }) {
+export function createSheet({ el, grip, enabled, onSettle, reserve }) {
   /** The name of the detent the sheet is resting at. */
   let detent = 'rest';
   /** The live drag, or null. */
@@ -220,6 +223,21 @@ export function createSheet({ el, grip, enabled, onSettle }) {
   function measure() {
     const held = el.style.height;
     const at = el.dataset.detent;
+    // THE SCROLL POSITION GOES BACK TOO, and it is the half of this that was
+    // missing. For the length of the measurement the sheet is its resting self
+    // — a wordmark and a field, 131px, nothing to scroll — and a box with
+    // nothing to scroll clamps its scrollTop to 0. Putting the height back does
+    // not put the position back, so every press on a scrolled sheet threw it
+    // to the top, because `onDown` measures before it does anything else.
+    //
+    // Measured on a phone at the full detent scrolled 420px down: press the
+    // Library tile and the sheet jumped to its top under the finger, and the
+    // tap that finished the press landed on whatever had scrolled into that
+    // spot — Restrooms, in the Find nearby grid. Every tap below the fold of a
+    // scrolled sheet was a tap on something else. And the drag reading
+    // `el.scrollTop` a line later saw 0, took a downward scroll for a sheet
+    // being dragged shut, and collapsed it.
+    const scrolled = el.scrollTop;
     // BOTH of them, and the attribute is the one that is easy to forget. The
     // stylesheet shows things at the open detents that it hides at rest — the
     // shortcut list is the first — so measuring the resting height while the
@@ -238,6 +256,9 @@ export function createSheet({ el, grip, enabled, onSettle }) {
     const content = el.scrollHeight;
     if (at) el.dataset.detent = at; else delete el.dataset.detent;
     el.style.height = held;
+    // Only when it moved: a write is a scroll event, and a scroll event on
+    // every press is somebody else's handler running for nothing.
+    if (el.scrollTop !== scrolled) el.scrollTop = scrolled;
 
     // The VISUAL viewport, so a keyboard shortens the sheet instead of putting
     // its top half behind the keys. The sheet's own `bottom` is already lifted
@@ -248,7 +269,17 @@ export function createSheet({ el, grip, enabled, onSettle }) {
     // sheet holding six rows to 88% of a phone and the bottom third is a field
     // of blank material, which reads as content that failed to load rather than
     // as a sheet that is open.
-    const full = clamp(content, rest, screen - MAP_STRIP);
+    //
+    // THE STRIP IS AT LEAST WHAT IS PINNED UP THERE, and on a phone with a notch
+    // that is a good deal more than 96px. Added to the home screen, the page
+    // runs under the status bar, the layers button and locate move down by the
+    // inset with it, and a fixed strip put the full sheet's edge through the
+    // bottom of the one and over the whole of the other: measured with a 47px
+    // inset at 390x844, layers at 57..101, locate at 102..146, the sheet's top
+    // at 97. `reserve` is whoever built this sheet saying where those controls
+    // end — see src/shell.js — so this file still knows nothing about them.
+    const strip = Math.max(MAP_STRIP, Math.round(reserve?.() ?? 0));
+    const full = clamp(content, rest, screen - strip);
     const half = clamp(Math.round(screen * 0.5), rest, full);
     return { rest, half, full };
   }
@@ -353,6 +384,19 @@ export function createSheet({ el, grip, enabled, onSettle }) {
       // the browser off and false once the scroller has been given it.
       owner: null,
     };
+    // THE GRABBER TAKES THE POINTER NOW, not eight pixels from now. A press
+    // there is a sheet gesture whatever happens next, so there is nothing to
+    // wait and see about — and waiting cost the gesture to a mouse. A finger's
+    // pointer is implicitly captured by whatever it went down on; a mouse's is
+    // not, and the grabber is 26px tall, so a quick upward drag on a narrow
+    // desktop window (which gets this sheet too) left the strip on its first
+    // move. That move and every one after it went to the map, `onMove` never
+    // saw the threshold crossed, and the sheet ignored the drag. Measured in
+    // WebKit, whose automation drives touch as a mouse: pointerdown on the
+    // grabber, then nothing.
+    if (drag.fromGrip) {
+      try { el.setPointerCapture(drag.id); } catch { /* uncaptured is still a drag */ }
+    }
   }
 
   /**
@@ -485,6 +529,12 @@ export function createSheet({ el, grip, enabled, onSettle }) {
     if (moved) apply(detent, heights);
   }
 
+  // Whether anything is scrolled under the top edge, for the grabber — which
+  // is pinned there and has to say so once content passes beneath it. See
+  // `.g-sheet-grip` in the phone block of src/input.css.
+  el.addEventListener('scroll', () => {
+    el.toggleAttribute('data-scrolled', el.scrollTop > 0);
+  }, { passive: true });
   el.addEventListener('pointerdown', onDown);
   el.addEventListener('pointermove', onMove);
   el.addEventListener('pointerup', onUp);

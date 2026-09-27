@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { claims, snapTo } from '../src/sheet.js';
+import { claims, createSheet, snapTo } from '../src/sheet.js';
 
 /** A phone-shaped set: collapsed head, half the screen, most of the screen. */
 const DETENTS = [122, 422, 748];
@@ -174,3 +174,100 @@ test('the first move of a gesture is only a pixel or two', () => {
   assert.equal(claims({ ...LONG, dx: 0, dy: 1 }), true, 'a downward gesture was given away');
   assert.equal(claims({ ...LONG, dx: 1, dy: -1 }), false);
 });
+
+// ---------------------------------------------------------------------------
+// The sheet itself, driven through its own listeners.
+//
+// Not a browser — nothing here lays anything out — but a browser's one rule
+// that matters to what follows is small enough to state: a box's scrollTop is
+// clamped to how far it can scroll, and that is decided at layout, which is
+// whenever something asks how big the box is. `measure` makes the sheet
+// briefly its resting self to ask exactly that, so this is the rule that
+// threw a scrolled sheet back to its top on every press.
+// ---------------------------------------------------------------------------
+
+/** A phone: 664px of visible viewport, a sheet 1187px tall when open, 131 at rest. */
+function fakeSheet({ scrolled = 0, detent = 'full', height = '568px' } = {}) {
+  const listeners = {};
+  let scroll = scrolled;
+  const captured = [];
+  const el = {
+    dataset: { detent },
+    style: { height },
+    classList: { add() {}, remove() {} },
+    // What the content measures, which the stylesheet decides per detent.
+    get scrollHeight() { return el.dataset.detent === 'rest' ? 131 : 1187; },
+    get clientHeight() { return el.style.height ? parseFloat(el.style.height) : 131; },
+    get scrollTop() { return scroll; },
+    set scrollTop(v) { scroll = v; layout(); },
+    getBoundingClientRect() {
+      layout();
+      return { height: el.clientHeight, top: 664 - el.clientHeight, bottom: 664 };
+    },
+    addEventListener(type, fn) { listeners[type] = fn; },
+    setPointerCapture(id) { captured.push(id); },
+  };
+  function layout() {
+    scroll = Math.max(0, Math.min(scroll, el.scrollHeight - el.clientHeight));
+  }
+  const gripNode = {};
+  const grip = {
+    contains: (node) => node === gripNode,
+    setAttribute() {},
+    addEventListener() {},
+  };
+  const press = (target = {}) => listeners.pointerdown({
+    pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0,
+    clientX: 195, clientY: 400, timeStamp: 0, target,
+  });
+  return { el, grip, gripNode, press, captured };
+}
+
+/** Run `body` with a phone-sized `window`, then put back whatever was there. */
+function onPhone(body) {
+  const had = globalThis.window;
+  globalThis.window = { innerHeight: 664, visualViewport: { height: 664 } };
+  try { return body(); } finally {
+    if (had === undefined) delete globalThis.window; else globalThis.window = had;
+  }
+}
+
+test('pressing a scrolled sheet leaves it scrolled where it was', () => onPhone(() => {
+  // The bug, as measured: full detent, scrolled 420px to the Browse buildings
+  // grid, a finger on Library. The press measured the resting sheet — 131px,
+  // nothing to scroll — the position clamped to 0, and the tap that finished
+  // the press opened Restrooms, which had scrolled in under the finger.
+  const { el, grip, press } = fakeSheet({ scrolled: 420 });
+  createSheet({ el, grip, enabled: () => true });
+  press();
+  assert.equal(el.scrollTop, 420, 'the sheet jumped to its top under the finger');
+}));
+
+test('the full detent stops below whatever is pinned to the top of the screen', () => onPhone(() => {
+  // A notched phone on the home screen: layers and locate pushed down by the
+  // 47px inset, ending at 146. The fixed 96px strip put the sheet over both.
+  const { el, grip } = fakeSheet({ detent: 'rest', height: '' });
+  const sheet = createSheet({ el, grip, enabled: () => true, reserve: () => 156 });
+  sheet.apply('full');
+  assert.equal(el.style.height, `${664 - 156}px`);
+}));
+
+test('with nothing pinned up there, the strip is still the strip', () => onPhone(() => {
+  const { el, grip } = fakeSheet({ detent: 'rest', height: '' });
+  const sheet = createSheet({ el, grip, enabled: () => true, reserve: () => 0 });
+  sheet.apply('full');
+  assert.equal(el.style.height, `${664 - 96}px`);
+}));
+
+test('a press on the grabber takes the pointer at once', () => onPhone(() => {
+  // A mouse has no implicit capture, and the grabber is 26px tall: a quick
+  // drag left it on its first move and the sheet never heard the rest.
+  const { el, grip, gripNode, press, captured } = fakeSheet();
+  createSheet({ el, grip, enabled: () => true });
+  press(gripNode);
+  assert.deepEqual(captured, [7]);
+  // ...and only there. Anywhere else a press may still be a scroll or a tap,
+  // and capturing it would take it from whatever it landed on.
+  press({});
+  assert.deepEqual(captured, [7]);
+}));

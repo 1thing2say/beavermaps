@@ -29,7 +29,7 @@ import { distance } from '@turf/distance';
  * @param {Function} deps.places      the places overlay, once it has landed
  * @param {Function} deps.directory   the building directory overlay
  * @param {Function} deps.afterExit   run something once a list has animated out
- * @param {Function} deps.setDestination
+ * @param {Function} deps.openPlace   what picking a place does: open its card
  * @param {Function} deps.directoryRow
  * @param {Function} deps.buildingSub
  * @param {Function} deps.measureFrom  where distances are measured from
@@ -39,7 +39,7 @@ export function createSearchBox({
   places,
   directory,
   afterExit,
-  setDestination,
+  openPlace,
   directoryRow,
   buildingSub,
   measureFrom,
@@ -107,7 +107,7 @@ export function createSearchBox({
       // The full name for anyone who cannot see how far the label was cut.
       chip.title = entry.name;
       chip.setAttribute('aria-label', `Go to ${entry.name}`);
-      chip.addEventListener('click', () => chooseDestination(entry));
+      chip.addEventListener('click', () => choosePlace(entry));
       return chip;
     }));
     // Never on screen at the same time as the list that holds the same places.
@@ -217,10 +217,7 @@ export function createSearchBox({
        * The description is still the fallback, because a room is not a
        * directory row and has nothing else to offer.
        */
-      const row = entry.points.length > 1 ? null : directoryRow(entry.name);
-      const hint = entry.points.length > 1
-        ? `${entry.points.length} locations`
-        : (row ? buildingSub(row) : entry.description);
+      const hint = hintFor(entry);
       if (hint) {
         const sub = document.createElement('div');
         sub.className = 'g-result-sub';
@@ -230,7 +227,7 @@ export function createSearchBox({
       li.addEventListener('mousedown', (event) => {
         // mousedown, not click: blur would close the list first.
         event.preventDefault();
-        chooseDestination(entry);
+        choosePlace(entry);
       });
       return li;
     }));
@@ -256,11 +253,38 @@ export function createSearchBox({
     ));
   }
 
-  async function chooseDestination(entry) {
+  /**
+   * The line under a result's name, and under the card it opens.
+   *
+   * One function for both so the row you pressed and the card that answers
+   * it say the same thing about the same place.
+   */
+  function hintFor(entry) {
+    if (entry.points.length > 1) return `${entry.points.length} locations`;
+    const row = directoryRow(entry.name);
+    return row ? buildingSub(row) : (entry.description ?? null);
+  }
+
+  /**
+   * What picking a result or a shortcut does: open the place, not a route.
+   *
+   * THIS USED TO BE `chooseDestination`, and it did what it was called. Search
+   * "Library", press it, and the app went straight to routing — asked for a
+   * fix, and on a phone that had not got one yet answered with "Your device
+   * could not get a location fix" in a route panel, which is not what anybody
+   * pressing Library asked about. Tapping the Library on the map, meanwhile,
+   * opened its card. The same building, two different answers, depending on
+   * which way you had found it.
+   *
+   * Every way of finding a place ends at its card now — the map, this field,
+   * the shortcuts, a Find nearby list, a Browse buildings list — and the card
+   * has Directions on it. See openPlace in main.js.
+   */
+  function choosePlace(entry) {
     // A row with nowhere to go: a class at the Natomas centre, or outdoor PE,
     // which the sheet draws as four separate fields. Both are real answers and
-    // both are shown; neither can be routed to, so the panel says why instead
-    // of dropping a pin somewhere defensible-looking.
+    // both are shown; neither is one place, so the panel says why instead of
+    // dropping a pin somewhere defensible-looking.
     if (!entry.points.length) {
       searchInput.value = entry.name;
       searchClear.classList.remove('hidden');
@@ -271,8 +295,8 @@ export function createSearchBox({
       return;
     }
     const coords = nearestInstance(entry);
-    // Remembered here rather than in `setDestination`, which is also how a tap
-    // on the map arrives: this is the one path that means somebody LOOKED
+    // Remembered here rather than in `openPlace`, which is also how a tap on
+    // the map arrives: this is the one path that means somebody LOOKED
     // something up, which is the thing "most searched" is a claim about.
     recordVisit(entry.name);
     refreshPopularity();
@@ -280,7 +304,10 @@ export function createSearchBox({
     searchClear.classList.remove('hidden');
     closeResults();
     searchInput.blur();
-    await setDestination(coords, entry.name);
+    // The nearest of several is the one the card is about, so the hint that
+    // counted them would describe the list rather than the card.
+    const sub = entry.points.length > 1 ? (entry.description ?? null) : hintFor(entry);
+    openPlace({ coords, name: entry.name, sub });
   }
 
   searchInput.addEventListener('input', () => {
@@ -418,7 +445,7 @@ export function createSearchBox({
       highlight((activeHit - 1 + searchHits.length) % searchHits.length);
     } else if (event.key === 'Enter' && activeHit >= 0) {
       event.preventDefault();
-      chooseDestination(searchHits[activeHit]);
+      choosePlace(searchHits[activeHit]);
     }
   });
 

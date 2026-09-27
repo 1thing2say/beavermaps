@@ -302,12 +302,32 @@ const prefersStill = () => Boolean(
  * that is already the slow part.
  */
 function keyedFetch(key) {
-  return (url, options) => {
+  return async (url, options) => {
     const target = new URL(url, TILESET);
     if (target.hostname.endsWith('googleapis.com') && !target.searchParams.has('key')) {
       target.searchParams.set('key', key);
     }
-    return fetch(target.toString(), options);
+    const response = await fetch(target.toString(), options);
+    // THE ONE REQUEST WHOSE REFUSAL IS THE WHOLE ANSWER, and nothing else was
+    // listening for it. deck.gl's Tile3DLayer loads the root itself and does
+    // not catch what that throws, so a refused key — the API not enabled, a
+    // referrer the key does not allow, the key simply wrong — surfaced as an
+    // uncaught error in the console and a card that said "Loading aerial view"
+    // for as long as it was open. Measured with the root answering 403: still
+    // spinning at twelve seconds, and on every card after it.
+    //
+    // Said here because this is the only code on that path that is ours.
+    // Google's own sentence is the message when it sent one, which is the
+    // policy src/ground.js already follows for the same key's 2D half.
+    if (!response.ok && target.pathname === new URL(TILESET).pathname) {
+      let message = `Aerial view unavailable (HTTP ${response.status})`;
+      try {
+        message = (await response.clone().json())?.error?.message ?? message;
+      } catch { /* not JSON: the status is all there is */ }
+      stage.refused = message;
+      stage.onRefused?.(message);
+    }
+    return response;
   };
 }
 
@@ -457,6 +477,17 @@ const stage = {
   owner: null,
   /** Set by whichever flyover holds the canvas, so traversals reach the right card. */
   onReady: null,
+  /** ...and the same for a tileset Google refused. See keyedFetch. */
+  onRefused: null,
+  /**
+   * Google's sentence, once the root has been refused.
+   *
+   * Kept because the refusal only happens once. The layer and its tileset
+   * outlive every card, so the root is requested once per page and never again
+   * — every card after the first would otherwise wait for an answer that has
+   * already been given.
+   */
+  refused: null,
   /**
    * The current building's tile box, [[w, s], [e, n]].
    *
@@ -930,6 +961,7 @@ export function createFlyover({
     if (stage.owner === token) {
       stage.owner = null;
       stage.onReady = null;
+      stage.onRefused = null;
       // Not left set. The layer's traversal keeps running for a frame or two
       // after the canvas is detached, and culling those against a box for a
       // building nobody is looking at is the sort of thing that shows up as a
@@ -1029,6 +1061,11 @@ export function createFlyover({
     // three taps ago that is nowhere on screen.
     stage.credits.clear();
     el.prepend(stage.host);
+
+    // The refusal, for this card: now if it has already happened, or whenever
+    // the root comes back refused. See keyedFetch.
+    if (stage.refused) { fail(stage.refused); return; }
+    stage.onRefused = (message) => fail(message);
 
     // Called both when a traversal selects tiles and when one finishes loading,
     // so it does two jobs and has to be safe to call repeatedly.

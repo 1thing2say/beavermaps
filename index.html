@@ -372,10 +372,12 @@
                      amenities.json and places.json have landed, for the
                      reason the shelf below is: a tile that answers
                      "nothing found" reads as broken rather than as
-                     early. Phone-only — above the breakpoint the same
-                     eleven are the legend panel down the sidebar, and
-                     two copies of one list in one column is one list
-                     too many. -->
+                     early. At every width — the front of the phone's
+                     sheet once it is pulled up, and the front of the
+                     sidebar on a desktop, where it took the place the
+                     legend panel used to hold. The legend is the same
+                     eleven as a key, one door away in the layers menu
+                     on both. -->
                 <div id="sheet-browse" class="g-browse">
                     <h2 class="g-browse-title">Find nearby</h2>
                     <div id="browse-grid" class="g-browse-grid" role="group"
@@ -401,8 +403,8 @@
                      them, which is the same pair of answers a legend row gives.
 
                      Empty in the markup and filled by main.js when
-                     directory.json lands, and phone-only, both for the same
-                     reasons as the grid above it. -->
+                     directory.json lands, and at every width, both for the
+                     same reasons as the grid above it. -->
                 <div id="sheet-kinds" class="g-browse">
                     <h2 class="g-browse-title">Browse buildings</h2>
                     <div id="kinds-grid" class="g-kind-grid" role="group"
@@ -631,10 +633,11 @@
                  sheet for the length of the load, which is a placeholder for
                  nothing, over the map, in a state nobody asked for.
 
-                 Stating the closed state here costs a desktop a legend that
-                 arrives with the bundle rather than with the first paint, which
-                 is the honest order anyway: every row in it is disabled until
-                 amenities.json and places.json land. -->
+                 And closed it stays until somebody opens it, at every width.
+                 A desktop used to open it on arrival as the sidebar's front
+                 page; the Find nearby grid is that now, on both layouts, and
+                 this is the key behind it — opened from the layers menu, and
+                 one panel in the column like the rest. -->
             <div id="legend-panel" class="g-card g-panel g-legend hidden" role="region" aria-label="Map legend">
                 <div class="g-panel-head g-panel-head--section">
                     <div>
@@ -729,11 +732,9 @@
                     </button>
                 </div>
 
-                <!-- The legend is a permanent panel on the right at desktop
-                     widths, so this row is a way back rather than the way in:
-                     it re-opens a legend that was closed, and on a phone —
-                     where a right-hand column would be most of the screen and
-                     the panel starts closed — it is still the way in. -->
+                <!-- The way into the legend, and the same way in at every
+                     width. It opens as a panel in the column, over whatever
+                     is showing there, and its × goes back to that. -->
                 <p class="g-layers-heading g-layers-heading--split">Legend</p>
                 <div class="g-layers-row">
                     <button id="layers-legend" type="button" class="g-layer-btn g-layer-btn--wide">

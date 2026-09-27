@@ -16,9 +16,10 @@
 // place it goes up and one place it is checked.
 //
 // WHAT A CHOSEN PLACE MEANS still belongs to the caller. This module knows how
-// to plant a pin and ask for a route; the cards, the search box and the legend
-// rows all call `setDestination` and none of them needs to know the other two
-// exist.
+// to plant a pin and ask for a route; the place cards and the route panel's
+// own fields call `setDestination`, and neither needs to know the other
+// exists. Everything else that finds a place — search, the shortcuts, a list
+// row — opens that place's card, whose Directions button is the way in here.
 
 import mapboxgl from 'mapbox-gl';
 import { point } from '@turf/helpers';
@@ -38,6 +39,8 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
 
 /**
  * @param {object} deps  every collaborator, named for what it does
+ * @param {() => object|null} deps.geolocateControl  a GETTER: the control is
+ *        built on map load, long after this is
  */
 export function createEndpoints({
   map,
@@ -186,14 +189,23 @@ export function createEndpoints({
     if (fresh) return Promise.resolve(lastFix.at);
 
     return new Promise((resolve, reject) => {
-      if (!geolocateControl) { reject({ code: 2 }); return; }
+      // THROUGH THE GETTER. main.js hands this over as `() => control`, because
+      // the control is not built until the map has loaded — and this read it
+      // as the control itself. A function is always truthy, so the guard
+      // below never fired and `.on` threw inside this executor: the promise
+      // rejected on the spot, and Directions answered "could not get a
+      // location fix" on every device that had not already put its blue dot
+      // up, without ever asking for a fix. The timer then threw `.off is not a
+      // function` a few seconds later, which is how it was found.
+      const control = geolocateControl();
+      if (!control) { reject({ code: 2 }); return; }
       let settled = false;
       const finish = (fn, value) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        geolocateControl.off('geolocate', onFix);
-        geolocateControl.off('error', onFail);
+        control.off('geolocate', onFix);
+        control.off('error', onFail);
         fn(value);
       };
       const onFix = (e) => finish(resolve, [e.coords.longitude, e.coords.latitude]);
@@ -207,8 +219,8 @@ export function createEndpoints({
         if (lastFix) finish(resolve, lastFix.at);
         else finish(reject, { code: 3 });
       }, FIX_TIMEOUT_MS);
-      geolocateControl.on('geolocate', onFix);
-      geolocateControl.on('error', onFail);
+      control.on('geolocate', onFix);
+      control.on('error', onFail);
       // No-op if it is already locked on, in which case the next fix its watch
       // delivers is the one resolved above.
       startLocating();
@@ -234,7 +246,12 @@ export function createEndpoints({
    * Returns whether there is now a start point to route from.
    */
   async function locateStart() {
-    if (!routingEnabled || !networkPoints) return false;
+    // Both are GETTERS — see the note in currentPosition. Read as values, a
+    // function is always truthy: the guard never stopped anything, and the
+    // snap below was handed a function where it wanted the vertex cloud, found
+    // nothing in it and threw on `.geometry`. So a start from your location
+    // failed even when a fix arrived, as did Start here on any card.
+    if (!routingEnabled() || !networkPoints()) return false;
 
     // The fixture answers on the next tick, so this spinner is a real wait only
     // for a real GPS — which is exactly when it is worth showing.
@@ -250,7 +267,7 @@ export function createEndpoints({
       setBusy(false);
     }
 
-    const node = nearestPoint(point(at), networkPoints).geometry.coordinates;
+    const node = nearestPoint(point(at), networkPoints()).geometry.coordinates;
     const problem = reachProblem(distance(point(at), point(node)) * 1000);
     if (problem) { setStatus(problem, true); return false; }
 
@@ -287,10 +304,11 @@ export function createEndpoints({
    * @returns {boolean} whether there is now a start point
    */
   function placeStart(coords, label) {
-    if (!routingEnabled) return false;
+    if (!routingEnabled()) return false;
 
-    if (networkPoints) {
-      const node = nearestPoint(point(coords), networkPoints).geometry.coordinates;
+    const vertices = networkPoints();
+    if (vertices) {
+      const node = nearestPoint(point(coords), vertices).geometry.coordinates;
       const problem = reachProblem(distance(point(coords), point(node)) * 1000);
       if (problem) { setStatus(problem, true); return false; }
     }
@@ -313,7 +331,7 @@ export function createEndpoints({
   }
 
   async function placeEnd(coords, label) {
-    if (!routingEnabled) return;
+    if (!routingEnabled()) return;
     panel.show();
     endPoint = point(coords);
     endMarker?.remove();
@@ -466,7 +484,7 @@ export function createEndpoints({
     // something — "show me where that is" — so this degrades to the camera
     // rather than to nothing. Dropping the red pin here without a route panel
     // to explain it would be the worst of the three options.
-    if (!routingEnabled) {
+    if (!routingEnabled()) {
       map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 17), duration: 900 });
       return;
     }

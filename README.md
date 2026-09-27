@@ -29,7 +29,8 @@ destinations, 33 buildings with what each one holds, and a room and course index
 for the current term — 125 rooms and 557 course sections, so "ACCT 101" and
 "Room 320" are lookups with a right answer rather than fuzzy name matches.
 
-**Browse.** Two grids on the sheet's front page. *Find nearby* is the eleven rows
+**Browse.** Two grids on the front page, the sidebar's on a desktop and the
+sheet's on a phone. *Find nearby* is the eleven rows
 of my campus's printed legend — restrooms, parking, food, bus stops, bike racks,
 emergency phones, defibrillators — which drops pins and outlines the ground that
 holds them. *Browse buildings* is one coloured tile per class of building, for
@@ -378,10 +379,35 @@ previous layout put a 600 px map inside a padded card under a page heading,
 which spent the top third of a phone screen on furniture.
 
 Above the phone breakpoint that floating column is a sidebar; below it, it is a
-bottom sheet with three detents and a grabber you can drag (`src/sheet.js`), and
-one panel at a time inside it (`src/sheet-stack.js`). my campus's printed key had a
-chip strip across the top for a while and it is the legend panel now — twelve
-categories in a slot four wide is a control you have to scroll to read.
+bottom sheet with three detents and a grabber you can drag (`src/sheet.js`). The
+shape is the only thing the width decides. What is in the column, and how you
+move through it, is the same on both:
+
+- **A front page** while nothing has been asked: the search field, *Find nearby*,
+  *Browse buildings* and *Places you go*. On a phone it is what the sheet shows
+  when you pull it up; on a desktop it is the sidebar at rest.
+- **Every way of finding a place ends at its card.** Tapping it on the map, a
+  search result, a shortcut, a row in a Find nearby or Browse buildings list —
+  all of them open the same card, and the card's **Directions** is the one way
+  into a route.
+- **One panel at a time, with a way back** (`src/sheet-stack.js`). A list, a
+  card over the list, the route over the card: each goes on top of the last,
+  and its × — or Escape — goes back one step. Closing the last one returns to
+  the front page.
+- **The legend is a panel like the others**, opened from Layers → *Map legend*
+  at every width. Pressing one of its rows puts that category's results on top
+  of it, and × on the results goes back to the key.
+
+This was a phone arrangement for a while and a pile of panels on a desktop:
+the same three presses — Food & drink, a vending machine, Directions — left a
+phone showing the route with the list one step back, and a desktop showing the
+list squeezed between the route panel and the legend with a close button on
+each. The desktop's front page was the legend and there was no Browse buildings
+on it at all. Now there is one workflow and two shapes of it.
+
+my campus's printed key had a chip strip across the top for a while and it is
+the legend panel now — twelve categories in a slot four wide is a control you
+have to scroll to read.
 
 ### Who draws the ground (`src/provider.js`)
 

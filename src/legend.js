@@ -34,37 +34,34 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
  * @param {object} deps.map
  * @param {Function} deps.litPalette
  * @param {object} deps.elements   the legend's and the category card's nodes
- * @param {Function} deps.isPhone
  * @param {object} deps.data       getters for the overlays, which land late
  * @param {object} deps.camera     createCamera(), for framing an answer
  * @param {Function} deps.feetFrom
  * @param {Function} deps.playSwap
  * @param {Function} deps.playClear
- * @param {Function} deps.openBuilding
- * @param {Function} deps.toggleSheet        open or close a panel
- * @param {object} deps.legendOpen           the button that opens the legend
+ * @param {Function} deps.openBuilding     a building row's card
+ * @param {Function} deps.openPlace        any other row's card
  * @param {Function} deps.addCategoryLayer
- * @param {Function} deps.setDestination
  * @param {Function} deps.buildingSub        the subtitle a building card shows
  */
 export function createLegend({
   map,
   litPalette,
   elements,
-  isPhone,
   data,
   camera,
   feetFrom,
   playSwap,
   playClear,
   openBuilding,
-  toggleSheet,
-  legendOpen,
+  openPlace,
   addCategoryLayer,
-  setDestination,
   buildingSub,
 }) {
-  const { legendList, browseGrid, kindsGrid, legendPanel, categoryPanel } = elements;
+  const { legendList, browseGrid, kindsGrid, categoryPanel } = elements;
+
+  /** Whether the device has a pointer that can rest on a tile. See renderBrowse. */
+  const canHover = globalThis.matchMedia?.('(hover: hover)').matches === true;
 
   // -------------------------------------------------------------------------
 
@@ -291,7 +288,15 @@ export function createLegend({
       dist.textContent = niceFeet(hit.feet);
       row.append(dist);
 
-      row.addEventListener('click', () => setDestination(hit.coords, hit.name));
+      // THE CARD FIRST, the way a tap on this same pin out on the map works.
+      // This row used to set the destination on the spot — so the same vending
+      // machine was a card from the map and a route from the list, and on a
+      // phone with no fix yet the list's version answered a press with "could
+      // not get a location fix" instead of with the thing you pressed. The
+      // card has Directions on it; that is the one door into a route.
+      row.addEventListener('click', () => openPlace({
+        coords: hit.coords, name: hit.name, sub: hit.sub, kind: hit.icon,
+      }));
       li.append(row);
       return li;
     }));
@@ -423,14 +428,12 @@ export function createLegend({
     // the wording.
     categoryHits = hitsFor(category);
 
-    // On a phone the legend is a full-width sheet over the map, so leaving it
-    // up would mean answering "where are the restrooms" with a card covering
-    // the restrooms. The pins and the results list are the answer; the list you
-    // asked from has done its job.
-    // Plain toggleSheet, not toggleLegendPanel: frameCategory a few lines below
-    // is about to move the camera anyway, and it reads campusPadding after this
-    // has run, so the sheet is already out of the reckoning.
-    if (isPhone()) toggleSheet(legendPanel, legendOpen, false);
+    // The legend STAYS OPEN underneath, at every width. It used to be closed
+    // here on a phone, so the results list's × went back to the bare map
+    // there and back to the legend on a desktop, where nothing had closed it.
+    // The column shows one panel at a time now (src/sheet-stack.js), so the
+    // list simply goes on top — the legend is not covering anything, and × on
+    // the list is the way back to the key you asked from, on both.
 
     // The pressed row, and the outline that goes with it. A category press now
     // answers both halves of the question it was split across: the pins say
@@ -495,10 +498,6 @@ export function createLegend({
       // the place the row takes you are the same place.
       .map((props) => ({ props, feet: feetFrom(props.anchor ?? props.entrance) }))
       .sort((a, b) => a.feet - b.feet);
-
-    // Same reason the legend row has it: on a phone the sheet this was pressed
-    // from covers the campus it is about.
-    if (isPhone()) toggleSheet(legendPanel, legendOpen, false);
 
     stickyRow = kindRow(id);
     paintHighlight();
@@ -611,7 +610,8 @@ export function createLegend({
   }
 
   /**
-   * The same eleven, as the grid the phone sheet opens onto.
+   * The same eleven, as the grid the column opens onto — the phone sheet
+   * pulled up, and the sidebar at rest on a desktop.
    *
    * WHY A SECOND RENDERER for one list. The legend is a column of rows with a
    * count under each name — "6 buildings · 22 zones" — which is what it is for:
@@ -670,6 +670,21 @@ export function createLegend({
 
       tile.append(disc, name);
       tile.addEventListener('click', () => selectCategory(category.id));
+      // POINT TO PREVIEW, which the legend's rows have always done and these
+      // did not need to while they were phone-only. This grid is the front of
+      // the sidebar on a desktop too now — it took the legend's place there —
+      // so a pointer resting on Restrooms outlines the buildings that have
+      // them, exactly as the row it replaced did.
+      //
+      // Only where a pointer can hover. A tap sends a mouseenter too, and the
+      // legend row gets away with that because its press follows at once; here
+      // it would be a preview flashed on the way to a press that replaces it.
+      if (canHover) {
+        tile.addEventListener('mouseenter', () => previewLegendRow(category.id));
+        tile.addEventListener('focus', () => previewLegendRow(category.id));
+        tile.addEventListener('mouseleave', () => previewLegendRow(null));
+        tile.addEventListener('blur', () => previewLegendRow(null));
+      }
       return tile;
     }));
     paintIcons(browseGrid);
