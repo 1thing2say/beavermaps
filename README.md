@@ -1135,22 +1135,22 @@ there is no seam at the campus mask edge.
 ### 3. Run
 
 ```bash
-npm run dev       # dev server with HMR, usually http://localhost:5173
+npm run dev       # dev server with HMR over TLS: https://<your-mac>.local:5173
+npm run dev:http  # same, plain HTTP: http://localhost:5173
 npm run build     # production build into dist/
 npm run preview   # serve the production build locally
 ```
 
 ### 4. On a phone
 
-`npm run dev` prints a Network URL, and opening that bare LAN IP on a phone
+`npm run dev:http` prints a Network URL, and opening that bare LAN IP on a phone
 gives you a map with **no blue dot and no error to read** — browsers gate
 geolocation behind a secure context, and `localhost` is the one plain-HTTP
 origin exempt from the rule. Every route in this app starts from where you are
 standing, so that is most of the app.
 
-```bash
-npm run dev:https   # same site, TLS, reachable as https://<your-mac>.local:5173
-```
+That is why `npm run dev` serves over TLS by default, reachable as
+`https://<your-mac>.local:5173` (`npm run dev:https` is an alias for it).
 
 Both devices on the same Wi-Fi, then open **`https://<your-mac>.local:5173`** on
 the phone — the name, not the IP. macOS publishes it over mDNS and iOS and

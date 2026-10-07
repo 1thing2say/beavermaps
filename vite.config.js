@@ -7,15 +7,16 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
 
 /**
  * Browsers gate geolocation behind a secure context, and `localhost` is the one
- * plain-HTTP origin exempt from that rule. So `npm run dev` never notices — but
+ * plain-HTTP origin exempt from that rule. So plain HTTP never notices — but
  * the Network URL Vite prints is a bare LAN IP, and opening that on a phone
  * leaves the GeolocateControl in src/main.js silently dead: no prompt, no blue
  * dot, no error to read.
  *
- * `npm run dev:https` serves the same site over TLS so a phone counts as
- * secure. Opt-in rather than always-on, because a self-signed certificate buys
+ * `npm run dev` therefore sets HTTPS=1 and serves the site over TLS, so a phone
+ * counts as secure. The price is a self-signed certificate, which buys
  * localhost nothing it did not already have and costs a warning on every
- * reload.
+ * reload there; `npm run dev:http` is the way back to plain HTTP when only
+ * localhost matters.
  */
 const useHttps = process.env.HTTPS === '1';
 
@@ -67,9 +68,9 @@ const LAN_HOST = `${mdnsName()}.local`.toLowerCase();
  * decodedBodySize.
  *
  * It only shows up on a phone. Over localhost the bytes are free and this is
- * pure overhead; over `npm run dev:https` on the LAN it is the difference
+ * pure overhead; over `npm run dev` on the LAN it is the difference
  * between a map that appears and one you wait for — and the LAN is the whole
- * point of dev:https, since a phone needs a secure context for geolocation.
+ * point of HTTPS in dev, since a phone needs a secure context for geolocation.
  *
  * PER REQUEST RATHER THAN CACHED, deliberately, which is the opposite of the
  * choice server/wire.js makes for the API payloads. Those are constants read
@@ -106,7 +107,7 @@ export default defineConfig({
     devCompression(),
     tailwindcss(),
     // Spread rather than a falsy entry: Vite accepts `false` in the array, but
-    // an unconditional basicSsl() would flip HTTPS on for plain `npm run dev`
+    // an unconditional basicSsl() would flip HTTPS on for `npm run dev:http`
     // too, since the plugin sets server.https from configResolved.
     //
     // certDir is keyed on the name because the plugin's cache is only
@@ -137,7 +138,7 @@ export default defineConfig({
     proxy: {
       // Talk to the local routing server in dev without CORS. In production
       // the same Node process serves both dist/ and /api, so paths match.
-      // Stays http even under dev:https — the browser's TLS terminates at Vite
+      // Stays http even under `npm run dev` — the browser's TLS terminates at Vite
       // and this hop never leaves the machine, so there is no mixed content.
       '/api': {
         target: 'http://localhost:8080',
