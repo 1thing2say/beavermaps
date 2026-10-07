@@ -124,11 +124,7 @@ export const MIN_AREA_M2 = 150;
  * DELETE the entry once Google reflies, and a bare list gives nobody any way to
  * know when that is.
  */
-export const STALE_IMAGERY = new Map([
-  // Google's tiles catch the CTE mid-build: bare steel, site fencing and a
-  // scraped pad where the frontage now is. Recheck after a Google refly.
-  ['Career Technical Education (CTE)', 'under construction in Google\'s imagery'],
-]);
+export const STALE_IMAGERY = new Map([]);
 
 /**
  * What tier a tapped thing belongs to.

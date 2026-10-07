@@ -50,10 +50,9 @@ test('every directory building is classified, and only the known cases are refus
   // to hold "Baseball and Softball Field" as well, refused on the word its name
   // ends with — and src/roofs.json measured 4.5 m of built structure standing
   // there, so the name was wrong about it and a traced footprint now outranks
-  // one. Only bad imagery refuses a directory row today.
-  assert.deepEqual(refused.sort(), [
-    'Career Technical Education (CTE)', // stale imagery, see STALE_IMAGERY
-  ]);
+  // one. Only bad imagery can refuse a directory row, and STALE_IMAGERY is
+  // empty today.
+  assert.deepEqual(refused.sort(), []);
 });
 
 test('every stale-imagery entry names a building that actually exists', () => {
@@ -411,10 +410,10 @@ test('every name printed on the sheet reaches a flyover, and the one that does n
     }
   }
 
-  // One building on this campus is deliberately not flown, and the reason is
-  // written down beside it rather than left as a fact about the output.
-  assert.deepEqual([...new Set(refused)], ['Career Technical Education (CTE)']);
-  assert.ok(STALE_IMAGERY.has('Career Technical Education (CTE)'));
+  // Every printed building flies. A building refused for bad imagery has to be
+  // in STALE_IMAGERY, so its reason is written down beside it rather than left
+  // as a fact about the output.
+  assert.deepEqual([...new Set(refused)].filter((name) => !STALE_IMAGERY.has(name)), []);
 });
 
 test('the campus box holds the campus, with room for a building on its edge', () => {
