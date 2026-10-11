@@ -170,15 +170,19 @@ test('no row promises somewhere to go without having one', () => {
 
 test('two schedule buildings sharing the map name both answer to it', () => {
   // Fine Arts and its one-room "Makeup room" are both Fine & Applied Arts on
-  // the map; Science and Science Portable are both Science & Engineering. When
-  // a name held one building, the second replaced the first and the name on the
-  // sign found nothing for the main building.
+  // the map. When a name held one building, the second replaced the first and
+  // the name on the sign found nothing for the main building.
   assert.equal(find('Fine & Applied Arts 501')[0]?.name, 'Room 501');
   assert.equal(find('Fine & Applied Arts 501')[0]?.place, 'Fine & Applied Arts');
   assert.equal(find('Fine & Applied Arts 519')[0]?.name, 'Room 519');
   assert.equal(find('Science & Engineering 401')[0]?.name, 'Room 401');
   assert.equal(find('Science & Engineering 401').length, 1, 'the TEW 401 leaked into a named query');
-  assert.equal(find('Science & Engineering 490')[0]?.name, 'Room 490', 'the portable was lost');
+  // Science Portable is filed under the Science Success Center now (see
+  // build-rooms.mjs), so its rooms answer to that name and to the schedule's,
+  // and no longer to Science & Engineering's.
+  assert.equal(find('Science Success Center 490')[0]?.name, 'Room 490', 'the portable was lost');
+  assert.equal(find('Science Portable 490')[0]?.place, 'Science Success Center');
+  assert.equal(find('Science & Engineering 490').length, 0);
 });
 
 test('every name on the sign finds the building, abbreviation included', () => {
