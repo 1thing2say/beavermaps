@@ -45,6 +45,46 @@ export function tokenRefusal(token) {
 }
 
 /**
+ * What to say when the browser cannot draw the map at all.
+ *
+ * The second failure with no degraded mode. Mapbox GL v3 asks for a WebGL 2
+ * context and throws from its constructor when it does not get one — hardware
+ * acceleration switched off, a GPU on the browser's blocklist, a locked-down
+ * work machine — and that throw used to escape startApp() before a single
+ * control existed, which left exactly the blank page this file was written to
+ * replace. Unlike the token, this one IS the visitor's to fix, so it is written
+ * to them.
+ */
+export const WEBGL_PROBLEM = 'This map needs WebGL 2, which this browser has turned off '
+  + 'or does not support. Turn on hardware acceleration in your browser settings, or '
+  + 'open the page in a current Chrome, Safari, Firefox or Edge.';
+
+/**
+ * Whether this browser will refuse the map its WebGL 2 context.
+ *
+ * Asked before the map is built, because the answer decides whether there is
+ * anything to build — and a probe that fails is a sentence on screen, where the
+ * constructor's failure was a stack trace in a console. The probe's context is
+ * released at once: browsers cap how many a page may hold, and the map is about
+ * to want one.
+ *
+ * A check that itself throws counts as missing. The constructor would have
+ * thrown at the same point.
+ *
+ * @param {Document} [doc]  for tests
+ */
+export function webglMissing(doc = globalThis.document) {
+  try {
+    const gl = doc.createElement('canvas').getContext('webgl2');
+    if (!gl) return true;
+    gl.getExtension?.('WEBGL_lose_context')?.loseContext();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Put a setup failure on the screen, in place of the map.
  *
  * Styled inline rather than from input.css, and that is deliberate: this runs
@@ -52,9 +92,16 @@ export function tokenRefusal(token) {
  * its stylesheet did not load. A message that depends on the thing that might
  * be broken is a message that is not there when it is needed.
  *
+ * THE CARD STILL WEARS THE GLASS when it can. Its fill, blur, sheen, rim,
+ * radius and ink are the same `--g-card-*` tokens every other card is drawn
+ * from, each with the old plain value as its `var()` fallback — so with the
+ * stylesheet loaded this is one more card in the app's own material, and
+ * without it the fallbacks are exactly the card it used to be. Same blur as
+ * the rest, and the same rule: no saturate(), which is not what Apple ships.
+ *
  * `role="alert"` so it is announced rather than silently painted, and the
- * colours are drawn from the theme attribute if one was set before the failure
- * — otherwise from the plain defaults, which is the light one.
+ * colours are drawn from the theme and skin attributes if they were set before
+ * the failure — otherwise from the plain defaults, which is the light one.
  *
  * @param {string} message    the sentence from tokenRefusal, or another like it
  * @param {Element} container where to put it; the map's own box by default
@@ -67,14 +114,20 @@ export function showSetupProblem(message, container = document.getElementById('m
   box.style.cssText = [
     'position:absolute', 'inset:0', 'display:flex', 'align-items:center',
     'justify-content:center', 'padding:24px', 'box-sizing:border-box',
-    'background:#f3f4f6', 'color:#1f2937',
+    'background:var(--g-surface-2,#f3f4f6)', 'color:var(--g-text,#1f2937)',
     'font:400 15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif',
   ].join(';');
 
   const card = document.createElement('div');
   card.style.cssText = [
-    'max-width:34rem', 'background:#fff', 'border-radius:12px', 'padding:20px 22px',
-    'box-shadow:0 1px 3px rgba(0,0,0,.16),0 8px 24px rgba(0,0,0,.10)',
+    'max-width:34rem', 'padding:20px 22px',
+    'background-color:var(--g-card-bg,#fff)',
+    'background-image:var(--g-sheen,none)',
+    '-webkit-backdrop-filter:var(--g-card-filter,none)',
+    'backdrop-filter:var(--g-card-filter,none)',
+    'border-radius:var(--g-radius,12px)',
+    'box-shadow:var(--g-shadow,0 1px 3px rgba(0,0,0,.16),0 8px 24px rgba(0,0,0,.10)),'
+      + 'var(--g-rim,0 0 0 0 transparent)',
   ].join(';');
 
   const title = document.createElement('p');
@@ -85,7 +138,7 @@ export function showSetupProblem(message, container = document.getElementById('m
   // somebody passes this an error message off the wire it should still be text.
   const body = document.createElement('p');
   body.textContent = message;
-  body.style.cssText = 'margin:0;color:#4b5563';
+  body.style.cssText = 'margin:0;color:var(--g-text-dim,#4b5563)';
 
   card.append(title, body);
   box.append(card);
