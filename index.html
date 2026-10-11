@@ -59,6 +59,30 @@
     <meta name="apple-mobile-web-app-title" content="beavermaps">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>beavermaps</title>
+    <!-- WHAT A SEARCH RESULT AND A PASTED LINK SAY ABOUT THE PAGE.
+         ==================================================================
+         Without a description a search engine writes its own snippet out of
+         whatever text it finds first, and in this page that is a debug menu's
+         switch labels. Without the Open Graph tags a link pasted into a chat
+         unfurls as a bare URL, or as "beavermaps" over nothing.
+
+         The same sentence as public/manifest.webmanifest, and as anonymous as
+         the rest of the copy — the campus is not named anywhere a visitor
+         reads, and a preview card is not the place to start.
+
+         THREE TAGS ARE MISSING ON PURPOSE: canonical, og:url and og:image.
+         All three need an absolute URL, and the production hostname is not
+         settled — a canonical pointing at a guessed domain tells every search
+         engine that the real one is a duplicate of it. They go in when the
+         domain does. `summary` rather than `summary_large_image` for the same
+         reason: there is no image to make large yet. -->
+    <meta name="description"
+          content="A campus map: search for a place, browse the buildings, and get walking directions.">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="beavermaps">
+    <meta property="og:description"
+          content="A campus map: search for a place, browse the buildings, and get walking directions.">
+    <meta name="twitter:card" content="summary">
     <!-- THE TAB ICON. Three links for two reasons.
 
          favicon.ico first because it is the one an .ico is for: the request a
@@ -235,7 +259,32 @@
         </button>
     </header>
 
-    <div class="app-shell">
+    <!-- <main>, because everything a visitor came for is in here: the map, the
+         search, the cards and the route. It was a <div>, which left a screen
+         reader's landmark list with nothing in it but the top bar's <header>
+         — and that is off unless the debug menu turns it on — so "jump to main
+         content" had nowhere to jump. The element changes nothing on screen:
+         .app-shell is positioned by class in src/input.css, never by tag. -->
+    <main class="app-shell">
+        <!-- The page's one heading of rank 1, for the outline rather than the
+             eye. Every card in the column is an <h2>, and without this they
+             were six top-level sections of a page with no title; a screen
+             reader listing headings got "Find nearby", "Browse buildings",
+             "Places you go" and no idea whose. Visually there is already a
+             wordmark on the sheet and a <title> in the tab, and a third
+             "beavermaps" painted over the map would be furniture — hence
+             sr-only, Tailwind's utility, the same one the search label uses. -->
+        <h1 class="sr-only">beavermaps campus map</h1>
+        <!-- WHAT CHANGED, SAID OUT LOUD. A polite live region, empty in the
+             markup and written by src/search-box.js: how many places match
+             what has been typed, or that nothing does. Sighted visitors see
+             the list appear and shrink under the field; without this a screen
+             reader heard the letters echo back and had to go looking for
+             whether anything had happened. Polite so it waits for the
+             keystroke's own echo, and outside every panel so it is never in a
+             subtree that is display:none at the moment it is written to —
+             a live region that is hidden says nothing. -->
+        <div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
         <div id="map"></div>
 
         <!-- There was a far-left rail here: panel collapse, legend, clear
@@ -333,7 +382,12 @@
                     <span class="g-sheet-mark"></span>
                     <span class="g-sheet-word">beavermaps</span>
                 </div>
-                <div class="g-search-row">
+                <!-- role="search" on the row and not on .g-search, because
+                     .g-search is the whole sheet head on a phone — the browse
+                     grids and the shelf live in it too — and a search landmark
+                     around "Find nearby" would send a screen reader to the
+                     tiles when it asked for the field. -->
+                <div class="g-search-row" role="search" aria-label="Search the campus">
                     <div class="g-search-field">
                         <label for="place-search" class="sr-only">Search for a destination</label>
                         <input id="place-search" type="text" role="combobox" autocomplete="off" aria-expanded="false"
@@ -684,7 +738,31 @@
              There is nothing in the bottom-left corner now but Mapbox's
              wordmark, which is the one thing there that has to be. -->
         <div class="g-layers app-chrome">
-            <div id="layers-menu" class="g-card g-layers-menu hidden" role="menu" aria-label="Map layers">
+            <!-- The button FIRST and the menu after it, which is the reverse
+                 of how it was written and makes no difference on screen: the
+                 menu is absolutely positioned off this box at every width (see
+                 .g-layers-menu), so where it sits among the children decides
+                 nothing about where it is drawn. What it decides is the Tab
+                 order. With the menu first, opening it from the keyboard left
+                 focus on the button and the menu BEHIND it — Shift+Tab to reach
+                 a thing that had just appeared, which nobody tries.
+
+                 A disclosure, not a menu. It was role="menu", which promises
+                 menuitems and arrow-key roving between them and had neither;
+                 what it holds is four groups of ordinary buttons, one of them a
+                 radiogroup, which Tab and the buttons' own semantics already
+                 handle. So the button says what it controls and
+                 whether it is open (panels.js keeps aria-expanded in step), and
+                 the menu is a labelled group. -->
+            <button id="layers-btn" type="button" class="g-layers-btn" aria-controls="layers-menu"
+                aria-expanded="false">
+                <span class="g-layers-thumb" aria-hidden="true"></span>
+                <span class="g-layers-caption">
+                    <span class="g-icon" data-icon="layers"></span>
+                    Layers
+                </span>
+            </button>
+            <div id="layers-menu" class="g-card g-layers-menu hidden" role="group" aria-label="Map layers">
                 <p class="g-layers-heading">Map type</p>
                 <div class="g-layers-row">
                     <button id="basemap-toggle" type="button" class="g-layer-btn">
@@ -743,13 +821,6 @@
                     </button>
                 </div>
             </div>
-            <button id="layers-btn" type="button" class="g-layers-btn" aria-haspopup="true" aria-expanded="false">
-                <span class="g-layers-thumb" aria-hidden="true"></span>
-                <span class="g-layers-caption">
-                    <span class="g-icon" data-icon="layers"></span>
-                    Layers
-                </span>
-            </button>
         </div>
 
         <!-- The debug menu. Opened by ?debug, #debug or Ctrl/Cmd+Shift+D, and
@@ -1048,7 +1119,7 @@
                 <div id="nav-eta" class="text-xl font-bold">—</div>
             </div>
         </div>
-    </div>
+    </main>
 
     <!-- Vite loads JS as a module -->
     <script type="module" src="/src/main.js"></script>

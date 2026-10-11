@@ -494,8 +494,18 @@ test('imagery belongs to neither look, and an unknown look is classic', () => {
 // the block a naive matcher thinks it is in. Which is exactly what happened:
 // the :root block came back 39 characters long and every token in it read as
 // undefined.
+//
+// The reduced-transparency block is cut out second, and for the opposite of
+// tidiness too. `tokens` below reads every rule whose selector matches, nested
+// or not, later ones winning — which is what makes the @supports glass values
+// count. The accessibility fallback restates the same two selectors with
+// OPAQUE values after that block, so left in, every check in this file would
+// quietly be measuring the solid fallback instead of the glass most visitors
+// see, and the contrast floors below would pass against the easy case. That
+// block is checked on its own terms in test/html-shell.test.js.
 const css = readFileSync(path.join(root, 'src', 'input.css'), 'utf8')
-  .replace(/\/\*[\s\S]*?\*\//g, '');
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/@media \(prefers-reduced-transparency: reduce\)[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, '');
 
 /** Every `--name: value` inside the blocks whose selector matches. */
 function tokens(selector) {

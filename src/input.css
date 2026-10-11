@@ -642,6 +642,48 @@
     }
 }
 
+/* ...AND NONE OF IT FOR SOMEBODY WHO HAS ASKED THE SYSTEM FOR LESS.
+   ---------------------------------------------------------------------------
+   iOS and macOS both have a Reduce Transparency switch, and every system
+   material honours it by going solid; Increase Contrast does the same and
+   more. A web page hears the first as `prefers-reduced-transparency: reduce`
+   and the second as `prefers-contrast: more`, and this page heard neither —
+   so the one group of people who had said in so many words that glass gets in
+   their way were the only ones still reading through it.
+
+   The answer is the block above, undone: the opaque values the Apple look
+   already falls back to where there is no compositor, restated for the same
+   two scopes in the same order, filter and all. Not a third set of colours —
+   these are the solids the ink contrasts in the token blocks were already
+   checked against, and they are what Apple's own material flattens to.
+
+   AFTER the @supports block on purpose. The selectors are the same specificity
+   and a media query adds none, so this wins on order and only on order; moved
+   above it, the translucent values would come back for exactly these people.
+
+   The classic look needs nothing here: its cards are opaque already and its
+   filters are `none` (see --g-card-* in the :root block), which
+   test/html-shell.test.js asserts alongside these. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    :root[data-skin="apple"] {
+        --g-card-bg: var(--g-surface-2);
+        --g-card-bg-thick: var(--g-surface-2);
+        --g-card-bg-thin: var(--g-surface);
+        --g-card-filter: none;
+        --g-card-filter-thick: none;
+        --g-card-filter-thin: none;
+    }
+
+    :root[data-skin="apple"][data-theme="dark"] {
+        --g-card-bg: var(--g-surface-2);
+        --g-card-bg-thick: var(--g-surface-2);
+        --g-card-bg-thin: var(--g-surface-2);
+        --g-card-filter: none;
+        --g-card-filter-thick: none;
+        --g-card-filter-thin: none;
+    }
+}
+
 :root[data-theme="dark"] {
     /* Dark: charcoal sign, grid drawn lighter than the background. */
     --sign-bg: #292929;
@@ -1415,6 +1457,24 @@ body.navigating .app-chrome {
     overflow: hidden;
 }
 
+/* The row a list shows when what was typed matches nothing. It sits in the
+   same .g-results material as the rows it stands in for — the list keeps its
+   glass and its corners — but it is not one of them: secondary ink rather than
+   a name's, no pointer, and no hover or press fill, because a row that lights
+   up under the cursor is a row that promises to do something when pressed.
+   Written at 0-3-1 so it outranks both `.g-results li:hover` and the press
+   fills in the rows block near the end of this file without depending on
+   which comes first. */
+.g-results li.g-result-empty {
+    cursor: default;
+    color: var(--g-text-dim);
+}
+
+.g-results li.g-result-empty:hover,
+.g-results li.g-result-empty:active {
+    background: transparent;
+}
+
 /* THE SHELF, which is the row the shortcuts sit in.
    ---------------------------------------------------------------------------
    ONE LINE THAT SCROLLS, not a paragraph of chips. This had nothing but
@@ -1505,6 +1565,17 @@ body.navigating .app-chrome {
     font-size: 16px;
     font-weight: 500;
     color: var(--g-text);
+}
+
+/* A card's heading takes focus from script — picking a search result sends it
+   there, so a screen reader reads the place that opened (src/search-box.js) —
+   and it is not a control. A ring round a title says "press me" about the one
+   thing on the card that does nothing, and Chrome would draw it on a mouse
+   pick too: focus arrives from a text field, which always counts as keyboard
+   focus. tabindex="-1" in the selector so a heading that ever becomes a real
+   Tab stop gets its ring back. */
+.g-panel-title[tabindex="-1"]:focus {
+    outline: none;
 }
 
 .g-panel-sub {
@@ -4269,15 +4340,22 @@ body.no-dirbutton .g-directions {
 
 /* The count, and it is not decoration: "1 building" is the difference between
    a tile worth pressing and one that will answer with a single row you could
-   have searched for. Set in the tile's own ink at reduced opacity rather than
-   in a grey, because a grey mixed over ten different hues is ten different
-   greys. */
+   have searched for. Set in the tile's own ink rather than in a grey, because a
+   grey mixed over ten different hues is ten different greys.
+
+   AT FULL INK. It was the tile's ink at 0.78 opacity, to sit a step behind the
+   name, and that step was paid for in contrast the tile did not have to spare.
+   The ink is chosen by textInk in src/legend.js to clear 4.5:1 on each fill —
+   11px is small text, so 4.5 is the bar — and the closest tile clears it at
+   4.96. Faded by a fifth towards the fill, four of the ten fell under it —
+   arts to 3.6, food and sport to 3.8, works to 4.45.
+   The name above is set 600 and two pixels larger, which is hierarchy enough
+   without taking it out of the contrast. */
 .g-kind-count {
     display: block;
     margin-top: 2px;
     font-size: 11px;
     line-height: 1.2;
-    opacity: 0.78;
 }
 
 /* --- the sheet's head ------------------------------------------------------
