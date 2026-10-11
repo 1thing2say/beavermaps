@@ -292,8 +292,17 @@ export function createSheet({ el, grip, enabled, onSettle, reserve }) {
     // at 97. `reserve` is whoever built this sheet saying where those controls
     // end — see src/shell.js — so this file still knows nothing about them.
     const strip = Math.max(MAP_STRIP, Math.round(reserve?.() ?? 0));
-    const full = clamp(content, rest, screen - strip);
-    const half = clamp(Math.round(screen * 0.5), rest, full);
+    const ceiling = screen - strip;
+    // AND NEVER TALLER THAN THE SCREEN, whatever rest measured. `rest` was the
+    // floor of both clamps, and rest is capped by the stylesheet at 62dvh —
+    // which iOS does not shrink for a keyboard. With the keys up on a 390x844
+    // phone the visible screen is 464px and a resting sheet holding eight
+    // results is 523, so the floor sat above the ceiling and `full` and `half`
+    // both came out taller than the screen: the field being typed into ended
+    // up above y = 0. The floor gives way to the ceiling now.
+    const floor = Math.min(rest, ceiling);
+    const full = clamp(content, floor, ceiling);
+    const half = clamp(Math.round(screen * 0.5), floor, full);
     return { rest, half, full };
   }
 

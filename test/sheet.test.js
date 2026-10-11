@@ -187,7 +187,7 @@ test('the first move of a gesture is only a pixel or two', () => {
 // ---------------------------------------------------------------------------
 
 /** A phone: 664px of visible viewport, a sheet 1187px tall when open, 131 at rest. */
-function fakeSheet({ scrolled = 0, detent = 'full', height = '568px' } = {}) {
+function fakeSheet({ scrolled = 0, detent = 'full', height = '568px', rest = 131 } = {}) {
   const listeners = {};
   let scroll = scrolled;
   const captured = [];
@@ -196,8 +196,8 @@ function fakeSheet({ scrolled = 0, detent = 'full', height = '568px' } = {}) {
     style: { height },
     classList: { add() {}, remove() {} },
     // What the content measures, which the stylesheet decides per detent.
-    get scrollHeight() { return el.dataset.detent === 'rest' ? 131 : 1187; },
-    get clientHeight() { return el.style.height ? parseFloat(el.style.height) : 131; },
+    get scrollHeight() { return el.dataset.detent === 'rest' ? rest : 1187; },
+    get clientHeight() { return el.style.height ? parseFloat(el.style.height) : rest; },
     get scrollTop() { return scroll; },
     set scrollTop(v) { scroll = v; layout(); },
     getBoundingClientRect() {
@@ -224,9 +224,9 @@ function fakeSheet({ scrolled = 0, detent = 'full', height = '568px' } = {}) {
 }
 
 /** Run `body` with a phone-sized `window`, then put back whatever was there. */
-function onPhone(body) {
+function onPhone(body, visible = 664) {
   const had = globalThis.window;
-  globalThis.window = { innerHeight: 664, visualViewport: { height: 664 } };
+  globalThis.window = { innerHeight: 664, visualViewport: { height: visible } };
   try { return body(); } finally {
     if (had === undefined) delete globalThis.window; else globalThis.window = had;
   }
@@ -309,3 +309,16 @@ test('the same drag let go at speed is still a throw', () => onPhone(() => {
   drag(fake, { y0: 600, moves: 6, step: -25 }).release(8);
   assert.deepEqual(settled, ['full']);
 }));
+
+test('with the keyboard up, no detent is taller than the screen above it', () => onPhone(() => {
+  // 464px of visible screen above the keys, and a resting sheet holding eight
+  // results that the 62dvh cap — which a keyboard does not shrink — leaves at
+  // 523. Rest was the floor of both clamps, so half and full came out at 523
+  // and the field at the top of the sheet was above the top of the screen.
+  const { el, grip } = fakeSheet({ detent: 'rest', height: '', rest: 523 });
+  const sheet = createSheet({ el, grip, enabled: () => true });
+  sheet.apply('full');
+  assert.ok(parseFloat(el.style.height) <= 464 - 96, `full is ${el.style.height}`);
+  sheet.apply('half');
+  assert.ok(parseFloat(el.style.height) <= 464 - 96, `half is ${el.style.height}`);
+}, 464));
