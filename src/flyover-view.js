@@ -258,12 +258,28 @@ const FALLBACK_CREDIT = 'Google';
  * visits pay for a renderer they did not use. The promise is cached rather than
  * the modules so two fast taps share one download instead of racing.
  */
+//
+// EACH IMPORT NAMES WHAT IT TAKES, inside its own `.then`, and that is what
+// keeps the download the size of a 3D tile viewer. Handed the whole namespace
+// (`geo.Tile3DLayer` read later off the module object), the bundler cannot
+// tell which exports are used and keeps all of them — and @deck.gl/geo-layers
+// is a barrel of every geospatial layer deck.gl has, H3 hexagons among them,
+// so the flyover chunk shipped h3-js (about 200 KB) for a layer this app never
+// draws. Destructured at the import, only the named bindings are live and the
+// rest of each barrel tree-shakes away. A deep import of the one file instead
+// is refused by the packages' `exports` maps, and aliasing h3-js to a stub
+// would break the day something did start using it.
 let toolkit = null;
 const loadToolkit = () => (toolkit ??= Promise.all([
-  import('@deck.gl/core'),
-  import('@deck.gl/geo-layers'),
-  import('@loaders.gl/3d-tiles'),
-  import('@deck.gl/layers'),
+  import('@deck.gl/core').then(({ Deck, MapView, WebMercatorViewport }) => (
+    { Deck, MapView, WebMercatorViewport })),
+  import('@deck.gl/geo-layers').then(({ Tile3DLayer }) => ({ Tile3DLayer })),
+  import('@loaders.gl/3d-tiles').then(({ Tiles3DLoader }) => ({ Tiles3DLoader })),
+  import('@deck.gl/layers').then(({
+    LineLayer, IconLayer, PathLayer, SolidPolygonLayer,
+  }) => ({
+    LineLayer, IconLayer, PathLayer, SolidPolygonLayer,
+  })),
 ]).then(([core, geo, tiles, layers]) => ({
   Deck: core.Deck,
   MapView: core.MapView,
