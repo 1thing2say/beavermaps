@@ -503,6 +503,14 @@ const stage = {
   onCredits: null,
   /** ...and the same for a tileset Google refused. See keyedFetch. */
   onRefused: null,
+  /** ...and for a renderer that could not start or has lost its context. */
+  onFailed: null,
+  /**
+   * The Deck cannot draw any more: it never got a WebGL context, or it lost
+   * the one it had. Every card reuses the one Deck, so left alone this was a
+   * blank aerial view for the rest of the tab; the next card builds a new one.
+   */
+  broken: false,
   /**
    * Google's sentence, once the root has been refused.
    *
@@ -805,7 +813,58 @@ function buildStage(tools, view) {
     // shows through everywhere the clip discarded, which is the whole point of
     // drawing a grid there.
     layers: stage.base,
+    /**
+     * WHERE A RENDERER THAT NEVER STARTED SAYS SO. deck.gl creates its device
+     * asynchronously and does not wait for it, so a browser that will not hand
+     * out a WebGL context does not throw from `new Deck` — the try around
+     * buildStage never sees it, and the card said "Loading aerial view" for as
+     * long as it was open. This is the one place that failure arrives.
+     *
+     * Two kinds of error come through here and only one is fatal. A layer's
+     * own error arrives with the layer as its second argument and leaves the
+     * renderer working, so it is logged — passing onError replaces deck's own
+     * logging — and the stage is left alone.
+     */
+    onError: (error, layer) => {
+      if (layer) {
+        console.error('flyover layer error:', error);
+        return;
+      }
+      stage.broken = true;
+      stage.onFailed?.(error);
+    },
   });
+
+  // A lost context is not handed to onError — luma only notes it, and deck's
+  // own handler for it is never called — so it is listened for here. Not
+  // restored: the stage is thrown away and the next card builds another, which
+  // is simpler than rebuilding every GPU resource deck.gl and loaders.gl hold.
+  // iOS does this to a backgrounded tab, and to one under GPU memory pressure
+  // while Mapbox GL holds a context of its own.
+  canvas.addEventListener('webglcontextlost', () => {
+    stage.broken = true;
+    stage.onFailed?.(new Error('WebGL context lost'));
+  });
+}
+
+/**
+ * Throw the renderer away, so the next card builds a new one.
+ *
+ * After a failure only. A new Deck is a new tileset and therefore a billable
+ * root request, which is everything the shared stage exists to avoid — but a
+ * Deck that cannot draw costs nothing and shows nothing.
+ */
+function discardStage() {
+  try {
+    stage.deck?.finalize();
+  } catch (error) {
+    console.error('flyover stage teardown:', error);
+  }
+  stage.host?.remove();
+  stage.deck = null;
+  stage.host = null;
+  stage.canvas = null;
+  stage.broken = false;
 }
 
 /**
@@ -969,9 +1028,15 @@ export function createFlyover({
 
   let frame = 0;
   let dead = false;
+  /** Whether this card has given up and said so. The orbit stops with it. */
+  let failed = false;
 
   function fail(message) {
-    if (dead) return;
+    if (dead || failed) return;
+    failed = true;
+    // The orbit too, which used to go on driving the hidden canvas behind the
+    // note for as long as the card was open.
+    cancelAnimationFrame(frame);
     busy.stop?.();
     busy.remove();
     // Replaces the box rather than sitting over it. A viewport that stays empty
@@ -994,6 +1059,7 @@ export function createFlyover({
       stage.onReady = null;
       stage.onCredits = null;
       stage.onRefused = null;
+      stage.onFailed = null;
       // Off between cards. The one Deck is kept for the tab, and its render
       // loop asked for a frame sixty times a second whether or not its canvas
       // was in a card — on a phone, for the rest of the visit, after a single
@@ -1068,6 +1134,9 @@ export function createFlyover({
       },
     };
 
+    // A renderer that failed is not handed to another card. See `broken`.
+    if (stage.broken) discardStage();
+
     stage.maxTileSpan = maxTileSpan ?? 0;
     stage.bounds = bounds ? campusBox(bounds) : null;
     stage.roof = roof ?? null;
@@ -1109,6 +1178,10 @@ export function createFlyover({
     // the root comes back refused. See keyedFetch.
     if (stage.refused) { fail(stage.refused); return; }
     stage.onRefused = (message) => fail(message);
+    stage.onFailed = (error) => {
+      console.error('aerial view renderer failed:', error);
+      fail('Aerial view unavailable');
+    };
 
     // Called as tiles load and on every traversal, so it has to be safe to call
     // repeatedly.
@@ -1226,7 +1299,7 @@ export function createFlyover({
         layers: [...stage.base, ...marks(landed ? STILL_MS : null)],
       });
       const wait = () => {
-        if (dead || stage.owner !== token) return;
+        if (dead || failed || stage.owner !== token) return;
         if (busy.isConnected && drawn()) reveal();
         if (!(roofReady && drawn())) { frame = requestAnimationFrame(wait); return; }
         // Landed, so the fall's length changes nothing on screen — but the
@@ -1241,7 +1314,7 @@ export function createFlyover({
 
     const start = performance.now();
     const tick = (now) => {
-      if (dead || stage.owner !== token || !stage.deck) return;
+      if (dead || failed || stage.owner !== token || !stage.deck) return;
       // Wall-clock rather than a per-frame increment, so the circle takes
       // ORBIT_MS whether the tab is rendering at 120fps or dropping frames
       // decoding tiles — which is exactly when this is running.

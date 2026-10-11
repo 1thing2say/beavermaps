@@ -1,8 +1,10 @@
 // src/flyover-view.js — the shared stage, and the ways it used to stop for good.
 //
 // The flyover keeps ONE Deck and one tileset for the tab, by design (it is a
-// billing decision; see the top of that file). Its render loop kept ticking
-// after the card closed, and the pin dropped on the first coarse tile rather
+// billing decision; see the top of that file). Every failure here was the price
+// of that sharing going unhandled: a renderer that never got a WebGL context, or
+// lost the one it had, left every later card blank; a render loop kept ticking
+// after the card closed; and the pin dropped on the first coarse tile rather
 // than on the roof.
 //
 // The module imports a stylesheet (through src/spinner.js) and deck.gl, neither
@@ -158,11 +160,60 @@ async function open(options = {}) {
   return card;
 }
 
+const failed = (card) => card.el.classList.contains('g-flyover--failed');
+const spinning = (card) => card.el.children.some((c) => c.classList.contains('g-spinner'));
 const latestTiles = () => fakes.tileLayers.at(-1);
 
 // ---------------------------------------------------------------------------
 // The tests, in tab order
 // ---------------------------------------------------------------------------
+
+test('a Deck that never gets a WebGL context fails the card instead of spinning', async () => {
+  // What luma does: the device is created asynchronously, its failure goes to
+  // onError, and the constructor itself returns normally.
+  fakes.onDeck = (deck) => queueMicrotask(
+    () => deck.props.onError(new Error('Failed to create WebGL context')),
+  );
+  const card = await open();
+  assert.equal(fakes.decks.length, 1);
+  assert.ok(failed(card), 'the card says so');
+  assert.ok(!spinning(card), 'and stops spinning');
+  card.destroy();
+
+  // The next card does not inherit the dead renderer.
+  fakes.onDeck = () => {};
+  const next = await open();
+  assert.equal(fakes.decks.length, 2, 'a fresh Deck');
+  assert.equal(fakes.decks[0].calls.finalize, 1, 'and the broken one let go');
+  assert.ok(!failed(next));
+  next.destroy();
+});
+
+test('a layer error is logged and leaves the renderer alone', async () => {
+  const card = await open();
+  const deck = fakes.decks.at(-1);
+  errors.length = 0;
+  deck.props.onError(new Error('bad tile'), latestTiles());
+  assert.ok(!failed(card));
+  assert.equal(errors.length, 1);
+  card.destroy();
+  const next = await open();
+  assert.equal(fakes.decks.at(-1), deck, 'still the same Deck');
+  next.destroy();
+});
+
+test('a lost context fails the card, and the next card builds a new stage', async () => {
+  const card = await open();
+  const deck = fakes.decks.at(-1);
+  deck.props.canvas.fire('webglcontextlost');
+  assert.ok(failed(card));
+  card.destroy();
+
+  const next = await open();
+  assert.notEqual(fakes.decks.at(-1), deck);
+  assert.equal(deck.calls.finalize, 1);
+  next.destroy();
+});
 
 test('the render loop stops when the card closes and resumes for the next', async () => {
   const card = await open();
