@@ -1672,7 +1672,12 @@ function startApp() {
   });
 
   map.on('click', (e) => {
-    if (navigating() || !networkPoints) return;
+    // NOT gated on the routing graph. Nothing a tap does here routes — a pin
+    // lifts, a card opens, a category clears — and the card's own buttons ask
+    // endpoints, which checks for the graph itself. Gated, every tap was
+    // ignored until /api/network landed, and for the whole session if it
+    // failed, while search and Browse opened the very same cards.
+    if (navigating()) return;
     // The release at the end of a press-and-hold. That gesture has already done
     // its work; without this the same finger would drop a route point and then
     // immediately clear the selection on the way back up.
