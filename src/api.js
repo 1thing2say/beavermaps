@@ -11,9 +11,43 @@
 // argument, so test/api.test.js can hand it each status in turn.
 
 /**
- * @param {Function} [request]  stand-in for `fetch`, for tests
+ * How long a boot-time request may take before it counts as failed, in ms.
+ *
+ * Generous, because the largest of them — /api/basemap — is about 1.6 MB, and
+ * the ceiling covers reading the body as well as the response arriving. What
+ * it rules out is the wait being the browser's own. On a connection that has
+ * silently dropped (a handover between networks, a captive portal that took
+ * the connection and never answered) that is minutes, and until it ends
+ * "Loading the campus…" spins and the routing outage can never be said.
  */
-export function createApi({ request = (...args) => globalThis.fetch(...args) } = {}) {
+export const BOOT_TIMEOUT_MS = 20_000;
+
+/**
+ * @param {Function} [request]        stand-in for `fetch`, for tests
+ * @param {number}   [bootTimeoutMs]  the ceiling on each boot-time GET, for tests
+ */
+export function createApi({
+  request = (...args) => globalThis.fetch(...args),
+  bootTimeoutMs = BOOT_TIMEOUT_MS,
+} = {}) {
+  /**
+   * One GET with a ceiling on the wait. A fresh signal per call, since a
+   * timeout signal starts counting when it is made. Feature-tested because
+   * AbortSignal.timeout is a 2022 API, and a browser without it should still
+   * load — just without the ceiling. The rejection when it fires is the
+   * browser's TimeoutError, which every caller already treats as the request
+   * having failed.
+   */
+  async function getJson(path, what) {
+    const timeout = globalThis.AbortSignal?.timeout;
+    const response = await request(
+      path,
+      typeof timeout === 'function' ? { signal: AbortSignal.timeout(bootTimeoutMs) } : undefined,
+    );
+    if (!response.ok) throw new Error(`${what} request failed (${response.status})`);
+    return response.json();
+  }
+
   /**
    * Ask the server for a route. The graph and the maneuver derivation both live
    * there — this file never builds a PathFinder.
@@ -52,10 +86,8 @@ export function createApi({ request = (...args) => globalThis.fetch(...args) } =
   }
 
   /** The linework that gets DRAWN: the campus's own paths, and only those. */
-  async function network() {
-    const response = await request('/api/network');
-    if (!response.ok) throw new Error(`network request failed (${response.status})`);
-    return response.json();
+  function network() {
+    return getJson('/api/network', 'network');
   }
 
   /**
@@ -70,17 +102,13 @@ export function createApi({ request = (...args) => globalThis.fetch(...args) } =
    * AGAINST, and it has to include those streets or a fix on the pavement
    * outside would be measured to the far side of a car park.
    */
-  async function vertices() {
-    const response = await request('/api/vertices');
-    if (!response.ok) throw new Error(`vertex request failed (${response.status})`);
-    return response.json();
+  function vertices() {
+    return getJson('/api/vertices', 'vertex');
   }
 
   /** One of the draw-only overlays: buildings, basemap, amenities, places. */
-  async function overlay(name) {
-    const response = await request(`/api/${name}`);
-    if (!response.ok) throw new Error(`${name} request failed (${response.status})`);
-    return response.json();
+  function overlay(name) {
+    return getJson(`/api/${name}`, name);
   }
 
   return { route, network, vertices, overlay };
