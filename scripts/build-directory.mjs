@@ -147,21 +147,28 @@ for (const f of doors) {
  * is where the card's pin goes; it is not the only way in, and a walk to the
  * building should not be made to go round to it. server/graph.js takes any of
  * a building's `doors` as the end of a walk to it (see `entrances` in
- * createGraph), and the pin moves to the door the walk used. Two kinds go in:
+ * createGraph), and the pin moves to the door the walk used. Three kinds go
+ * in:
  *
  *   - Every drawn door of the footprint the card stands on, nearest the anchor
  *     first. The Parking Garage has five and the one nearest its anchor is on
  *     the west wall: with that as the only end, walks from the north came in
  *     71 m longer on average than when they ended at the north door, and Fine
  *     & Applied Arts, with four, was 70 m worse the same way.
+ *   - Every drawn door of the building's OTHER footprints, nearest the anchor
+ *     first. Not the entrance, as above, but a way in all the same: leaving
+ *     them out gave the CTE only its east wall, so a walk from the Student
+ *     Center went 412 m round to it rather than 98 m to the annexe's door,
+ *     and Science & Engineering's doors on two of its shards, 2.9 m from the
+ *     Science Success Center's wall, were never offered: 166 m between the two
+ *     buildings, against 22 m with them.
  *   - Every point where the walls come nearest the network, after the drawn
  *     doors. The sheet draws a path into a building where it happens to, not
  *     into every door it has, and the walks this map used to give ended at
  *     the wall-nearest point. Moving the Library's end to its one drawn door
  *     made a walk from restroom #51 go from 92 to 171 m, though the old end
- *     was still on the graph 2.3 m from a corner; Science & Engineering's,
- *     from the Science Success Center, went from 59 to 170 m. Both ends are
- *     offered now and the walk takes the nearer.
+ *     was still on the graph 2.3 m from a corner. Both ends are offered now
+ *     and the walk takes the nearer.
  *
  * Returns `nearWalls` too, each with its metres from the corner it is nearest:
  * a point can be nearest the walls of two buildings, and the caller gives it
@@ -170,16 +177,27 @@ for (const f of doors) {
 function entranceFor(group) {
   const at = group.pole?.coordinates;
   const home = at && group.members.find((m) => pointInRing(at, m.geometry.coordinates[0]));
-  const known = home ? doorsByRing.get(ringKey(home.geometry.coordinates[0])) ?? [] : [];
-  const drawn = [...known].sort((x, y) => metresBetween(at, x) - metresBetween(at, y)
-    || x[0] - y[0] || x[1] - y[1]);
+  const byAnchor = (x, y) => metresBetween(at, x) - metresBetween(at, y) || x[0] - y[0] || x[1] - y[1];
+  const doorsOf = (m) => doorsByRing.get(ringKey(m.geometry.coordinates[0])) ?? [];
+  const drawn = home ? [...doorsOf(home)].sort(byAnchor) : [];
+  const own = new Set(drawn.map(keyOf));
+  const shards = [];
+  for (const m of group.members) {
+    if (m === home) continue;
+    for (const door of doorsOf(m)) {
+      if (own.has(keyOf(door))) continue;
+      own.add(keyOf(door));
+      shards.push(door);
+    }
+  }
+  shards.sort(byAnchor);
   const nearWalls = [];
   for (const { at: point, d } of wallNearest(group, segments)) {
     const node = nodeAt(point);
     if (!node || nearWalls.some((w) => keyOf(w.node) === keyOf(node))) continue;
     nearWalls.push({ node, d });
   }
-  return { drawn, nearWalls };
+  return { drawn, shards, nearWalls };
 }
 
 /**
@@ -230,13 +248,13 @@ const claim = (node, group, rank) => {
   if (!held || rank < held.rank) owner.set(keyOf(node), { group, rank });
 };
 const UNDRAWN_FIRST = 1e6;
-for (const [group, { drawn, nearWalls }] of ways) {
-  for (const door of drawn) claim(door, group, -Infinity);
+for (const [group, { drawn, shards, nearWalls }] of ways) {
+  for (const door of [...drawn, ...shards]) claim(door, group, -Infinity);
   for (const { node, d } of nearWalls) claim(node, group, drawn.length ? d : d - UNDRAWN_FIRST);
 }
 let givenAway = 0;
 for (const [group, way] of ways) {
-  const listed = new Set(way.drawn.map(keyOf));
+  const listed = new Set([...way.drawn, ...way.shards].map(keyOf));
   const extra = [];
   for (const { node } of way.nearWalls) {
     if (listed.has(keyOf(node))) continue;
@@ -244,7 +262,11 @@ for (const [group, way] of ways) {
     listed.add(keyOf(node));
     extra.push(node);
   }
-  way.doors = [...way.drawn, ...extra];
+  // The entrance is what it always was — the card's footprint's nearest drawn
+  // door, or where the walls come nearest — and the other shards' doors are
+  // ways in after it, never in its place.
+  way.doors = way.drawn.length ? [...way.drawn, ...way.shards, ...extra]
+    : [...extra.slice(0, 1), ...way.shards, ...extra.slice(1)];
 }
 
 const features = [];
@@ -323,7 +345,9 @@ const atDrawn = [...ways.values()].filter((w) => w.drawn.length).length;
 console.log(`[build-directory] ${atDrawn} entrances at a door the walls stage recorded (src/doors.json), `
   + `${features.filter((f) => f.properties.entrance).length - atDrawn} where the walls come nearest the network`);
 console.log(`[build-directory] ${features.reduce((n, f) => n + (f.properties.doors?.length ?? 0), 0)} ways in, `
-  + `${[...ways.values()].reduce((n, w) => n + w.doors.length - w.drawn.length, 0)} of them where the walls come nearest; `
+  + `${[...ways.values()].reduce((n, w) => n + w.shards.length, 0)} drawn on another of the building's footprints, `
+  + `${[...ways.values()].reduce((n, w) => n + w.doors.length - w.drawn.length - w.shards.length, 0)} `
+  + 'where the walls come nearest; '
   + `${givenAway} left to another building that shares it`);
 if (unspliced) {
   console.log(`[build-directory] WARNING: ${unspliced} wall-nearest point(s) with no node within a weld — `

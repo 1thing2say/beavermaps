@@ -102,6 +102,29 @@ test('an entrance is a door where the building has one under its anchor', () => 
   assert.ok(atDoor >= 8, `only ${atDoor} buildings have their entrance at a door`);
 });
 
+test("a door drawn on any of a building's footprints is a way into it", () => {
+  // Only the footprint the card stands on used to give its doors, so the
+  // CTE annexe's door and two Science & Engineering shards' doors were never
+  // ends of a walk: the Student Center to the CTE went 412 m round to its east
+  // wall, and the Science Success Center to Science & Engineering 166 m, with
+  // the two buildings' walls 2.9 m apart. Matched on the outline, as the build
+  // matches doors.json to buildings, at six decimals.
+  const ringKey = (ring) => JSON.stringify(ring.map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]));
+  const owner = new Map();
+  for (const f of directory) for (const [ring] of f.geometry.coordinates) owner.set(ringKey(ring), f);
+  let checked = 0;
+  for (const d of load('doors').features) {
+    const f = owner.get(ringKey(d.geometry.coordinates[0]));
+    if (!f) continue;
+    const listed = new Set((f.properties.doors ?? []).map(vertexKey));
+    for (const door of d.properties.stubs.flatMap((s) => s.doors)) {
+      assert.ok(listed.has(vertexKey(door)), `${f.properties.officialName} does not list its door at ${door}`);
+      checked += 1;
+    }
+  }
+  assert.ok(checked >= 20, `test premise: only ${checked} drawn doors matched a directory building`);
+});
+
 test('every building is offered where its walls come nearest the network', () => {
   // A door the sheet does not draw is most likely where the network passes
   // closest to the building, and every walk this map gave before the walls

@@ -501,6 +501,25 @@ test('a walk to a building is never longer than one to where its walls come near
   assert.ok(compared > 300, `only ${compared} walks compared`);
 });
 
+test('a walk to a building may end at a door on any of its footprints', () => {
+  // The directory used to list only the doors of the footprint a card stands
+  // on. Science & Engineering has drawn doors on two other shards, 2.9 m from
+  // the Science Success Center's wall, and the walk between the two buildings
+  // went 166 m round to the ones it listed; the Student Center to the CTE went
+  // 412 m round to its east wall, past the annexe's door.
+  const entrance = (name) => load('directory').features.find((f) => f.properties.name === name).properties.entrance;
+  for (const [from, to, under] of [
+    ['Science Success Center', 'Science & Engineering', 40],
+    ['Science & Engineering', 'Science Success Center', 40],
+    ['Student Center', 'Career Technical Education (CTE)', 120],
+  ]) {
+    const result = graph.route(entrance(from), entrance(to));
+    assert.ok(result.ok, `${from} to ${to} refused: ${result.error}`);
+    const m = result.distanceFeet * 0.3048;
+    assert.ok(m < under, `${m.toFixed(0)} m from ${from} to ${to}`);
+  }
+});
+
 test('a room at the fork of two walkways leaves by the arm that leads where it is going', () => {
   // The Evangelisti Culinary Arts Center's north door is where walkway 1259 met
   // the wall before the walls stage cut its passage through the building, 7.5 m
