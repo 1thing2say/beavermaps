@@ -295,3 +295,51 @@ test('an answer that lands during a style swap still finishes the panel', async 
   assert.equal(h.buttons(), true);
   assert.equal(h.route.isWalkable, true, 'style.load has no route to draw from');
 });
+
+// "Start here" on a pin's card. placeStart alone moved the start and nothing
+// else, so a walk already drawn stayed drawn from the old start with Start
+// still enabled, and a parked destination was never routed.
+
+const FAR = [-121.36, 38.66];
+
+test('Start here with a walk on screen routes the walk again from the new start', async () => {
+  const h = harness(walk);
+  h.endpoints.placeStart(LIBRARY, 'Library');
+  await h.endpoints.placeEnd(CTE, 'CTE');
+  h.asked.length = 0;
+
+  assert.equal(await h.endpoints.startHere(DESIGN_HUB, 'Dropped pin'), 'routed');
+  assert.equal(h.asked.length, 1, 'the old walk was left in place');
+  assert.deepEqual(h.asked[0].from, DESIGN_HUB);
+  assert.deepEqual(h.asked[0].to, CTE);
+  assert.deepEqual(h.route.coords[0], DESIGN_HUB, 'the walk drawn is still from the old start');
+  assert.equal(h.buttons(), true);
+});
+
+test('Start here routes a destination that was parked waiting for a start', async () => {
+  const h = harness(walk);
+  h.endpoints.parkDestination(CTE, 'CTE');
+
+  assert.equal(await h.endpoints.startHere(LIBRARY, 'Library'), 'routed');
+  assert.equal(h.asked.length, 1);
+  assert.deepEqual(h.asked[0].to, CTE);
+  assert.equal(h.route.isWalkable, true);
+  assert.equal(h.endpoints.takeParked(), null);
+});
+
+test('Start here with no destination only sets the start', async () => {
+  const h = harness(walk);
+  assert.equal(await h.endpoints.startHere(LIBRARY, 'Library'), 'waiting');
+  assert.equal(h.asked.length, 0);
+  assert.deepEqual(h.endpoints.start().geometry.coordinates, LIBRARY);
+});
+
+test('Start here too far from any path routes nothing and keeps the parked destination', async () => {
+  const h = harness(walk);
+  h.endpoints.parkDestination(CTE, 'CTE');
+
+  assert.equal(await h.endpoints.startHere(FAR, 'Dropped pin'), 'refused');
+  assert.equal(h.asked.length, 0);
+  assert.equal(h.last().isError, true);
+  assert.deepEqual(h.endpoints.takeParked()?.coords, CTE);
+});

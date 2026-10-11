@@ -612,9 +612,32 @@ export function createEndpoints({
     }
   }
 
+  /**
+   * "Start here" on a pin's card: make the point the start, then route to the
+   * destination there already is, whether drawn or parked.
+   *
+   * placeStart alone only moves the start. With a walk on screen that left
+   * the old one drawn from the old start, with Start still offering to walk
+   * it, under a start field naming the new one. With a destination parked it
+   * left that waiting, though parkDestination promises the next start
+   * routes it. The start field's own pick does placeStart and then
+   * rerouteFromStart, and the cards now go through the same pair.
+   *
+   * @returns {Promise<'refused'|'routed'|'waiting'>} refused when placeStart
+   *          turned the point down (and has said why); waiting when there is
+   *          no destination yet, which the caller may want to say
+   */
+  async function startHere(coords, label) {
+    if (!placeStart(coords, label)) return 'refused';
+    if (!endPoint && !pendingEnd) return 'waiting';
+    await rerouteFromStart();
+    return 'routed';
+  }
+
   return {
     reset: resetMap,
     rerouteFromStart,
+    startHere,
     rerouteTo,
     locateStart,
     placeStart,

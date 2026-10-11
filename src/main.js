@@ -639,7 +639,7 @@ function startApp() {
       ? SATELLITE.label : pinInk(kind, currentTheme)),
     onDeselect: () => closeBuildingCard(),
     onLift: (hit) => showPlaceCard(pinCard(hit, {
-      onStart: (coords, name) => { clearSelection(); placeStart(coords, name); },
+      onStart: (coords, name) => { clearSelection(); startHere(coords, name); },
       onEnd: (coords, name) => { clearSelection(); setDestination(coords, name); },
       onClose: clearSelection,
     // The pin, kept in view. A tap in the bottom third of a phone screen is
@@ -916,7 +916,7 @@ function startApp() {
   const resetMap = () => endpoints.reset();
   const locateStart = () => endpoints.locateStart();
   const placeStart = (coords, label) => endpoints.placeStart(coords, label);
-  const placeEnd = (coords, label) => endpoints.placeEnd(coords, label);
+  const startHere = (coords, label) => endpoints.startHere(coords, label);
   const setDestination = (coords, name) => endpoints.setDestination(coords, name);
   const coordLabel = (c) => endpoints.coordLabel(c);
 
@@ -1788,7 +1788,7 @@ function startApp() {
     if (building) { cards.openBuilding(building); return; }
     plantPin(coords, name);
     showPlaceCard(pinCard({ coords, kind, name, sub }, {
-      onStart: (at) => { clearSelection(); placeStart(at, name); },
+      onStart: (at) => { clearSelection(); startHere(at, name); },
       onEnd: (at) => { clearSelection(); setDestination(at, name); },
       onClose: clearSelection,
     }), null, { at: coords });
@@ -1817,19 +1817,13 @@ function startApp() {
       // them on its dropped pin for the same reason.
       { coords: at, kind: 'dropped', name: 'Dropped pin', sub: coordLabel(at) },
       {
-        onStart: (coords) => {
+        onStart: async (coords) => {
           clearSelection();
-          // Refused when the pin is too far from any path to walk from, and
-          // placeStart has said so. Going on regardless routed a waiting
-          // destination from no start at all — reported as the server being
-          // unreachable, with the destination dropped — or wrote "Starting
-          // from the dropped pin" over the refusal.
-          if (!placeStart(coords, 'Dropped pin')) return;
-          // A destination chosen before a start has been waiting for this.
-          const parked = endpoints.takeParked();
-          if (parked) {
-            placeEnd(parked.coords, parked.name);
-          } else {
+          // Routed on to the destination already drawn or parked, if there
+          // is one; see startHere. Said only when there is none. A refusal
+          // (the pin too far from any path) has said so already, and this
+          // must not write over it.
+          if (await startHere(coords, 'Dropped pin') === 'waiting') {
             setStatus('Starting from the dropped pin. Now pick where you are going.');
           }
         },
