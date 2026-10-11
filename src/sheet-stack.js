@@ -81,8 +81,17 @@ export function createSheetStack({ el, panels, enabled, onFront }) {
   const scrolledTo = new Map();
   el.addEventListener('scroll', () => scrolledTo.set(front(), el.scrollTop), { passive: true });
 
+  /**
+   * Who wants to hear when the depth changes — the hardware back button, see
+   * src/hardware-back.js, which keeps one history entry up for as long as
+   * anything is open. Told after the stack has settled, so `depth` is read
+   * back already true.
+   */
+  const depthListeners = new Set();
+
   function refresh() {
     const before = front();
+    const depthBefore = order.length;
     for (const panel of panels) {
       const open = isOpen(panel);
       if (open === was.get(panel)) continue;
@@ -94,6 +103,7 @@ export function createSheetStack({ el, panels, enabled, onFront }) {
       if (open) order.push(panel);
     }
     paint();
+    if (order.length !== depthBefore) depthListeners.forEach((listener) => listener(order.length));
     const after = front();
     if (after === before) return;
     // A panel that has closed is forgotten, so opening it again starts fresh.
@@ -134,8 +144,8 @@ export function createSheetStack({ el, panels, enabled, onFront }) {
      *
      * Each panel's own dismiss button is the back button, which is the point
      * of the arrangement; this is for the paths that need to unwind the column
-     * without knowing what is in it. Escape is the first — see main.js — and a
-     * hardware back gesture would be the next.
+     * without knowing what is in it. Escape is the first — see main.js — and
+     * the hardware back gesture is the second, see src/hardware-back.js.
      */
     back() {
       front()?.dismiss();
@@ -143,5 +153,13 @@ export function createSheetStack({ el, panels, enabled, onFront }) {
     /** Re-decide after the breakpoint has been crossed. */
     refit: paint,
     get depth() { return order.length; },
+    /**
+     * Call `listener(depth)` whenever the number of open panels changes.
+     * Returns the way to stop.
+     */
+    onDepth(listener) {
+      depthListeners.add(listener);
+      return () => depthListeners.delete(listener);
+    },
   };
 }
