@@ -1477,7 +1477,86 @@ a stale dev server from yesterday is enough to make an allowlist entry miss.
 is the other way in: a real certificate, no warning to click past, and it works
 off your network. It costs a fresh random `*.trycloudflare.com` hostname every
 run, which `allowedHosts` already covers as a wildcard but a Google referrer
-rule has to as well.
+rule has to as well — and that rule belongs on a **development** key, never the
+one production uses. Anyone can open a quick tunnel and get a hostname under
+that wildcard, so on the production key it is an allowlist entry for every
+site on the internet that cares to spend your quota. See
+[one key for development, one for production](#one-key-for-development-one-for-production).
+
+## Deploy (Fly.io)
+
+The server, the built front end and the data ship as one image (`Dockerfile`)
+on [Fly.io](https://fly.io) (`fly.toml`). You need
+[`flyctl`](https://fly.io/docs/flyctl/install/), logged in.
+
+### Before the first deploy
+
+1. **Rename `app` in `fly.toml`** to something globally unique, or let
+   `fly launch` rewrite the file. The name becomes `https://<app>.fly.dev`, and
+   that origin is what the next step allowlists. `primary_region` is `sjc`, the
+   nearest region to the campus; change it before `fly launch` if you must,
+   because moving a running app means new machines.
+2. **Add the production origin to both keys**, before anyone visits:
+   - **Google**, in the [Cloud console](https://console.cloud.google.com/):
+     `https://<app>.fly.dev/*`, and `https://<your-domain>/*` if there is one,
+     in the key's HTTP-referrer restrictions.
+   - **Mapbox**, under the token in your account: `https://<app>.fly.dev` and
+     the custom domain in its URL restrictions.
+
+   Nothing on the server notices if you skip this. `/healthz` is the API, and
+   the API needs no key, so the health check is green while every visitor gets
+   Google's 403, falls back to Mapbox, gets Mapbox's 403 too — and has the
+   fallback *remembered* (see [2b](#2b-add-a-google-key)), so fixing the
+   console afterwards does not fix their phone. After deploying, check with the
+   production `Referer` that both Google's `createSession` and a Mapbox
+   `/v4/…vector.pbf` tile answer 200; the style loading is not evidence.
+
+### Deploying
+
+```bash
+npm run deploy                     # check, then fly deploy with the keys from .env
+npm run deploy -- --remote-only    # anything after -- goes to fly deploy
+```
+
+Not a bare `fly deploy`, which builds and goes live without either key. The
+script, in order:
+
+- **Refuses a dirty tree**: unstaged or staged changes, or an untracked file
+  under `src/` or `server/`. `fly deploy` uploads the working directory, not
+  `HEAD`, so a deploy from an edited tree puts live something no commit and no
+  CI run has seen — which nobody can reproduce or roll back to. The untracked
+  check is there because `git commit -a` leaves new files behind while the
+  committed modules that import them go out regardless.
+- **Runs `npm run check`**, lint and the suite. The image build cannot do this
+  for you: `test/` is in `.dockerignore`. Push and let CI finish too — it also
+  builds the image and boots it, which the local check does not.
+- **Reads `.env` and passes both keys as `--build-arg`**, refusing first if
+  there is no `pk.*` Mapbox token. `.env` is sourced by the shell here, so keep
+  it to plain `NAME=value` lines. The keys never go in `fly.toml`'s
+  `[build.args]`: this repository is public.
+
+The `Dockerfile` refuses a build without a `pk.*` token on its own as well, and
+only warns without the Google key — Mapbox alone is a working map, a missing
+token is not.
+
+### One key for development, one for production
+
+Everything in [On a phone](#4-on-a-phone) — `localhost`, the `.local` name,
+the port, the tunnel wildcard — belongs on a development key. Production gets
+its own:
+
+- **Google:** a separate browser key whose referrer list is only the
+  production origins, with an **API restriction to the Map Tiles API** and
+  nothing else, **daily quota caps** on the Map Tiles API (the 3D tiles root
+  requests and `createSession` are the ones a scraper would run up), and a
+  **billing budget alert** on the project. The key is a query parameter on
+  every tile URL; the referrer list, the API restriction and the cap are all
+  there is between it and somebody else's usage.
+- **Mapbox:** a separate public token for production, URL-restricted to the
+  production origins.
+
+`npm run deploy` bakes in whatever `.env` holds when you run it, so that has to
+be the production pair at the time.
 
 ## Project structure
 
