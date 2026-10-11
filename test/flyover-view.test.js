@@ -153,12 +153,28 @@ const { createFlyover } = await import('../src/flyover-view.js');
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
+/**
+ * The first card waits on the import of deck.gl, which the page caches after.
+ * Under `module.register` (node before 22.15) every one of those imports is
+ * resolved on the hooks thread, a round trip that takes longer than the few
+ * turns of the event loop a card needs once deck.gl is in. So the first card
+ * waits, up to half a second, for the Deck it builds.
+ */
+let toolkitLoaded = false;
+async function loadingToolkit() {
+  for (let ms = 0; ms < 500 && !toolkitLoaded && fakes.decks.length === 0; ms += 5) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  toolkitLoaded = true;
+}
+
 /** A card for the Library, without a pin unless it asks for one. */
 async function open(options = {}) {
   const card = createFlyover({
     key: 'k', centre: [-121.3464, 38.6492], span: 120, pitch: 63, maxTileSpan: 200,
     name: 'Library', ...options,
   });
+  await loadingToolkit();
   for (let i = 0; i < 5; i += 1) await settle();
   return card;
 }
