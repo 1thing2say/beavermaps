@@ -80,6 +80,19 @@ const PROJECT_MS = 120;
  */
 const FLICK = 0.45;
 
+/**
+ * How long a finger can rest before letting go and still be throwing, in ms.
+ *
+ * A finger held still sends no moves — iOS sends none for a stationary touch —
+ * so the speed of the last move it did send is kept for as long as it is held.
+ * Drag, stop, adjust and let go a second later, and that stale speed was
+ * projected 120ms ahead and read as a flick: measured, a sheet held at 281px
+ * between half (332) and full (568) landed at full. Past this the release is a
+ * placement, and lands at the nearest detent. Longer than a frame or two, so
+ * the gap between the last move of a real throw and its pointerup never trips it.
+ */
+const STILL_MS = 80;
+
 /** Two detents closer together than this are one detent. */
 const DISTINCT = 24;
 
@@ -501,9 +514,12 @@ export function createSheet({ el, grip, enabled, onSettle, reserve }) {
       return;
     }
 
+    // How fast it was going when it was let go, which is nothing if the finger
+    // had stopped. See STILL_MS.
+    const still = event.timeStamp - done.at > STILL_MS;
     const height = snapTo({
       height: released,
-      velocity: done.velocity,
+      velocity: still ? 0 : done.velocity,
       detents: stops(done.heights),
       from: done.h0,
     });

@@ -220,7 +220,7 @@ function fakeSheet({ scrolled = 0, detent = 'full', height = '568px' } = {}) {
     pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0,
     clientX: 195, clientY: 400, timeStamp: 0, target,
   });
-  return { el, grip, gripNode, press, captured };
+  return { el, grip, gripNode, press, captured, listeners };
 }
 
 /** Run `body` with a phone-sized `window`, then put back whatever was there. */
@@ -270,4 +270,42 @@ test('a press on the grabber takes the pointer at once', () => onPhone(() => {
   // and capturing it would take it from whatever it landed on.
   press({});
   assert.deepEqual(captured, [7]);
+}));
+
+/** A finger on the grabber: down at `y0`, then moves of `step` px every 16ms. */
+function drag({ listeners, gripNode }, { y0, moves, step }) {
+  const at = (clientY, timeStamp) => ({
+    pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0,
+    clientX: 195, clientY, timeStamp, target: gripNode,
+  });
+  listeners.pointerdown(at(y0, 0));
+  let y = y0;
+  let t = 0;
+  for (let i = 0; i < moves; i += 1) {
+    y += step;
+    t += 16;
+    listeners.pointermove(at(y, t));
+  }
+  return { release: (after) => listeners.pointerup(at(y, t + after)) };
+}
+
+test('a drag that stops before it is let go lands where it stopped', () => onPhone(() => {
+  // Detents 131 / 332 / 568. Six fast moves up to 281px, then the finger is
+  // held still for a second and a half — which sends no moves at all — and
+  // lifted. 281 is nearest half; the stale speed of the last move used to be
+  // projected as if it had just been thrown, and the sheet went to full.
+  const fake = fakeSheet({ detent: 'rest', height: '' });
+  const settled = [];
+  createSheet({ el: fake.el, grip: fake.grip, enabled: () => true, onSettle: (n) => settled.push(n) });
+  drag(fake, { y0: 600, moves: 6, step: -25 }).release(1500);
+  assert.deepEqual(settled, ['half'], 'a held drag was thrown past where it stopped');
+  assert.equal(fake.el.style.height, '332px');
+}));
+
+test('the same drag let go at speed is still a throw', () => onPhone(() => {
+  const fake = fakeSheet({ detent: 'rest', height: '' });
+  const settled = [];
+  createSheet({ el: fake.el, grip: fake.grip, enabled: () => true, onSettle: (n) => settled.push(n) });
+  drag(fake, { y0: 600, moves: 6, step: -25 }).release(8);
+  assert.deepEqual(settled, ['full']);
 }));
