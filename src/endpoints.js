@@ -41,6 +41,11 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
  * @param {object} deps  every collaborator, named for what it does
  * @param {() => object|null} deps.geolocateControl  a GETTER: the control is
  *        built on map load, long after this is
+ * @param {(colour: string, title: string, at: number[]) => object} [deps.plantPin]
+ *        puts one of the route's two pins on the map and returns the marker.
+ *        Mapbox's by default; a seam because a Marker wants a whole browser
+ *        under it, and the sequencing these pins take part in is exactly what
+ *        test/endpoints-reroute.test.js has to drive end to end.
  */
 export function createEndpoints({
   map,
@@ -58,6 +63,13 @@ export function createEndpoints({
   clearSelection,
   clearSearchField,
   startLocating,
+  plantPin = (colour, title, at) => new mapboxgl.Marker({
+    element: routePin(colour, { title }),
+    anchor: 'bottom',
+    offset: liftedOffset(ROUTE_PIN_W),
+  })
+    .setLngLat(at)
+    .addTo(map),
 }) {
   const { setStatus, setBusy, setRouteSummary, setNavButtonsEnabled, setIdleStatus } = status;
   const { startCoordText, endCoordText } = ui;
@@ -330,13 +342,7 @@ export function createEndpoints({
     // than replacing it with a GPS fix. See startIsMine.
     startIsMine = false;
     startMarker?.remove();
-    startMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_GREEN, { title: 'Start' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords)
-      .addTo(map);
+    startMarker = plantPin(GOOGLE_GREEN, 'Start', coords);
     startCoordText.value = label ?? coordLabel(coords);
     return true;
   }
@@ -367,13 +373,7 @@ export function createEndpoints({
     panel.show();
     endPoint = point(coords);
     endMarker?.remove();
-    endMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Destination' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords)
-      .addTo(map);
+    endMarker = plantPin(GOOGLE_RED, 'Destination', coords);
     endCoordText.value = label ?? coordLabel(coords);
     setStatus('Calculating route…');
 
@@ -490,12 +490,7 @@ export function createEndpoints({
     });
     pendingEnd = { coords, name };
     endMarker?.remove();
-    endMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Destination' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords).addTo(map);
+    endMarker = plantPin(GOOGLE_RED, 'Destination', coords);
     endCoordText.value = name ?? coordLabel(coords);
   }
 
