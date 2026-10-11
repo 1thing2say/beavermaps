@@ -352,7 +352,10 @@ async function mintSession(key, mapType, theme, skin, timeoutMs) {
   // API in the console" and a blank grey rectangle.
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(payload?.error?.message ?? `createSession failed (HTTP ${response.status})`);
+    const error = new Error(payload?.error?.message ?? `createSession failed (HTTP ${response.status})`);
+    // Kept so a refusal can be told from a failure. See isRefusal.
+    error.status = response.status;
+    throw error;
   }
   if (!payload?.session) throw new Error('createSession returned no session token');
   return payload;
@@ -446,6 +449,23 @@ async function fetchAttribution(key, token, [[west, south], [east, north]], zoom
 }
 
 /**
+ * Whether a rejection from googleGround is Google saying no, rather than the
+ * request failing to get an answer.
+ *
+ * The difference is whether falling back to Mapbox is remembered past this
+ * page (see `revert` in src/provider.js). A missing key, and a 4xx — key
+ * invalid, API not enabled, referrer not allowed — will be the same on the
+ * next load. A fetch that threw (offline, DNS, a reset connection), a 5xx, a
+ * 408 or a 429 will not; nor will a 200 that was not Google's, which is what
+ * "returned no session token" usually is: a captive portal's sign-in page.
+ */
+export function isRefusal(error) {
+  if (error?.refused) return true;
+  const status = error?.status;
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/**
  * Everything `map.addSource` needs for a Google raster basemap.
  *
  * Rejects with Google's own message when the key, the project or the referrer
@@ -463,7 +483,10 @@ async function fetchAttribution(key, token, [[west, south], [east, north]], zoom
 export async function googleGround({
   key, basemap, theme, skin, bounds, timeoutMs = GOOGLE_TIMEOUT_MS,
 }) {
-  if (!key) throw new Error('No Google Maps API key — set VITE_GOOGLE_MAPS_KEY in .env');
+  if (!key) {
+    throw Object.assign(new Error('No Google Maps API key — set VITE_GOOGLE_MAPS_KEY in .env'),
+      { refused: true });
+  }
 
   const mapType = GOOGLE_MAP_TYPE[basemap] ?? GOOGLE_MAP_TYPE.map;
   const id = sessionId(mapType, theme, skin);

@@ -15,7 +15,7 @@
 // the page changes a token's URL restrictions, so a second telling would be a
 // second telling of something they already know.
 
-import { googleGround } from './google-tiles.js';
+import { googleGround, isRefusal } from './google-tiles.js';
 import { mapboxRefusal, MAPBOX_HOST } from './basemap-problem.js';
 import { styleKey } from './palette.js';
 import { CAMPUS_BOUNDS } from './campus-bounds.js';
@@ -187,7 +187,9 @@ export function createGround({
       setNotice(`Google basemap unavailable: ${error.message}`);
       if (generation !== groundGeneration) return;
       setProvider('mapbox');
-      providerControl()?.revert();
+      // Remembered past this page only when Google refused, so one dropped
+      // connection does not opt the visitor out of Google's ground for good.
+      providerControl()?.revert({ persist: isRefusal(error) });
       syncBasemapStyle();
     } finally {
       // `revert()` above already repainted the buttons, and `busy(false)` calls
