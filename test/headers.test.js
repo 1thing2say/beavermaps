@@ -62,7 +62,11 @@ test('every https host the front-end names is allowed to be fetched', () => {
   const hosts = new Set();
   for (const name of readdirSync(srcDir).filter((f) => f.endsWith('.js'))) {
     const code = readFileSync(path.join(srcDir, name), 'utf8');
-    for (const [, host] of code.matchAll(/['"`]https:\/\/([a-z0-9.-]+)/gi)) hosts.add(host);
+    // A link's href is not a fetch: the browser only ever navigates to it, on
+    // a click, and no CSP directive here governs that. route-layers.js names
+    // OpenStreetMap's copyright page that way, in the credit it adds under
+    // Google, and connect-src has no business listing it.
+    for (const [, host] of code.matchAll(/(?<!href=)['"`]https:\/\/([a-z0-9.-]+)/gi)) hosts.add(host);
     // basemap-problem.js names Mapbox's API host bare, to compare against.
     for (const [, host] of code.matchAll(/['"`]((?:api|events)\.mapbox\.com)['"`]/g)) hosts.add(host);
   }
