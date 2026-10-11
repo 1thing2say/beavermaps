@@ -29,7 +29,7 @@
 // `makeUserDot` is what lets test/navigation.test.js walk a whole simulated
 // route and check the dot went with it.
 
-import { point } from '@turf/helpers';
+import { point, lineString } from '@turf/helpers';
 import { nearestPointOnLine } from '@turf/nearest-point-on-line';
 import { along } from '@turf/along';
 import { bearing } from '@turf/bearing';
@@ -51,6 +51,29 @@ export const MIN_AIM_KM = 8 / FEET_PER_KM;
 // Must match --banner-swap in input.css: it is how long both signs are on
 // screen together before the outgoing one is removed from the DOM.
 export const BANNER_SWAP_MS = 320;
+
+// How a GPS fix becomes progress along the route. See `track`, which is the
+// only reader of all seven, for why each one is what it is.
+//
+// A fix whose own accuracy circle is wider than this is not used for progress
+// at all: 35 m is wider than most of the campus's walkways are apart, so a fix
+// that vague cannot say which one you are on.
+export const MAX_ACCURACY_M = 35;
+// The window a fix is snapped inside, around where you were last: a little way
+// back, so standing still in noise does not ratchet you forward, and further
+// ahead, so a brisk walk between two fixes is not clipped. The lead widens with
+// a poor fix, which is a fix that could honestly be further on.
+export const SNAP_BEHIND_M = 30;
+export const SNAP_AHEAD_M = 60;
+// A fix outside the window is only believed once this many in a row agree, and
+// only when the window's own best fit is at least this poor — a fix that sits
+// nicely on the stretch you are walking has no reason to be read as anywhere else.
+export const JUMP_FIXES = 3;
+export const JUMP_MISS_M = 25;
+// Further than this from every part of the line, this many fixes running, and
+// you have left the route rather than wobbled off it.
+export const OFF_ROUTE_M = 40;
+export const OFF_ROUTE_FIXES = 3;
 
 /**
  * @param {object} deps
@@ -80,6 +103,19 @@ export function createNavigation({
   let lastBearing = 0;
   let userMarker = null;
 
+  // Progress, as `track` keeps it. `lastAlong` is how far along the route the
+  // last believed fix put the walker, in km; `jump` is a run of fixes that all
+  // say you are somewhere outside the window, waiting to be agreed with; the
+  // other two count fixes that are nowhere near the line.
+  let lastAlong = 0;
+  let jump = null;
+  let offRouteFixes = 0;
+  let offRoute = false;
+  // Set when the live sign has been written over by the off-route warning and
+  // has to be painted whole the next time it is painted at all — the countdown
+  // between turns only ever touches the distance.
+  let signStale = false;
+
   let simTimer = null;
   let simAlong = 0;
 
@@ -96,6 +132,11 @@ export function createNavigation({
 
     active = true;
     stepIndex = 0;
+    lastAlong = 0;
+    jump = null;
+    offRouteFixes = 0;
+    offRoute = false;
+    signStale = false;
     resetBannerAnimation();
     buildings.add();
     // The legend goes with the rest of the chrome here, and an outline with
@@ -161,18 +202,151 @@ export function createNavigation({
   /**
    * Fold a new position into the navigation state. Position is snapped onto the
    * route line rather than to a network vertex — snapping to vertices would
-   * make the dot jump between path endpoints instead of sliding along.
+   * make the dot jump between path endpoints instead of sliding along. Where
+   * on the line, and whether the fix is believed at all, is `track`'s call.
+   *
+   * `accuracy` is the fix's own radius in metres, as the Geolocation API gives
+   * it. Left out it means exact, which is what the simulator's positions are:
+   * they were taken off the line in the first place.
    */
-  function moved(coords, { duration = SIM_TICK_MS } = {}) {
+  function moved(coords, { duration = SIM_TICK_MS, accuracy = 0 } = {}) {
     if (!active || !route.isWalkable) return;
 
-    const snapped = nearestPointOnLine(route.line, point(coords));
-    const distanceAlong = snapped.properties.location;  // km travelled so far
-    const here = snapped.geometry.coordinates;
+    const accuracyM = Number.isFinite(accuracy) && accuracy > 0 ? accuracy : 0;
+    // Too vague to say where on the route you are, so it says nothing. The
+    // blue dot still moves — it is the locate control's, drawn from the fix
+    // itself rather than from here — and the next good fix carries on from
+    // the last believed one.
+    if (accuracyM > MAX_ACCURACY_M) return;
 
+    const fix = track(point(coords), accuracyM);
+    if (fix.offRoute) {
+      warnOffRoute(fix.missM);
+      // Follow the walker, not the line they have left: a camera parked on
+      // the route would watch the blue dot walk off the edge of the screen.
+      ease(coords, duration);
+      return;
+    }
+    if (!fix.snapped) return;
+
+    const { distanceAlong, here } = fix.snapped;   // km travelled so far
     advanceSteps(distanceAlong);
     renderBanner(distanceAlong);
     moveCamera(here, distanceAlong, duration);
+  }
+
+  /**
+   * Where on the route a fix puts you — or that it puts you nowhere yet.
+   *
+   * THIS USED TO BE ONE CALL: the nearest point on the whole line, taken as
+   * gospel. On a walk that doubles back — out along one side of a quad and home
+   * along the other, twenty metres apart — a fix ten metres the wrong way at
+   * the start is nearer the return leg than the outbound one, and the nearest
+   * point is then most of the way to the door. `advanceSteps` only ever counts
+   * up, so every corner in between was retired for good, and a phone held
+   * still at the start could read "Arrived". Campus GPS between buildings is
+   * out by that much routinely.
+   *
+   * So a fix is snapped inside a WINDOW around where you were last — a little
+   * behind, further ahead — rather than to the whole line. Progress can still
+   * slide back a few steps in noise and can still be wrong for a fix, but it
+   * cannot leap to a part of the route you have not walked to. The Geolocation
+   * API's own accuracy is what sizes it: a vague fix is not used at all (see
+   * `moved`), and a merely poor one widens the window ahead.
+   *
+   * A REAL LEAP still happens — the radio lost under a roof for a minute, or a
+   * shortcut across a lawn — and the window alone would hold you at its edge
+   * for ever. It is believed when the window's best fit is poor, the whole
+   * line has a better one outside it, and JUMP_FIXES fixes in a row agree on
+   * roughly where. Until then the fix moves nothing: one bad fix is not a
+   * reason to move, let alone to move sixty metres toward it.
+   *
+   * And a fix that is nowhere near ANY of the line, OFF_ROUTE_FIXES times
+   * running, is a walker who has left the route; the sign says so rather than
+   * counting down to a corner they are not walking toward.
+   */
+  function track(fix, accuracyM) {
+    const whole = nearestPointOnLine(route.line, fix);
+    const missM = whole.properties.dist * 1000;
+
+    if (missM > Math.max(OFF_ROUTE_M, accuracyM)) {
+      jump = null;
+      offRouteFixes++;
+      if (offRouteFixes >= OFF_ROUTE_FIXES) offRoute = true;
+      return { offRoute, missM, snapped: null };
+    }
+    offRouteFixes = 0;
+    if (offRoute) {
+      offRoute = false;
+      signStale = true;
+    }
+
+    const lo = Math.max(0, lastAlong - SNAP_BEHIND_M / 1000);
+    const hi = Math.min(route.totalKm, lastAlong + Math.max(SNAP_AHEAD_M, 2 * accuracyM) / 1000);
+    const near = snapBetween(fix, lo, hi);
+    const wholeKm = whole.properties.location;
+
+    const outside = wholeKm < lo || wholeKm > hi;
+    if (outside && near.dist * 1000 > Math.max(JUMP_MISS_M, accuracyM)) {
+      // Agreement is "about the same place", not the same metre: fixes a few
+      // strides apart while you walk are making the same claim.
+      const agreeKm = Math.max(SNAP_AHEAD_M, 2 * accuracyM) / 1000;
+      const count = jump && Math.abs(wholeKm - jump.km) <= agreeKm ? jump.count + 1 : 1;
+      jump = { km: wholeKm, count };
+      if (count < JUMP_FIXES) return { offRoute: false, snapped: null };
+
+      jump = null;
+      lastAlong = wholeKm;
+      // A leap BACK has to give back the corners it passed, or the sign would
+      // keep pointing at one you are now behind. Counting up again from the
+      // start gives the same answer as before for a leap forward.
+      stepIndex = 0;
+      return { offRoute: false, snapped: { distanceAlong: wholeKm, here: whole.geometry.coordinates } };
+    }
+
+    jump = null;
+    lastAlong = near.location;
+    return { offRoute: false, snapped: { distanceAlong: near.location, here: near.here } };
+  }
+
+  /**
+   * The nearest point to `fix` on the part of the route between `lo` and `hi`
+   * km along it, with `location` measured from the start of the whole route.
+   *
+   * Cut by hand from `route.cumulative` rather than with @turf/line-slice-along,
+   * which would be a dependency for a dozen lines: `along` gives the two cut
+   * ends, and every vertex strictly between them is kept as it is.
+   */
+  function snapBetween(fix, lo, hi) {
+    const { coords, cumulative } = route;
+    const piece = [along(route.line, lo).geometry.coordinates];
+    for (let i = 0; i < coords.length; i++) {
+      if (cumulative[i] > lo && cumulative[i] < hi) piece.push(coords[i]);
+    }
+    piece.push(along(route.line, hi).geometry.coordinates);
+
+    const snapped = nearestPointOnLine(lineString(piece), fix);
+    return {
+      location: Math.min(hi, lo + snapped.properties.location),
+      dist: snapped.properties.dist,
+      here: snapped.geometry.coordinates,
+    };
+  }
+
+  /**
+   * Off the route: the live sign says so, and how far away the line is.
+   *
+   * Painted over the sign that is up rather than swapped in as a step of its
+   * own — this is not a maneuver, and the corner you were walking toward is
+   * still the corner once you are back. `signStale` makes sure the next paint
+   * puts it back whole.
+   */
+  function warnOffRoute(missM) {
+    if (!liveCard) return;
+    signStale = true;
+    liveCard.arrow.innerHTML = maneuverIcon('uturn');
+    liveCard.distance.textContent = niceFeet((missM / 1000) * FEET_PER_KM);
+    liveCard.instruction.textContent = 'Head back to the route';
   }
 
   /** Retire every maneuver we have already walked past. */
@@ -267,7 +441,13 @@ export function createNavigation({
     if (stepIndex !== renderedStep) {
       const isFirst = renderedStep === -1;
       renderedStep = stepIndex;
+      signStale = false;          // the new sign is painted whole anyway
       swapStep(step, feetToStep, arrived, isFirst);
+    } else if (liveCard && signStale) {
+      // The off-route warning wrote over the sign, and you are back: take it
+      // down whole, mid-swap or not — it went up without waiting either.
+      paintStep(liveCard, step, feetToStep, arrived);
+      signStale = false;
     } else if (!bannerBusy && liveCard) {
       // Between turns only the countdown moves — never re-run the animation.
       if (arrived) paintStep(liveCard, step, feetToStep, true);
@@ -292,6 +472,11 @@ export function createNavigation({
       lastBearing = bearing(point(here), ahead);
     }
 
+    ease(here, duration);
+  }
+
+  /** The walking camera: centred on `here`, facing the last good bearing. */
+  function ease(here, duration) {
     map.easeTo({
       center: here,
       zoom: 18.5,
@@ -372,6 +557,12 @@ export function createNavigation({
      * inside one tick when it is, so the caller shortens it.
      */
     isSimulating: () => simTimer !== null,
+    /**
+     * Whether the last OFF_ROUTE_FIXES fixes were all nowhere near the line.
+     * Nothing reroutes on it yet; the sign says so, and this is the question a
+     * reroute would ask.
+     */
+    isOffRoute: () => offRoute,
     /** Exposed for tests only — which maneuver the banner is counting down to. */
     stepIndex: () => stepIndex,
     aimKm,

@@ -57,6 +57,7 @@ import { createEndpoints, GOOGLE_RED } from './endpoints.js';
 import { createSearchBox } from './search-box.js';
 import { createLocate } from './locate.js';
 import { createShell } from './shell.js';
+import { createHardwareBack } from './hardware-back.js';
 import { createDebugFlags } from './debug-apply.js';
 import { createPanels } from './panels.js';
 import { spin } from './spinner.js';
@@ -794,9 +795,10 @@ function startApp() {
     panels: { placePanel, categoryPanel, sidePanel, legendPanel },
     isPhone: () => phone.matches,
     onSettle: () => revealPoint(camera.focus()),
-    // What going BACK from each panel does — Escape, today — and it is the
-    // same thing the panel's own × does in every case, so the two ways out of
-    // a panel cannot leave the map in two different states. They were not
+    // What going BACK from each panel does — Escape, and the phone's own Back
+    // (see createHardwareBack below) — and it is the same thing the panel's
+    // own × does in every case, so the ways out of a panel cannot leave the
+    // map in different states. They were not
     // quite: this closed a place card without putting its pin down, and hid the
     // route panel with the ribbon still across the campus.
     dismiss: {
@@ -808,6 +810,11 @@ function startApp() {
   });
   const sheet = shell.sheet;
   const refitSheet = () => shell.refit();
+
+  // The phone's own Back is the third way back, after the × and Escape, and
+  // walks the same stack: close what is in front, rather than leave the app
+  // with it open. One history entry while anything is open; src/hardware-back.js.
+  createHardwareBack({ stack: shell.stack });
 
   window.addEventListener('resize', refitSheet);
   shell.viewport?.addEventListener('resize', refitSheet);
@@ -1424,8 +1431,14 @@ function startApp() {
       // has to finish inside one tick. At a second apiece every fix would
       // interrupt the last and the dot would slide along a route the camera
       // never catches up with.
-      nav.moved([e.coords.longitude, e.coords.latitude],
-        { duration: nav.isSimulating() ? SIM_TICK_MS : 1000 });
+      //
+      // The fix's own accuracy goes with it: navigation will not let a fix
+      // vaguer than the gap between two walkways move you along the route.
+      // See `track` in src/navigation.js.
+      nav.moved([e.coords.longitude, e.coords.latitude], {
+        duration: nav.isSimulating() ? SIM_TICK_MS : 1000,
+        accuracy: e.coords.accuracy,
+      });
     });
 
     // What `locating` is kept in step with — see startLocating for why guessing
