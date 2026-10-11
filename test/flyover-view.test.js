@@ -4,8 +4,9 @@
 // billing decision; see the top of that file). Every failure here was the price
 // of that sharing going unhandled: a renderer that never got a WebGL context, or
 // lost the one it had, left every later card blank; a root that failed once was
-// never asked for again; a render loop kept ticking after the card closed; and
-// the pin dropped on the first coarse tile rather than on the roof.
+// never asked for again; a session that ran out was never renewed; a render
+// loop kept ticking after the card closed; and the pin dropped on the first
+// coarse tile rather than on the roof.
 //
 // The module imports a stylesheet (through src/spinner.js) and deck.gl, neither
 // of which node can load, so both are swapped for fakes at resolve time. The
@@ -147,6 +148,7 @@ const errors = [];
 console.error = (...args) => errors.push(args);
 
 const realFetch = globalThis.fetch;
+const realNow = Date.now;
 const { createFlyover } = await import('../src/flyover-view.js');
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -174,8 +176,6 @@ const respond = (status, body = {}) => async () => new Response(JSON.stringify(b
 // ---------------------------------------------------------------------------
 // The tests, in tab order
 // ---------------------------------------------------------------------------
-
-
 
 test('a Deck that never gets a WebGL context fails the card instead of spinning', async () => {
   // What luma does: the device is created asynchronously, its failure goes to
@@ -264,6 +264,15 @@ test('a coarse tile arriving does not drop the pin; the roof\'s own tile does', 
   card.destroy();
 });
 
+test('tiles that keep failing before the roof arrives end the wait', async () => {
+  const card = await open();
+  for (let i = 0; i < 4; i += 1) latestTiles().props.onTileError();
+  assert.ok(!failed(card), 'one blip is not the end of the picture');
+  latestTiles().props.onTileError();
+  assert.ok(failed(card));
+  card.destroy();
+});
+
 test('a root that cannot be fetched is asked for again on the next card', async () => {
   const card = await open();
   const firstId = latestTiles().id;
@@ -293,8 +302,42 @@ test('a busy Google is asked again on the next card', async () => {
   card.destroy();
 });
 
-// LAST, because it is the answer for the rest of the tab.
+test('a session three hours old is renewed on the next card', async () => {
+  let card = await open();
+  const id = latestTiles().id;
+  latestTiles().props.onTilesetLoad({});
+  card.destroy();
 
+  card = await open();
+  assert.equal(latestTiles().id, id, 'a fresh session is kept');
+  card.destroy();
+
+  Date.now = () => realNow() + 3 * 3600 * 1000;
+  try {
+    card = await open();
+  } finally {
+    Date.now = realNow;
+  }
+  assert.notEqual(latestTiles().id, id, 'an expired one is not');
+  card.destroy();
+});
+
+test('a child tile refused for its session renews it on the next card', async () => {
+  let card = await open();
+  const id = latestTiles().id;
+  globalThis.fetch = respond(403);
+  await latestTiles().props.loadOptions.fetch(
+    'https://tile.googleapis.com/v1/3dtiles/datasets/x/files/y.glb?session=abc',
+  );
+  globalThis.fetch = realFetch;
+  assert.ok(!failed(card), 'this card keeps what it has');
+  card.destroy();
+  card = await open();
+  assert.notEqual(latestTiles().id, id);
+  card.destroy();
+});
+
+// LAST, because it is the answer for the rest of the tab.
 test('a refused key is the answer for the tab, and is not asked for again', async () => {
   let card = await open();
   const id = latestTiles().id;

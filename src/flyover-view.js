@@ -246,6 +246,30 @@ const GRID_CELLS = 24;
  */
 const GRID_DEPTH_M = -8;
 
+/**
+ * How long one root's session is trusted for, in ms.
+ *
+ * Google's 3D Tiles session runs out three hours after the root that minted it:
+ * every child URI carries that `session` parameter, and past the three hours
+ * each one is refused. The root is fetched once per tab by design (see the top
+ * of this file), so a tab left open over lunch — a phone resumed in the
+ * afternoon, a kiosk — went on asking with a dead session, every new tile
+ * failed, and loaders.gl marks a failed tile FAILED and never asks for it
+ * again. Ten minutes short of the three hours, so a card opened just before the
+ * limit is not left to run into it, and about one billable root per three hours
+ * of actual use.
+ */
+const SESSION_MS = (3 * 60 - 10) * 60 * 1000;
+
+/**
+ * How many tiles may fail before a card that still has no roof says so.
+ *
+ * A failed tile is never retried, so past a handful of them the roof is not
+ * coming and the spinner — or a pin that never drops — is a wait for nothing.
+ * Enough that one blip on a flaky connection does not cost the picture.
+ */
+const TILE_FAILURES = 5;
+
 /** Google requires attribution and it is per-tile. Shown until tiles say more. */
 const FALLBACK_CREDIT = 'Google';
 
@@ -324,6 +348,11 @@ function keyedFetch(key) {
         stage.onRefused?.('Aerial view unavailable. Check your connection.');
       }
       throw error;
+    }
+    // A child tile refused for its session — see SESSION_MS. Marked rather than
+    // acted on: this card keeps what it has, and the next one starts afresh.
+    if ([400, 401, 403].includes(response.status) && target.searchParams.has('session')) {
+      stage.sessionStale = true;
     }
     // THE ONE REQUEST WHOSE REFUSAL IS THE WHOLE ANSWER, and nothing else was
     // listening for it. deck.gl's Tile3DLayer loads the root itself and does
@@ -526,6 +555,8 @@ const stage = {
   onReady: null,
   /** ...a tile arrived, so the credit line may have more to say. */
   onCredits: null,
+  /** ...a tile did not. Counted by the card; see TILE_FAILURES. */
+  onTileFailed: null,
   /** ...and the same for a tileset Google refused. See keyedFetch. */
   onRefused: null,
   /** ...and for a renderer that could not start or has lost its context. */
@@ -549,6 +580,10 @@ const stage = {
   rootFailed: false,
   /** What the failed root threw, so its unhandled rejection can be recognised. */
   rootError: null,
+  /** When the current root loaded, for SESSION_MS. 0 until it has. */
+  rootAt: 0,
+  /** A child tile was refused for its session. See SESSION_MS. */
+  sessionStale: false,
   /**
    * Google's sentence, once the root has been refused.
    *
@@ -692,9 +727,10 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
     // `_loadTileset` when `props.data` actually changes — so every subsequent
     // building reuses the tree that is already in memory, and pays nothing.
     //
-    // EXCEPT WHEN THE ROOT HAS TO BE ASKED FOR AGAIN, because it failed,
-    // which is what a new id is for. deck.gl finalizes the old layer and its
-    // tileset and the new one loads from scratch. See `tilesId`.
+    // EXCEPT WHEN THE ROOT HAS TO BE ASKED FOR AGAIN — it failed, or its
+    // session ran out — which is what a new id is for. deck.gl finalizes the
+    // old layer and its tileset and the new one loads from scratch. See
+    // `tilesId`.
     id: tilesId(),
     data: TILESET,
     loader: Tiles3DLoader,
@@ -814,13 +850,17 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
       // the roof is there.
       stage.onCredits?.();
     },
-    onTileError: () => {},
+    // Counted rather than swallowed. A failed tile is never asked for again, so
+    // a card waiting on one waits for ever without this. See TILE_FAILURES.
+    onTileError: () => stage.onTileFailed?.(),
     // The one moment the tileset exists and nothing has traversed it yet. Fires
     // once for the tab, because `_loadTileset` runs once — see the note on `id`
     // above. This is where MAX_GPU_MB has to be applied to bite; the option of
     // the same name does nothing.
     onTilesetLoad: (tileset) => {
       tileset.maximumMemoryUsage = MAX_GPU_MB;
+      // The session's clock starts here. See SESSION_MS.
+      stage.rootAt = Date.now();
     },
     // The perimeter, pushed down onto the layers that actually draw glTF.
     // Tile3DLayer is a composite and renders one ScenegraphLayer per tile, so
@@ -929,6 +969,7 @@ function discardStage() {
   stage.host = null;
   stage.canvas = null;
   stage.broken = false;
+  stage.rootAt = 0;
 }
 
 /**
@@ -1094,6 +1135,8 @@ export function createFlyover({
   let dead = false;
   /** Whether this card has given up and said so. The orbit stops with it. */
   let failed = false;
+  /** Tiles this card has seen fail. See TILE_FAILURES. */
+  let tileFailures = 0;
 
   function fail(message) {
     if (dead || failed) return;
@@ -1122,6 +1165,7 @@ export function createFlyover({
       stage.owner = null;
       stage.onReady = null;
       stage.onCredits = null;
+      stage.onTileFailed = null;
       stage.onRefused = null;
       stage.onFailed = null;
       // Off between cards. The one Deck is kept for the tab, and its render
@@ -1201,10 +1245,14 @@ export function createFlyover({
     // A renderer that failed is not handed to another card. See `broken`.
     if (stage.broken) discardStage();
     // A root worth asking for again: one that failed for want of a network or
-    // of a quiet minute at Google. A new layer id is what makes deck.gl ask.
-    if (stage.rootFailed) {
+    // of a quiet minute at Google, or one whose session has run out or been
+    // refused. A new layer id is what makes deck.gl ask. See SESSION_MS.
+    const expired = stage.rootAt && Date.now() - stage.rootAt > SESSION_MS;
+    if (stage.rootFailed || stage.sessionStale || expired) {
       stage.generation += 1;
       stage.rootFailed = false;
+      stage.sessionStale = false;
+      stage.rootAt = 0;
     }
 
     stage.maxTileSpan = maxTileSpan ?? 0;
@@ -1268,6 +1316,11 @@ export function createFlyover({
       // geometry out of it, and is checked per frame because it becomes true
       // between frames rather than in any callback.
       roofReady = true;
+    };
+    stage.onTileFailed = () => {
+      if (dead || roofReady) return;
+      tileFailures += 1;
+      if (tileFailures >= TILE_FAILURES) fail('Aerial view unavailable');
     };
 
     /**
