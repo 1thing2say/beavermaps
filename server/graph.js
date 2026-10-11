@@ -413,6 +413,16 @@ export function createGraph({
    * nearest, unless its straight leg crosses a building. See OPEN_GROUND_M,
    * and `wider()` below.
    *
+   * NONE OF THEM THROUGH A BUILDING. The leg to a way on is drawn dotted and
+   * walked straight, and a wall is no more something to walk across from the
+   * slack or the kerb than from open ground. Only the open-ground ways used to
+   * be asked, and from 4 m outside a wall a walk to the Library took a slack
+   * way on 32.5 m off, 20 m of it through the STEM Innovation Center, over
+   * one 30.1 m off that crossed nothing. So a slack or streetside way on whose
+   * leg crosses a building is not offered, and the nearest join, which has to
+   * stay first, is marked `walled` when its leg does: route() walks from it
+   * only when nothing clear is offered.
+   *
    * Inside a building that has doors, the answer may instead be its doors;
    * see doorFor(). The doors are the only entries then — they stand for the
    * approach paths the building used to have, which are the ways in that were
@@ -487,6 +497,11 @@ export function createGraph({
     // curving past at 32 to 36 m is one way onto the network, not twenty, and
     // the rest of its vertices are reached along it.
     const found = [entry(coord, best)];
+    // The nearest join stays first whatever its leg crosses — it is where the
+    // point is, for snap(), the reach check and the same-place test — but a
+    // leg through a building is marked, and route() walks from it only when
+    // nothing else is offered. See `usable` there.
+    if (throughBuilding(coord, found[0].coord)) found[0].walled = true;
     const seen = new Set([coordKey(found[0].coord)]);
     const reach = (nearest + Math.min(SNAP_SLACK_M, nearest * SNAP_SLACK_SHARE)) ** 2;
     const corner = (key) => incident.get(key).every((seg) => {
@@ -508,7 +523,7 @@ export function createGraph({
         continue;
       }
       const option = entry(coord, { seg, ...r });
-      if (seen.has(coordKey(option.coord))) continue;
+      if (seen.has(coordKey(option.coord)) || throughBuilding(coord, option.coord)) continue;
       seen.add(coordKey(option.coord));
       found.push(option);
     }
@@ -530,7 +545,7 @@ export function createGraph({
     if (!best.seg.campus && campusBest && (onCampus || (campusBest.d2 <= STREETSIDE_M ** 2
       && best.fx * campusBest.fx + best.fy * campusBest.fy < 0))) {
       const option = entry(coord, campusBest);
-      if (!seen.has(coordKey(option.coord))) {
+      if (!seen.has(coordKey(option.coord)) && !throughBuilding(coord, option.coord)) {
         seen.add(coordKey(option.coord));
         found.push(option);
       }
@@ -1050,7 +1065,13 @@ export function createGraph({
       };
     }
 
-    let walk = search(starts, ends);
+    // A way on whose leg runs through a building (`walled`, see candidates())
+    // is walked from only where it is all there is: the nearest join is kept
+    // first for the checks above, and a point with nothing clear in reach still
+    // needs some way onto the network.
+    const usable = (list) => (list.some((x) => !x.walled) ? list.filter((x) => !x.walled) : list);
+
+    let walk = search(usable(starts), usable(ends));
     if (!walk.found) return { ok: false, reason: 'no-path', error: 'no path found on the network' };
 
     // A DETOUR IS ASKED AGAIN, WIDER: see DETOUR_SHARE. Only where the wider
@@ -1061,7 +1082,7 @@ export function createGraph({
     if (walk.total > DETOUR_SHARE * distance(point(from), point(to)) && (starts.wider || ends.wider)) {
       const [ons, offs] = [starts.wider?.() ?? starts, ends.wider?.() ?? ends];
       if (ons.length > starts.length || offs.length > ends.length) {
-        const wider = search(ons, offs, walk.total);
+        const wider = search(usable(ons), usable(offs), walk.total);
         walk = { ...(wider.found ? wider : walk), across: Math.min(walk.across, wider.across) };
       }
     }

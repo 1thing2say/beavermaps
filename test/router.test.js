@@ -622,16 +622,18 @@ test('a point on open ground beside a path that leads the long way round may cro
   }
 });
 
+// Every building's outline, and whether the straight line p-q crosses one.
+const footprints = load('buildings').features.map((f) => f.geometry.coordinates[0]);
+const side = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+const crosses = (p, q, ring) => ring.some((a, k) => {
+  const b = ring[(k + 1) % ring.length];
+  return side(p, q, a) !== side(p, q, b) && side(a, b, p) !== side(a, b, q);
+});
+
 test('the way onto the network from open ground never runs through a building', () => {
   // The leg from a point to where it joins the network is drawn straight and
   // walked across whatever is there. A wall is not something to walk across,
   // so an open-ground way whose leg would cross a footprint is not offered.
-  const footprints = load('buildings').features.map((f) => f.geometry.coordinates[0]);
-  const side = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
-  const crosses = (p, q, ring) => ring.some((a, k) => {
-    const b = ring[(k + 1) % ring.length];
-    return side(p, q, a) !== side(p, q, b) && side(a, b, p) !== side(a, b, q);
-  });
   let seed = 7;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   const [west, south, east, north] = [-121.3504, 38.6448, -121.3424, 38.6535];
@@ -653,6 +655,26 @@ test('the way onto the network from open ground never runs through a building', 
     }
   }
   assert.ok(far > 10, `test premise: only ${far} walks joined the network beyond the slack`);
+});
+
+test('the way onto the network from beside a wall never runs through a building either', () => {
+  // Only the open-ground ways used to be asked. The nearest join, every way
+  // on within the slack and the campus edge offered from the kerb were not,
+  // and route() chose freely among them. 4 m outside a wall:
+  //   - to the Library, a slack way on 32.5 m off with 20 m of it through the
+  //     STEM Innovation Center, over one 30.1 m off that crossed nothing;
+  //   - a nearest join 39.8 m off, 28.4 m of it through the Pool.
+  const library = load('directory').features.find((f) => f.properties.name === 'Library').properties.entrance;
+  for (const [from, ft] of [[[-121.3484687, 38.6503222], 320], [[-121.3460087, 38.6496456], null]]) {
+    const result = graph.route(from, library);
+    assert.ok(result.ok, `refused: ${result.error}`);
+    for (const ring of footprints) {
+      if (pointInRing(from, ring) || pointInRing(result.snapped.from, ring)) continue;
+      assert.ok(!crosses(from, result.snapped.from, ring), `the leg from ${from} to ${result.snapped.from} crosses a building`);
+    }
+    // 274 ft through STEM; 293 ft round it.
+    if (ft) assert.ok(result.distanceFeet < ft, `${result.distanceFeet} ft from beside STEM to the Library`);
+  }
 });
 
 test('the path finder is built at the precision this file says', () => {
