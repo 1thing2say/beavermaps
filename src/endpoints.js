@@ -433,14 +433,18 @@ export function createEndpoints({
     // `stepIndex` used to be zeroed here too. It is navigation's, it is only
     // ever read while a walk is running, and nav.start() zeroes it — so this
     // was resetting a counter nothing could have read.
-    route.set(result);
-
+    //
+    // The pins are stood at their doors FIRST, because the legs are measured
+    // from where the pins end up: a building's leg is from the door the walk
+    // used, which is nothing, not from the door it was asked about.
     standAtDoors(result.door);
+    route.set(result, { from: startPoint?.geometry.coordinates, to: endPoint?.geometry.coordinates });
 
     map.getSource('calculated-route').setData(route.feature());
     paintLegs();
 
-    setRouteSummary(result.distanceFeet);
+    // The whole walk, dotted legs and all; see measureLegs in route-state.js.
+    setRouteSummary(result.distanceFeet + route.legFeet.from + route.legFeet.to);
     const turns = route.maneuvers.length - 2;
     setStatus(`Route calculated — ${turns} turn${turns === 1 ? '' : 's'}.`);
     setNavButtonsEnabled(true);

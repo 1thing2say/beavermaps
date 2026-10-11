@@ -30,6 +30,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   groupByName, metresBetween, pointInRing, loadFootprints, adoptPrintedNames, wallNearest,
+  memberNearest, MEMBER_APART_M, WALL_TIE_M,
 } from './building-names.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -56,6 +57,59 @@ for (const segment of network) {
 /** The network as straight pieces, for wallNearest(). */
 const segments = network.flatMap((segment) => segment.geometry.coordinates.slice(1)
   .map((b, k) => [segment.geometry.coordinates[k], b]));
+
+/**
+ * The vertices only the plaza crossings touch (src/plaza-paths.json): corners
+ * pushed clear of an obstacle and points where two crossings cross. The router
+ * walks them like any other node, and where one stands a metre from a wall
+ * across open paving it is as good a way in as any the network offers — STEM
+ * and TEW have them 1.2-1.3 m from their walls, against the nearest drawn path
+ * further off. Offered to wallNearest() as points, so what it returns is
+ * always one of them, never a point along a crossing.
+ */
+const plazaFile = src('plaza-paths.json');
+const plazaPoints = [];
+if (existsSync(plazaFile)) {
+  const seenHere = new Set(seen);
+  for (const f of JSON.parse(readFileSync(plazaFile, 'utf8')).features) {
+    for (const c of f.geometry.coordinates) {
+      const key = `${c[0]},${c[1]}`;
+      if (seenHere.has(key)) continue;
+      seenHere.add(key);
+      plazaPoints.push(c);
+    }
+  }
+}
+
+/** Network adjacency with metres, for the walk from a drawn door (see entranceFor). */
+const adjacency = new Map();
+for (const segment of network) {
+  const cs = segment.geometry.coordinates;
+  for (let k = 1; k < cs.length; k += 1) {
+    const [a, b] = [`${cs[k - 1][0]},${cs[k - 1][1]}`, `${cs[k][0]},${cs[k][1]}`];
+    const m = metresBetween(cs[k - 1], cs[k]);
+    if (!adjacency.has(a)) adjacency.set(a, []);
+    if (!adjacency.has(b)) adjacency.set(b, []);
+    adjacency.get(a).push([b, m]);
+    adjacency.get(b).push([a, m]);
+  }
+}
+/** Every node within `cap` metres of `from` by the network. */
+function within(from, cap) {
+  const best = new Map([[from, 0]]);
+  const queue = [[0, from]];
+  while (queue.length) {
+    queue.sort((x, y) => x[0] - y[0]);
+    const [d, n] = queue.shift();
+    if (d > best.get(n)) continue;
+    for (const [m, w] of adjacency.get(n) ?? []) {
+      if (d + w > cap || d + w >= (best.get(m) ?? Infinity)) continue;
+      best.set(m, d + w);
+      queue.push([d + w, m]);
+    }
+  }
+  return best;
+}
 
 const inAnyMember = (coords, members) =>
   members.some((m) => pointInRing(coords, m.geometry.coordinates[0]));
@@ -129,12 +183,13 @@ for (const f of doors) {
  * A DOOR WHERE THE SHEET DRAWS ONE. The walls stage peels every approach path
  * the sheet runs into a building back to the wall, and the node it leaves there
  * is the one place on the building's outline a drawn path actually arrives:
- * the door. The card stands on its anchor, so the doors that count are those of
- * the footprint the anchor is in, and of several the one nearest the anchor —
- * the rule server/graph.js applies to a room inside a building, with the anchor
- * as the room. A door on another shard of the building does not: the CTE's one
- * drawn door is on its 1,600 m2 annexe, 90 m from the main building the card
- * points at.
+ * the door. The card stands on its anchor, so the entrance is a door of the
+ * footprint the anchor is in, and of several the one nearest the anchor — the
+ * rule server/graph.js applies to a room inside a building, with the anchor as
+ * the room. A door on another shard of the building is not the entrance (the
+ * CTE's is on its north wing, 4.7 m from the main building but 90 m from the
+ * anchor the card points at), but it is a way in, listed after the home
+ * footprint's: see below.
  *
  * Otherwise where the network comes nearest the building's walls, which is
  * where a door most likely is (wallNearest() in building-names.mjs, which
@@ -153,7 +208,11 @@ for (const f of doors) {
  *     first. The Parking Garage has five and the one nearest its anchor is on
  *     the west wall: with that as the only end, walks from the north came in
  *     71 m longer on average than when they ended at the north door, and Fine
- *     & Applied Arts, with four, was 70 m worse the same way.
+ *     & Applied Arts, with four, was 70 m worse the same way. Then every drawn
+ *     door of the building's other footprints. Those used to be listed
+ *     nowhere — four of them, on Science & Engineering's wings and the CTE's
+ *     north wing — and a walk from the north to Science & Engineering went
+ *     125 m round to the main door where its north wing's door was 20 m.
  *   - Every point where the walls come nearest the network, after the drawn
  *     doors. The sheet draws a path into a building where it happens to, not
  *     into every door it has, and the walks this map used to give ended at
@@ -161,7 +220,16 @@ for (const f of doors) {
  *     made a walk from restroom #51 go from 92 to 171 m, though the old end
  *     was still on the graph 2.3 m from a corner; Science & Engineering's,
  *     from the Science Success Center, went from 59 to 170 m. Both ends are
- *     offered now and the walk takes the nearer.
+ *     offered now and the walk takes the nearer. Those are asked of the
+ *     whole building, so on one drawn as several footprints the shards
+ *     further from the network than the nearest offered nothing; each shard
+ *     with no way in within MEMBER_APART_M is now offered its own nearest
+ *     point (memberNearest() in building-names.mjs). The Portable Village's
+ *     furthest three were 66-68 m by the graph from a way in, with a path
+ *     16 m from their walls.
+ *   - Last, the plaza crossings' own corners where one stands nearest the
+ *     walls (see plazaPoints): STEM's and TEW's, a metre off the wall across
+ *     open paving.
  *
  * Returns `nearWalls` too, each with its metres from the corner it is nearest:
  * a point can be nearest the walls of two buildings, and the caller gives it
@@ -170,14 +238,34 @@ for (const f of doors) {
 function entranceFor(group) {
   const at = group.pole?.coordinates;
   const home = at && group.members.find((m) => pointInRing(at, m.geometry.coordinates[0]));
-  const known = home ? doorsByRing.get(ringKey(home.geometry.coordinates[0])) ?? [] : [];
-  const drawn = [...known].sort((x, y) => metresBetween(at, x) - metresBetween(at, y)
-    || x[0] - y[0] || x[1] - y[1]);
+  const doorsOf = (m) => doorsByRing.get(ringKey(m.geometry.coordinates[0])) ?? [];
+  const byAnchor = (x, y) => metresBetween(at, x) - metresBetween(at, y) || x[0] - y[0] || x[1] - y[1];
+  // The home footprint's doors first, then every other member's: a door the
+  // sheet draws into any shard of the building is a way into the building.
+  const drawn = [
+    ...(home ? [...doorsOf(home)].sort(byAnchor) : []),
+    ...group.members.filter((m) => m !== home).flatMap(doorsOf).sort(byAnchor),
+  ].filter((d, k, all) => all.findIndex((e) => keyOf(e) === keyOf(d)) === k);
   const nearWalls = [];
-  for (const { at: point, d } of wallNearest(group, segments)) {
+  const take = (point, d, how) => {
+    const node = how === 'plaza' ? point : nodeAt(point);
+    if (!node || nearWalls.some((w) => keyOf(w.node) === keyOf(node))) return;
+    nearWalls.push({ node, d, how });
+  };
+  for (const { at: point, d } of wallNearest(group, segments)) take(point, d, 'walls');
+  // A shard no way in reaches (memberNearest() in building-names.mjs).
+  for (const { at: point, d } of memberNearest(group, segments)) {
     const node = nodeAt(point);
-    if (!node || nearWalls.some((w) => keyOf(w.node) === keyOf(node))) continue;
-    nearWalls.push({ node, d });
+    if (node && [...drawn, ...nearWalls.map((w) => w.node)].every((w) => metresBetween(w, node) > MEMBER_APART_M)) take(point, d, 'member');
+  }
+  // A plaza corner a metre off the wall, tied with the nearest as wallNearest()
+  // ties corners, over the network and the plaza points together. Only the
+  // plaza points are taken from it, after the rest: what the network offers
+  // stays offered, so a walk can only get shorter for it.
+  const pointSegs = plazaPoints.map((c) => [c, c]);
+  const plazaKeys = new Set(plazaPoints.map(keyOf));
+  for (const { at: point, d } of wallNearest(group, [...segments, ...pointSegs])) {
+    if (plazaKeys.has(keyOf(point))) take(point, d, 'plaza');
   }
   return { drawn, nearWalls };
 }
@@ -230,17 +318,61 @@ const claim = (node, group, rank) => {
   if (!held || rank < held.rank) owner.set(keyOf(node), { group, rank });
 };
 const UNDRAWN_FIRST = 1e6;
+/** build-walk-network.mjs's weld: two points this close are one node. */
+const WELD_M = 2.0;
 for (const [group, { drawn, nearWalls }] of ways) {
   for (const door of drawn) claim(door, group, -Infinity);
-  for (const { node, d } of nearWalls) claim(node, group, drawn.length ? d : d - UNDRAWN_FIRST);
+  for (const { node, d, how } of nearWalls) if (how !== 'plaza') claim(node, group, drawn.length ? d : d - UNDRAWN_FIRST);
 }
-let givenAway = 0;
+// NOT IN SOMEONE ELSE'S BUILDING, AND NOT AT SOMEONE ELSE'S DOOR. A point
+// where one building's walls come nearest can lie inside another's footprint
+// — the Pool's and Adaptive PE's used to be inside the Gym, on a path the Gym
+// was drawn over — or a step from another building's door, where a walk to
+// one building would end at the other's. Refused, both. The claims above
+// settle a node two buildings both offer; this settles two nodes a weld or
+// two apart, for the same reason.
+const NEIGHBOUR_DOOR_M = 2 * WELD_M;
+const inOther = (node, group) => groups.some((g) => g !== group && inAnyMember(node, g.members));
+/** Metres from p to the nearest wall of any member of a group. */
+const LON_M = metresBetween([0, 38.65], [1, 38.65]), LAT_M = metresBetween([0, 0], [0, 1]);
+const wallsOf = (p, group) => Math.min(...group.members.flatMap((m) => m.geometry.coordinates.flatMap((ring) => ring.slice(1).map((b, k) => {
+  const a = ring[k];
+  const [ax, ay, bx, by, px, py] = [a[0], a[1], b[0], b[1], p[0], p[1]].map((v, i) => v * (i % 2 ? LAT_M : LON_M));
+  const vx = bx - ax, vy = by - ay, L = vx * vx + vy * vy;
+  const t = L === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / L));
+  return Math.hypot(px - ax - t * vx, py - ay - t * vy);
+}))));
+// "Someone else's door" is one a step away that the other building has the
+// better claim to, from a point plainly nearer their walls than this
+// building's — by more than WALL_TIE_M, the drawing's own slop. Two buildings
+// side by side each have a corner on the path between them, a couple of
+// metres apart and as near one wall as the other (Fine & Applied Arts' and the
+// Evangelisti Center's, 2.83 and 2.61 m), and each keeps its own.
+const nearOthers = (node, group, rank) => [...owner].some(([key, held]) => held.group !== group
+  && held.rank < rank && metresBetween(key.split(',').map(Number), node) < NEIGHBOUR_DOOR_M
+  && wallsOf(node, held.group) + WALL_TIE_M <= wallsOf(node, group));
+// AND NOT A STEP SHORT OF A DRAWN DOOR. Where the sheet draws an approach path
+// into a building and the walls stage peels it back to the wall, the door is
+// at the end of a dead end, and the network on its way there can pass nearer
+// the walls than the door itself. Kinesiology's wall-nearest point was 7.3 m
+// back along its own approach from the door the sheet draws, and walks ended
+// there, short of it. A wall-nearest point that close by the network to a
+// door that ends a dead end is that door's approach, and the door stands.
+const APPROACH_M = 10;
+const deadEnd = (door) => (adjacency.get(keyOf(door)) ?? []).length === 1;
+let givenAway = 0, refused = 0, approaches = 0;
 for (const [group, way] of ways) {
   const listed = new Set(way.drawn.map(keyOf));
+  const short = new Set();
+  for (const door of way.drawn.filter(deadEnd)) for (const key of within(keyOf(door), APPROACH_M).keys()) short.add(key);
   const extra = [];
-  for (const { node } of way.nearWalls) {
+  for (const { node, d, how } of way.nearWalls) {
     if (listed.has(keyOf(node))) continue;
-    if (owner.get(keyOf(node)).group !== group) { givenAway += 1; continue; }
+    const held = owner.get(keyOf(node));
+    if (held && held.group !== group) { givenAway += 1; continue; }
+    const rank = way.drawn.length ? d : d - UNDRAWN_FIRST;
+    if (inOther(node, group) || nearOthers(node, group, held?.rank ?? rank)) { refused += 1; continue; }
+    if (how !== 'plaza' && short.has(keyOf(node))) { approaches += 1; continue; }
     listed.add(keyOf(node));
     extra.push(node);
   }
@@ -324,7 +456,11 @@ console.log(`[build-directory] ${atDrawn} entrances at a door the walls stage re
   + `${features.filter((f) => f.properties.entrance).length - atDrawn} where the walls come nearest the network`);
 console.log(`[build-directory] ${features.reduce((n, f) => n + (f.properties.doors?.length ?? 0), 0)} ways in, `
   + `${[...ways.values()].reduce((n, w) => n + w.doors.length - w.drawn.length, 0)} of them where the walls come nearest; `
-  + `${givenAway} left to another building that shares it`);
+  + `${givenAway} left to another building that shares it, ${refused} inside another building or a step from its door, `
+  + `${approaches} on a drawn door's own approach within ${APPROACH_M} m`);
+console.log(`[build-directory] ${[...ways.values()].reduce((n, w) => n + w.drawn.length, 0)} drawn doors, `
+  + `${[...ways.values()].reduce((n, w) => n + w.doors.filter((d) => w.nearWalls.some((x) => x.how === 'member' && keyOf(x.node) === keyOf(d))).length, 0)} ways in for a shard no other reaches, `
+  + `${[...ways.values()].reduce((n, w) => n + w.doors.filter((d) => plazaPoints.some((c) => keyOf(c) === keyOf(d))).length, 0)} on a plaza crossing`);
 if (unspliced) {
   console.log(`[build-directory] WARNING: ${unspliced} wall-nearest point(s) with no node within a weld — `
     + 'src/paths.json predates them; rerun scripts/build-walk-network.mjs');

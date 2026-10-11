@@ -44,7 +44,12 @@ test('no segment has zero length', () => {
 });
 
 /**
- * Union-find over the vertex set, keyed exactly as server/index.js keys it.
+ * Union-find over the vertex set, keyed exactly as server/index.js keys it,
+ * over the drawn segments and the plaza crossings together, as the server
+ * unions them: three strokes on the sheet — the aprons from the Career
+ * Technical Education building's doors and the Child Development Center's
+ * north door — stop on a paved plaza and touch no other stroke, and the
+ * plaza is what joins them to the rest.
  *
  * This is the test worth having. A fragmented graph does not throw and does not
  * look wrong on the map — the network draws identically. It fails only when a
@@ -62,7 +67,7 @@ function components() {
   };
   const add = (k) => { if (!parent.has(k)) parent.set(k, k); };
 
-  for (const s of segments) {
+  for (const s of [...segments, ...load('plaza-paths').features]) {
     const keys = s.geometry.coordinates.map(vertexKey);
     keys.forEach(add);
     for (let n = 1; n < keys.length; n++) {
@@ -119,6 +124,55 @@ test('no edge doubles a shorter one leaving the same node the same way', () => {
         assert.ok(!(degrees <= 20 && off <= 1 && along < lb),
           `the ${lb.toFixed(1)} m edge from ${p} runs over the ${la.toFixed(1)} m one to ${near}`);
       }
+    }
+  }
+});
+
+test('no edge runs down a lane arrow the sheet files as a crossing', () => {
+  // build-walk-network.mjs takes pavement grey only. The 24 darker 0.82 m
+  // strokes the sheet files as `crossing` are the shafts of the lane arrows at
+  // the entrances, not crosswalks; read as path, 78 m of network ran down the
+  // carriageway on them and a gate went 8 m out into College Oak Dr. An edge
+  // may still lie along one where the arrow is painted on a driveway's own
+  // centreline, so only an edge on no pavement-grey stroke fails.
+  const lonM = metresBetween([0, 38.65], [1, 38.65]), latM = metresBetween([0, 0], [0, 1]);
+  const flat = ([x, y]) => [x * lonM, y * latM];
+  const segDist = (q, a, b) => {
+    const vx = b[0] - a[0], vy = b[1] - a[1], L = vx * vx + vy * vy;
+    const t = L ? Math.max(0, Math.min(1, ((q[0] - a[0]) * vx + (q[1] - a[1]) * vy) / L)) : 0;
+    return Math.hypot(q[0] - a[0] - t * vx, q[1] - a[1] - t * vy);
+  };
+  const near = (q, lines, m) => lines.some((l) => l.some((b, k) => k > 0 && segDist(q, l[k - 1], b) <= m));
+  const basemap = load('basemap').features;
+  const lines = (keep) => basemap.filter((f) => f.geometry.type === 'LineString' && keep(f.properties))
+    .map((f) => f.geometry.coordinates.map(flat));
+  const arrows = lines((p) => p.kind === 'crossing' && p.stroke !== '#e2e3e4');
+  const pavement = lines((p) => ['walkway', 'driveway', 'crossing'].includes(p.kind) && p.stroke === '#e2e3e4');
+  assert.equal(arrows.length, 24, 'the sheet\'s lane arrows have changed; re-read them');
+  for (const f of segments) {
+    const [a, b] = f.geometry.coordinates.map(flat);
+    const samples = Array.from({ length: 11 }, (_, k) => [a[0] + ((b[0] - a[0]) * k) / 10, a[1] + ((b[1] - a[1]) * k) / 10]);
+    const onArrow = samples.filter((q) => near(q, arrows, 0.5)).length;
+    if (onArrow < 6) continue;
+    assert.ok(samples.every((q) => near(q, pavement, 0.5)),
+      `${f.geometry.coordinates.join(' -> ')} runs down a lane arrow, on no pavement stroke`);
+  }
+});
+
+test('no edge cuts across the tree planter at the west entrance', () => {
+  // Sheet i=1873, beside the walkway diagonal 1321 north of driveway 1087. The
+  // second collapse pass once dragged the node where driveway 1086 tees onto
+  // 1321 five metres sideways onto walkway 1263, and the edge of 1321 into it
+  // ran across this planter and the lawn round it; the collapse now refuses a
+  // move that takes an edge off the paving.
+  const planter = load('basemap').features.find((f) => f.properties.i === 1873);
+  assert.equal(planter?.properties.kind, 'tree');
+  const ring = planter.geometry.coordinates[0];
+  for (const f of segments) {
+    const [a, b] = f.geometry.coordinates;
+    for (let k = 0; k <= 40; k += 1) {
+      const q = [a[0] + ((b[0] - a[0]) * k) / 40, a[1] + ((b[1] - a[1]) * k) / 40];
+      assert.ok(!pointInRing(q, ring), `${f.geometry.coordinates.join(' -> ')} crosses the planter`);
     }
   }
 });
@@ -304,4 +358,21 @@ test('every door in doors.json is on its building\'s wall and on the network', (
       }
     }
   }
+});
+
+test('a walkway that stops short of the next carries on to it from its end cap', () => {
+  // West of the south car park a walkway ends in a round cap 5.4 m from the
+  // footway it points at, 2.1 m of the gap over lawn. The junction stage held
+  // every connector to a metre off the paving and refused it, so the walkway
+  // joined the rest only at its far end. A connector that carries a path on
+  // from its end cap may cross more (JUNCTION_CAP_OFF_M); one from the bend
+  // 39 m back along the same walkway, over the verge to the footway beside
+  // it, may not.
+  const CAP = '-121.348265,38.645826';
+  const VERGE = '-121.347844,38.645713';
+  const at = (key) => segments.filter((s) => s.geometry.coordinates.some((c) => String(c) === key));
+  assert.ok(at(CAP).length >= 2, 'the walkway west of the south car park still ends in a dead end');
+  const across = segments.filter((s) => s.geometry.coordinates.some((c) => String(c) === VERGE)
+    && metresBetween(...s.geometry.coordinates) > 5 && metresBetween(...s.geometry.coordinates) < 6);
+  assert.deepEqual(across.map((s) => s.geometry.coordinates.join(' -> ')), [], 'a connector crosses the verge');
 });

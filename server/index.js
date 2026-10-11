@@ -35,10 +35,19 @@ const network = readJson('src/paths.json');
  *
  * Unioned rather than merged into paths.json on purpose: that file is my campus's
  * printed linework and one script owns it. This one is OpenStreetMap's, owned by
- * scripts/build-approach-network.mjs, and the join between them is twenty-two
- * connectors that script prints on every build.
+ * scripts/build-approach-network.mjs, and the join between them is sixteen
+ * gate connectors and four across the car parks, which that script prints on
+ * every build.
  */
 const approach = readJson('src/approach-paths.json');
+
+/**
+ * The ways across the sheet's paved plazas, written by the last stage of
+ * scripts/build-walk-network.mjs. Routed, never drawn, like the streets: the
+ * plaza is already on the map as paving, and a walk across it shows on the
+ * route ribbon. Campus network for every rule in graph.js that asks.
+ */
+const plazas = readJson('src/plaza-paths.json');
 
 /**
  * Where each building's drawn approach paths met its walls, so a room inside
@@ -68,11 +77,11 @@ const entrances = directory.features.filter((f) => f.properties.doors)
   .map((f) => ({ doors: f.properties.doors, footprint: f.geometry }));
 
 const buildStart = Date.now();
-const graph = createGraph({ network, approach, doors, boundary, entrances, buildings });
+const graph = createGraph({ network, approach, plazas, doors, boundary, entrances, buildings });
 
 console.log(
   `[beavermaps] graph ready in ${Date.now() - buildStart}ms ` +
-  `(${network.features.length} campus + ${approach.features.length} approach segments, ` +
+  `(${network.features.length} campus + ${plazas.features.length} plaza + ${approach.features.length} approach segments, ` +
   `${graph.vertices.length} vertices)`
 );
 
@@ -228,6 +237,9 @@ function route(req, res) {
   return res.json({
     geometry: result.geometry,
     distanceFeet: result.distanceFeet,
+    // The dotted legs at either end, which distanceFeet is not: see route()
+    // in graph.js. The browser adds them for the walk's whole length.
+    legFeet: result.legFeet,
     maneuvers: result.maneuvers,
     snapped: result.snapped,
     door: result.door,
