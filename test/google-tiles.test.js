@@ -15,12 +15,21 @@ globalThis.window ??= { devicePixelRatio: 1 };
 
 const BOUNDS = [[-121.36, 38.64], [-121.34, 38.66]];
 
-/** A fetch that never answers, but lets go when its signal aborts. */
+/**
+ * A fetch that never answers, but lets go when its signal aborts. The interval
+ * stands in for the open socket: Node 20 unrefs the timer behind
+ * AbortSignal.timeout, so without a handle holding the loop the test would end
+ * before the deadline fires.
+ */
 function hangingFetch(calls) {
   return (url, options = {}) => {
     calls.push(url);
     return new Promise((resolve, reject) => {
-      options.signal?.addEventListener('abort', () => reject(options.signal.reason));
+      const socket = setInterval(() => {}, 1_000);
+      options.signal?.addEventListener('abort', () => {
+        clearInterval(socket);
+        reject(options.signal.reason);
+      });
     });
   };
 }

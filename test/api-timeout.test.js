@@ -9,12 +9,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApi, BOOT_TIMEOUT_MS } from '../src/api.js';
 
-/** A fetch that never answers on its own, and gives up only when its signal says to. */
+/**
+ * A fetch that never answers on its own, and gives up only when its signal says
+ * to. The interval stands in for the open socket: Node 20 unrefs the timer
+ * behind AbortSignal.timeout, so without a handle holding the loop the test
+ * would end before the ceiling fires.
+ */
 function stalled() {
   const signals = [];
   const request = (url, init) => new Promise((resolve, reject) => {
     signals.push({ url, signal: init?.signal });
-    init?.signal?.addEventListener('abort', () => reject(init.signal.reason));
+    const socket = setInterval(() => {}, 1_000);
+    init?.signal?.addEventListener('abort', () => {
+      clearInterval(socket);
+      reject(init.signal.reason);
+    });
   });
   return { request, signals };
 }
