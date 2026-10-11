@@ -1,6 +1,34 @@
+# Everything listed here stays on your machine: `fly deploy` uploads the build
+# context to a remote builder, so this file decides what leaves the laptop, not
+# just what ends up in the image.
+
 node_modules
 dist
 .git
+# The keys travel as --build-arg (see `npm run deploy`), never as a file.
 .env
 .env.*
 *.log
+
+# Scraped third-party campus data: 16MB, staff names among it, and read only by
+# scripts/ when regenerating src/*.json — the build reads the committed output.
+campus-data
+
+# Claude Code's worktrees live under .claude/ inside the main checkout, each a
+# full copy of the repository; deploying from there would upload every one.
+.claude
+
+# Not read by `vite build` or by the server. assets/ is the README's
+# screenshots, not the app's (those are public/ and src/). test/ is why the
+# Dockerfile does not run the suite — `npm run deploy` and CI do instead.
+assets
+test
+.github
+*.md
+coverage
+.vscode
+**/.DS_Store
+**/._*
+
+# Deliberately kept: public/ is copied into dist/ by Vite, and scripts/ is
+# small and is what regenerates the data the image serves.
