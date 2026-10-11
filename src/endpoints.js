@@ -437,7 +437,13 @@ export function createEndpoints({
 
     standAtDoors(result.door);
 
-    map.getSource('calculated-route').setData(route.feature());
+    // Optional, as resetMap's is. A basemap, theme or skin change while this
+    // request was out replaces the style, and until style.load rebuilds it
+    // the source does not exist. The throw that followed skipped everything
+    // below — the summary, the buttons, "Route calculated" — and left the panel
+    // on "Calculating route…". Nothing is lost by skipping the line: the
+    // rebuild seeds the source from route.feature(). See src/route-layers.js.
+    map.getSource('calculated-route')?.setData(route.feature());
     paintLegs();
 
     setRouteSummary(result.distanceFeet);
