@@ -8,6 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { closeOnSignal, GRACE_MS } from '../server/shutdown.js';
 import { root } from './helpers.js';
@@ -77,12 +78,19 @@ test('a close error is an exit 1, not a clean one', () => {
   assert.deepEqual(exits, [1]);
 });
 
-test('the grace period fits inside the kill_timeout Fly is told to allow', () => {
-  // Fly's default is 5 s; fly.toml should say 10. Either way this has to be
-  // shorter than the window, or SIGKILL arrives first and the fallback never
-  // gets to say anything.
-  assert.ok(GRACE_MS < 10_000);
-  assert.equal(GRACE_MS, 8000);
+test('the grace period fits inside the kill_timeout fly.toml actually leaves', () => {
+  // Read from fly.toml rather than assumed, so the two cannot drift apart: with
+  // no kill_timeout there, Fly's default of 5 s is the window, and GRACE_MS has
+  // to end inside it with a second to spare for the log line and the exit, or
+  // SIGKILL arrives first and the fallback never gets to say anything. If
+  // fly.toml later sets a longer one, this still holds and GRACE_MS is free to
+  // grow into it.
+  const toml = readFileSync(path.join(root, 'fly.toml'), 'utf8');
+  const set = toml.match(/^\s*kill_timeout\s*=\s*"?(\d+)(ms|s)?"?/m);
+  const windowMs = set ? Number(set[1]) * (set[2] === 'ms' ? 1 : 1000) : 5000;
+  assert.ok(GRACE_MS <= windowMs - 1000,
+    `GRACE_MS ${GRACE_MS} leaves no second before Fly's SIGKILL at ${windowMs}ms`);
+  assert.ok(GRACE_MS >= 1000, 'too short to let an ordinary request finish');
 });
 
 test('the real server exits 0 on SIGTERM', { timeout: 30_000 }, async () => {

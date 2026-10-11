@@ -110,8 +110,18 @@ export function createRateLimit({
  * ONLY ON FLY, which is what FLY_APP_NAME says — Fly sets it in every machine's
  * environment. Anywhere else nothing strips that header on the way in, so it is
  * whatever the client wrote, and keying on it would make the limit a header
- * field anybody can rotate. Off Fly, `req.ip` is right: the socket address with
- * no proxy, or the one trusted hop's view of the client behind one.
+ * field anybody can rotate.
+ *
+ * OFF FLY, `req.ip` is NO DEFENCE EITHER, and that is accepted rather than
+ * fixed. `trust proxy 1` makes Express treat whatever is on the other end of the
+ * socket as the trusted hop, so when nothing is in front a client that connects
+ * directly sets `req.ip` to the right-most entry of its own X-Forwarded-For and
+ * can rotate that just as freely. Off Fly means `npm run dev` and the tests,
+ * where nobody is being protected from anybody; the key there only has to keep
+ * one ordinary client in one bucket, which it does. Running this behind some
+ * other proxy in production means revisiting both this and `trust proxy` in
+ * app.js — test/app.test.js pins the off-Fly behaviour so it is the documented
+ * one.
  */
 export function clientKey(req, env = process.env) {
   return (env.FLY_APP_NAME && req.get('fly-client-ip')) || req.ip || 'unknown';

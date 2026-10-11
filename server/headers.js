@@ -141,10 +141,16 @@ export const STRICT_TRANSPORT_SECURITY = 'max-age=31536000';
  *
  * HSTS only when the request actually came in over HTTPS. `req.secure` reads
  * X-Forwarded-Proto through the one trusted proxy hop (see `trust proxy` in
- * app.js) — on Fly that is https for every request force_https lets through —
- * and a plain-HTTP request from a laptop on localhost gets none, which is the
- * point: an HSTS header on localhost would poison every other dev server on
- * that port for a year.
+ * app.js) — on Fly that is https for every request force_https lets through.
+ * Over plain HTTP it would be wasted bytes: browsers ignore
+ * Strict-Transport-Security on a response that did not come over a secure
+ * connection (RFC 6797 §8.1). The case that matters is an HTTPS localhost
+ * (`npm run dev` serves one): there the browser would honour it, and since HSTS
+ * pins the whole host rather than one port, every server on localhost —
+ * `npm run dev:http` included — would be forced to HTTPS for a year. Under
+ * `npm run dev` that cannot happen: Vite serves the page, and its /api proxy
+ * reaches this server over plain HTTP without adding X-Forwarded-Proto, so
+ * `req.secure` is false and no header goes back through it.
  */
 export function securityHeaders({ distDir } = {}) {
   const indexFile = distDir ? path.join(distDir, 'index.html') : null;

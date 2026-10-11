@@ -81,8 +81,14 @@ export function createApp({
    *
    * ONE HOP, not `true`. `trust proxy: true` tells Express to believe the
    * left-most entry of a header the client itself can write. One hop means
-   * "trust the proxy immediately in front of me and nothing further out", and
-   * a request without a proxy gets the socket address, which is also correct.
+   * "trust the proxy immediately in front of me and nothing further out".
+   * The price is that with NO proxy in front — `npm run dev`, the tests — the
+   * socket peer is itself taken for that hop, so a client talking straight to
+   * this server sets `req.ip` and `req.secure` from headers it wrote. That is
+   * harmless on a laptop, and it means the rate limit off Fly is a courtesy
+   * rather than a defence (see clientKey in limit.js); on Fly the hop really is
+   * fly-proxy, and HSTS over a spoofed X-Forwarded-Proto is ignored by a
+   * browser that reached the server over plain HTTP anyway.
    *
    * WHAT THIS IS FOR ON FLY is `req.secure` — X-Forwarded-Proto through that
    * one hop, which is what decides whether HSTS goes out (see headers.js). It

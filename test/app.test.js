@@ -133,6 +133,22 @@ test('off Fly, a Fly-Client-IP the client wrote itself is ignored', async () => 
   assert.equal(spoofed.status, 429, 'rotating Fly-Client-IP bought a fresh allowance');
 });
 
+test('off Fly, X-Forwarded-For still picks the bucket — documented, not defended', async () => {
+  // `trust proxy 1` takes the socket peer for the trusted hop, so with nothing
+  // in front a direct client's own right-most X-Forwarded-For entry becomes
+  // req.ip. That is the accepted off-Fly behaviour clientKey's comment
+  // describes; this pins it so the comment cannot drift back to claiming the
+  // socket address is used. A client sending no header stays in one bucket.
+  const base = await start({ env: {}, takeRoute: createRateLimit({ max: 1 }) });
+  const statuses = [];
+  for (const xff of ['192.0.2.1', '192.0.2.2', '192.0.2.3']) {
+    statuses.push((await postRoute(base, { from: A, to: B }, { 'x-forwarded-for': xff })).status);
+  }
+  assert.deepEqual(statuses, [200, 200, 200]);
+  assert.equal((await postRoute(base, { from: A, to: B })).status, 200);
+  assert.equal((await postRoute(base, { from: A, to: B })).status, 429);
+});
+
 test('the first route request logs the header shape once, with no address in it', async () => {
   const lines = [];
   const base = await start({ env: { FLY_APP_NAME: 'beavermaps' }, log: (line) => lines.push(line) });
@@ -318,8 +334,9 @@ test('the policy allows the built page\'s own inline script by hash', async () =
 
 test('HSTS only over HTTPS, and only for this host', async () => {
   const base = await start();
-  // Plain HTTP on localhost: an HSTS header here would pin every dev server on
-  // this port to HTTPS for a year.
+  // Plain HTTP with no proxy saying otherwise: browsers ignore HSTS over HTTP,
+  // and this is also what Vite's /api proxy looks like under `npm run dev`,
+  // where an honoured header would pin all of localhost to HTTPS for a year.
   assert.equal((await request(base, '/healthz')).headers['strict-transport-security'], undefined);
   // Through the one trusted proxy hop, as fly-proxy sends it.
   const hsts = (await request(base, '/healthz', { headers: { 'x-forwarded-proto': 'https' } }))

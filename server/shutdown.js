@@ -15,14 +15,19 @@
 /**
  * How long in-flight requests get before the process goes anyway.
  *
- * Eight seconds, under the `kill_timeout = "10s"` that fly.toml needs to set
- * between the SIGTERM and the SIGKILL — Fly's default is five, which would cut
- * this off first — so this process always gets to say it is giving up rather
- * than being killed mid-sentence. Nothing here takes a
- * fraction of that; what can is a client holding a slow upload open, and that
- * is not a client worth holding a deploy for.
+ * Four seconds, because it has to finish inside the gap Fly leaves between
+ * SIGTERM and SIGKILL, and fly.toml does not set `kill_timeout`, so that gap is
+ * Fly's default of five seconds. Anything at or past five and SIGKILL arrives
+ * first: the slow request is cut off all the same, and the process dies without
+ * the "exiting anyway" line that says why. Four leaves a second of slack for
+ * the log line and the exit. If fly.toml ever sets `kill_timeout = "10s"`, this
+ * can go to eight — and not before, which is what test/shutdown.test.js holds
+ * it to.
+ *
+ * Nothing here takes a fraction of four seconds; what can is a client holding a
+ * slow upload open, and that is not a client worth holding a deploy for.
  */
-export const GRACE_MS = 8000;
+export const GRACE_MS = 4000;
 
 /**
  * Stop taking connections on SIGTERM or SIGINT, exit 0 once the ones already
@@ -36,7 +41,7 @@ export const GRACE_MS = 8000;
  * A SECOND SIGNAL IS IGNORED rather than starting a second close: `close()`
  * twice is an ERR_SERVER_NOT_RUNNING thrown out of a signal handler. Ctrl-C
  * pressed twice in `npm run dev` therefore waits for the same grace period as
- * once, which is at worst eight seconds and normally none.
+ * once, which is at worst four seconds and normally none.
  *
  * Everything that touches the process is injectable, which is the whole of
  * what makes this testable: the test hands it a fake server, a fake `on` and an
