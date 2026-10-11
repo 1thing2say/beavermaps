@@ -1,8 +1,9 @@
 // src/flyover-view.js — the shared stage, and the ways it used to stop for good.
 //
 // The flyover keeps ONE Deck and one tileset for the tab, by design (it is a
-// billing decision; see the top of that file). The pin dropped on the first
-// coarse tile rather than on the roof.
+// billing decision; see the top of that file). Its render loop kept ticking
+// after the card closed, and the pin dropped on the first coarse tile rather
+// than on the roof.
 //
 // The module imports a stylesheet (through src/spinner.js) and deck.gl, neither
 // of which node can load, so both are swapped for fakes at resolve time. The
@@ -162,6 +163,20 @@ const latestTiles = () => fakes.tileLayers.at(-1);
 // ---------------------------------------------------------------------------
 // The tests, in tab order
 // ---------------------------------------------------------------------------
+
+test('the render loop stops when the card closes and resumes for the next', async () => {
+  const card = await open();
+  const deck = fakes.decks.at(-1);
+  const before = fakes.decks.length;
+  const { stop, start } = deck.calls;
+  card.destroy();
+  assert.equal(deck.calls.stop, stop + 1);
+
+  const next = await open();
+  assert.equal(fakes.decks.length, before, 'no second Deck');
+  assert.equal(deck.calls.start, start + 1);
+  next.destroy();
+});
 
 test('a coarse tile arriving does not drop the pin; the roof\'s own tile does', async () => {
   const roof = [-121.3464, 38.6492, 20];

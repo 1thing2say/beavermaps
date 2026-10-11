@@ -994,6 +994,13 @@ export function createFlyover({
       stage.onReady = null;
       stage.onCredits = null;
       stage.onRefused = null;
+      // Off between cards. The one Deck is kept for the tab, and its render
+      // loop asked for a frame sixty times a second whether or not its canvas
+      // was in a card — on a phone, for the rest of the visit, after a single
+      // building had been opened and closed. Only once the device exists: a
+      // loop stopped while its device is still being created skips handing the
+      // device to deck.gl, and a later start would then run a Deck with none.
+      if (stage.deck?.layerManager) stage.deck.animationLoop?.stop();
       // Not left set. The layer's traversal keeps running for a frame or two
       // after the canvas is detached, and culling those against a box for a
       // building nobody is looking at is the sort of thing that shows up as a
@@ -1077,6 +1084,10 @@ export function createFlyover({
         return;
       }
     } else {
+      // Back on, having been stopped when the last card let go. Resumes the
+      // loop rather than re-initialising it, so the device and the tileset —
+      // and the one billable root — are the ones already held.
+      stage.deck.animationLoop?.start();
       // Per building, because both the camera and the perimeter are. Replacing
       // rather than mutating is what deck.gl expects of each: a View is
       // immutable once constructed, and a layer's props are read at
