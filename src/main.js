@@ -39,7 +39,7 @@ import { createNavigation, SIM_TICK_MS } from './navigation.js';
 import { createLongPress } from './long-press.js';
 import { FIT_MARGIN, paddingAround } from './viewport.js';
 import { createStatusLine } from './status-line.js';
-import { createApi } from './api.js';
+import { createApi, ROUTING_OUTAGE } from './api.js';
 import { createChoreography } from './pin-choreography.js';
 import { createPinState, POI_LABEL_LAYERS } from './pin-state.js';
 import { createBuildingsLighting, BUILDING_EMISSIVE } from './buildings-lighting.js';
@@ -900,6 +900,9 @@ function startApp() {
     camera,
     api,
     geolocateControl: () => geolocateControl,
+    // The fix the fence turned away, which the control will not pass on. See
+    // `last` in src/geolocation.js.
+    lastPosition: () => geolocation.lastPosition(),
     networkPoints: () => networkPoints,
     routingEnabled: () => routingEnabled,
     status: { setStatus, setBusy, setRouteSummary, setNavButtonsEnabled, setIdleStatus },
@@ -1386,7 +1389,12 @@ function startApp() {
     setBusy(true);
     setProgress('Loading the campus…');
 
-    /** A source that failed is one missing layer, so it is logged and stepped over. */
+    /**
+     * A source that failed is one missing layer, so it is logged and stepped
+     * over. "Failed" means after the api's retries — see withRetry — so a
+     * server that blinked during a deploy no longer costs a layer for the
+     * session; one that stayed away for six seconds still does.
+     */
     const orElse = (whenMissing) => (reason) => { console.error(reason); whenMissing?.(); };
 
     const buildingsReady = fetchOverlay('buildings').then((data) => {
@@ -1426,7 +1434,17 @@ function startApp() {
       buildLegendIndex();
     }, orElse());
 
-    const placesReady = fetchOverlay('places').then((data) => {
+    /**
+     * The places file, which is the whole of search.
+     *
+     * A FUNCTION, because it may be asked for twice. The field is disabled in
+     * the markup until an index exists, and this was the only thing that ever
+     * enabled it — so one failed request, retries and all, left the search
+     * field greyed out for the rest of the session with nothing on screen
+     * saying why or what to do. A failure now opens the field as its own
+     * retry button instead. See offerSearchRetry.
+     */
+    const loadPlaces = () => fetchOverlay('places').then((data) => {
       // The directory keeps the rows my campus lists without a room so a search index
       // can still be built from the file, but a null geometry is not something
       // a vector source can tile — drop them on the way in.
@@ -1434,10 +1452,12 @@ function startApp() {
         type: 'FeatureCollection',
         features: data.features.filter((feature) => feature.geometry),
       };
+      searchAvailable();
       buildSearchIndex();
       enableCategories();
       buildLegendIndex();
-    }, orElse());
+    }, orElse(() => offerSearchRetry(loadPlaces)));
+    const placesReady = loadPlaces();
 
     const directoryReady = fetchOverlay('directory').then((data) => {
       campusDirectory = data;
@@ -1485,9 +1505,13 @@ function startApp() {
     // an overlay that does not arrive costs a layer, and this costs the app.
     const routingReady = Promise.allSettled([fetchNetwork(), fetchVertices()])
       .then(([networkResult, vertexResult]) => {
+        // Already retried by the api — see withRetry — so a rejection here is
+        // a server that stayed away for the whole schedule, and nothing in this
+        // session will bring the graph back short of loading the page again.
+        // The sentence says so, rather than asking a visitor about a dev server.
         if (networkResult.status === 'rejected') {
           console.error(networkResult.reason);
-          setStatus('Routing server unreachable — is `npm run dev` still running?', true);
+          setStatus(ROUTING_OUTAGE, true);
           return;
         }
         const routable = networkResult.value;
@@ -1842,6 +1866,43 @@ function startApp() {
   });
   const searchInput = searchBox.input;
   const searchClear = searchBox.clear;
+
+  /**
+   * The search field as its own retry button, for a places file that never came.
+   *
+   * THE FIELD RATHER THAN A NEW CONTROL. It is where somebody goes to search,
+   * so it is where the news that search is down has to be, and it already wears
+   * the glass every other control does — a separate "retry" chip would be one
+   * more thing to style and one more place to look. Enabled so it can be
+   * tapped, read-only so nothing can be typed into an index that does not
+   * exist, and the placeholder says both what happened and what to do.
+   *
+   * Enter as well as a tap, so a keyboard can reach it. The retry goes through
+   * the api's own schedule again; while it runs the placeholder says so, and a
+   * second failure puts the offer back.
+   */
+  let searchPlaceholder = null;
+  function offerSearchRetry(load) {
+    searchPlaceholder ??= searchInput.placeholder;
+    searchInput.disabled = false;
+    searchInput.readOnly = true;
+    searchInput.placeholder = 'Search unavailable — tap to retry';
+    const retry = (event) => {
+      if (event.type === 'keydown' && event.key !== 'Enter') return;
+      searchInput.removeEventListener('click', retry);
+      searchInput.removeEventListener('keydown', retry);
+      searchInput.placeholder = 'Loading search…';
+      load();
+    };
+    searchInput.addEventListener('click', retry);
+    searchInput.addEventListener('keydown', retry);
+  }
+  /** The field back to itself once places have landed. A no-op on a clean boot. */
+  function searchAvailable() {
+    if (searchPlaceholder === null) return;
+    searchInput.readOnly = false;
+    searchInput.placeholder = searchPlaceholder;
+  }
   const closeResults = () => searchBox.closeResults();
   const buildSearchIndex = () => searchBox.buildIndex();
   const refreshPopularity = () => searchBox.refreshPopularity();
