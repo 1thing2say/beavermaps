@@ -19,6 +19,7 @@ import {
   OFF_ROUTE_M,
   OFF_ROUTE_FIXES,
   GIVE_BACK_M,
+  GIVE_BACK_FIXES,
   BANNER_SWAP_MS,
 } from '../src/navigation.js';
 import { instructionFor } from '../src/maneuvers.js';
@@ -466,26 +467,31 @@ const walkingTheU = () => {
 /** `at`, moved `metres` north. A metre of latitude is about 1/111 000 of a degree. */
 const north = ([lon, lat], metres) => [lon, lat + metres / 111_000];
 
-test('a fix by the start that drifts toward the return leg does not skip the walk', () => {
-  withDocument(() => {
-    const h = walkingTheU();
-    h.nav.start();
-    const drifted = north(U_WALK.geometry.coordinates[0], 12);   // 8 m from the return leg
+// 12 m north is inside SNAP_FIT_M, so the window places it; 16 m is outside
+// it, and the poor fit makes the door a candidate leap — one that three
+// agreeing fixes used to carry out, from a phone that had not moved.
+for (const [metres, accuracy] of [[12, 10], [16, 15], [16, 10]]) {
+  test(`a fix by the start ${metres} m toward the return leg (accuracy ${accuracy}) does not skip the walk`, () => {
+    withDocument(() => {
+      const h = walkingTheU();
+      h.nav.start();
+      const drifted = north(U_WALK.geometry.coordinates[0], metres);
 
-    // The precondition, so this test cannot pass for the wrong reason: the
-    // nearest point on the whole line really is near the far end.
-    const naive = nearestPointOnLine(h.route.line, point(drifted)).properties.location;
-    assert.ok(naive > h.route.totalKm * 0.9, `the fixture is not ambiguous (${naive} km)`);
+      // The precondition, so this test cannot pass for the wrong reason: the
+      // nearest point on the whole line really is near the far end.
+      const naive = nearestPointOnLine(h.route.line, point(drifted)).properties.location;
+      assert.ok(naive > h.route.totalKm * 0.9, `the fixture is not ambiguous (${naive} km)`);
 
-    // A phone held still at the start, every fix pulled the same way.
-    for (let i = 0; i < 10; i++) h.nav.moved(drifted, { accuracy: 10 });
+      // A phone held still at the start, every fix pulled the same way.
+      for (let i = 0; i < 10; i++) h.nav.moved(drifted, { accuracy });
 
-    assert.equal(h.nav.stepIndex(), 1, 'corners were retired from the start line');
-    const sign = h.dom.stack.children.at(-1);
-    assert.notEqual(sign.querySelector('.nav-distance').textContent, 'Arrived');
-    assert.notEqual(h.dom.remaining.textContent, '0 ft');
+      assert.equal(h.nav.stepIndex(), 1, 'corners were retired from the start line');
+      const sign = h.dom.stack.children.at(-1);
+      assert.notEqual(sign.querySelector('.nav-distance').textContent, 'Arrived');
+      assert.notEqual(h.dom.remaining.textContent, '0 ft');
+    });
   });
-});
+}
 
 test('a noisy walk round the U still arrives, one corner at a time', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -650,9 +656,13 @@ test('a corner retired too early comes back once fixes put you well short of it'
     for (let i = 0; i < 3; i++) h.nav.moved(at(h, retiredAt - GIVE_BACK_M / 2000), { accuracy: 5 });
     assert.equal(h.nav.stepIndex(), 2, 'given back inside the slack');
 
-    // GIVE_BACK_M short of it and more: the corner is yours again.
+    // GIVE_BACK_M short of it and more, GIVE_BACK_FIXES times running: the
+    // corner is yours again.
     const back = retiredAt - GIVE_BACK_M / 1000 - 0.002;
-    h.nav.moved(at(h, back), { accuracy: 5 });
+    for (let i = 1; i < GIVE_BACK_FIXES; i++) {
+      h.nav.moved(at(h, back), { accuracy: 5 });
+      assert.equal(h.nav.stepIndex(), 2, `given back after ${i} fix(es)`);
+    }
     h.nav.moved(at(h, back), { accuracy: 5 });
     assert.equal(h.nav.stepIndex(), 1, 'the corner never came back');
     assert.equal(liveSign(h).instruction, instructionFor('right'));
@@ -690,10 +700,10 @@ for (const stride of [25, 30]) {
     // A brisk walk with a phone that reports every few seconds, or a jog. The
     // window ahead is short on purpose (see SNAP_AHEAD_M), and a fix beyond it
     // must not have to wait for JUMP_FIXES others to agree before it counts:
-    // that is two fixes in every three standing still. A fix just past the
-    // window, or just round a corner from its end, fits there and is held
-    // there, so it can lag — by less than the stride, and the next fix
-    // catches up.
+    // that is two fixes in every three standing still. It is followed up the
+    // line to where it fits. Round a corner from the window's end it may fit
+    // the end better than anywhere further on, and is held there, so it can
+    // lag — by less than the stride, and the next fix catches up.
     withDocument(() => {
       const h = walking();
       h.nav.start();
@@ -805,5 +815,344 @@ test('coming back onto the line somewhere new never freezes the sign', () => {
     assert.doesNotMatch(liveSign(h).instruction, /back to the route/i);
     assert.equal(h.nav.stepIndex(), 2);
     assert.equal(liveSign(h).instruction, instructionFor('left'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GPS noise — short legs, hairpins, sparse fixes and the way onto the line
+// ---------------------------------------------------------------------------
+
+/**
+ * A point `x` m east and `y` m north of the corner of campus the fixtures
+ * start from, on the sphere turf measures on — so a route drawn in metres
+ * here is that many metres long to `route.cumulative`.
+ */
+const METRES_PER_DEGREE = (Math.PI * 6_371_008.8) / 180;
+const ORIGIN = U_WALK.geometry.coordinates[0];
+const local = ([x, y]) => [
+  ORIGIN[0] + x / (METRES_PER_DEGREE * Math.cos((ORIGIN[1] * Math.PI) / 180)),
+  ORIGIN[1] + y / METRES_PER_DEGREE,
+];
+
+/** A harness walking a route drawn in local metres, one maneuver per vertex. */
+function walkingLocal(points, turns) {
+  const route = createRoute();
+  route.set({
+    geometry: { type: 'LineString', coordinates: points.map(local) },
+    maneuvers: ['depart', ...turns, 'arrive'].map((type, index) => ({ index, type })),
+  });
+  return harness({ route });
+}
+
+test('two fixes beside a short jog take its corners one at a time', () => {
+  // A left, an 8 m leg, a right, a left. Two fixes 9.4 m to the side of a
+  // walker 3 m short of the first corner — each inside its own accuracy
+  // circle — used to land on the leg after the jog and take both corners at
+  // once, and the right turn between them was never shown.
+  withDocument(() => {
+    const h = walkingLocal([[0, 0], [60, 0], [60, 8], [120, 8], [120, 50]], ['left', 'right', 'left']);
+    h.nav.start();
+    strideAlong(h, 0, 0.05, { stepKm: 0.0014 });
+    assert.equal(h.nav.stepIndex(), 1);
+
+    const seen = [];
+    for (const fix of [[53, 9.4], [54, 9.4]]) {
+      h.nav.moved(local(fix), { accuracy: 10 });
+      seen.push(h.nav.stepIndex());
+    }
+    for (let m = 52; m <= h.route.totalKm * 1000; m += 1.4) {
+      h.nav.moved(at(h, m / 1000), { accuracy: 5 });
+      seen.push(h.nav.stepIndex());
+    }
+    assert.ok(seen.includes(2), `the right turn was never shown: ${[...new Set(seen)]}`);
+    for (let i = 1; i < seen.length; i++) {
+      assert.ok(Math.abs(seen[i] - seen[i - 1]) <= 1, `the sign jumped ${seen[i - 1]} -> ${seen[i]}`);
+    }
+    assert.equal(h.nav.stepIndex(), 4);
+  });
+});
+
+test('fixes pulled toward the way out of a hairpin do not walk you back down it', () => {
+  // Legs 10 m apart. Two fixes 5.5 m off the way home, on the way-out side,
+  // used to put you on the way out; accurate fixes after that were 10 m from
+  // it, inside SNAP_FIT_M, and slid you back along it, giving back both
+  // corners — and the sign reached the third corner pointing at the first.
+  withDocument(() => {
+    const h = walkingLocal([[0, 0], [100, 0], [100, 10], [0, 10], [0, 80]], ['left', 'left', 'right']);
+    h.nav.start();
+    strideAlong(h, 0, 0.12, { stepKm: 0.0014 });
+    assert.equal(h.nav.stepIndex(), 3);
+
+    h.nav.moved(local([88, 4.5]), { accuracy: 6 });
+    h.nav.moved(local([86, 4.5]), { accuracy: 6 });
+    for (let x = 84; x >= 10; x -= 2) {
+      h.nav.moved(local([x, 10]), { accuracy: 5 });
+      assert.equal(h.nav.stepIndex(), 3, `the sign went back to step ${h.nav.stepIndex()} at x=${x}`);
+      assert.equal(liveSign(h).instruction, instructionFor('right'));
+    }
+    assert.ok(Math.abs(believedKm(h) - 0.2) < 0.005, `believed at ${believedKm(h)} km, walking at 0.2`);
+  });
+});
+
+test('a walker the GPS put on the wrong leg of a hairpin is put back on the right one', () => {
+  // Here the noise wins: fixes biased toward the way out while the walker
+  // goes round the bend keep the window on the way out, and from there every
+  // fix on the way home is a few metres away and fits. The believed position
+  // walks backward while the line ahead fits better, and that is the wrong
+  // leg, put right once JUMP_FIXES agree.
+  withDocument(() => {
+    const h = walkingLocal([[0, 0], [100, 0], [100, 10], [0, 10], [0, 80]], ['left', 'left', 'right']);
+    h.nav.start();
+    strideAlong(h, 0, 0.095, { stepKm: 0.0014 });
+    // Round the bend with every fix 4 m south and 5 m west of the walker.
+    for (let m = 96; m <= 125; m += 1.4) {
+      const [x, y] = m <= 100 ? [m, 0] : m <= 110 ? [100, m - 100] : [210 - m, 10];
+      h.nav.moved(local([x - 5, y - 4]), { accuracy: 6 });
+    }
+    // The precondition: the bias did put the walker on the way out.
+    assert.ok(believedKm(h) < 0.1, `the fixture never went wrong (${believedKm(h)} km)`);
+
+    // Accurate fixes up the way home: back on it within a few of them.
+    let caught = null;
+    for (let x = 84; x >= 0 && caught === null; x -= 1.4) {
+      h.nav.moved(local([x, 10]), { accuracy: 5 });
+      if (Math.abs(believedKm(h) - (0.21 - x / 1000)) < 0.005) caught = x;
+    }
+    assert.ok(caught !== null && caught > 60, `still on the wrong leg (caught at x=${caught})`);
+    assert.equal(h.nav.stepIndex(), 3);
+  });
+});
+
+test('three fixes beside the way out are not a leap to the way home', () => {
+  // Accurate to 60 m up the outbound leg, then three fixes 17 m north — a
+  // poor fit for the leg you are on, and 3 m from the way home. The way home
+  // there is 143 m on along the route and 17 m away in a straight line: an
+  // ambiguity, not a leap, and the window keeps it. It used to read "Arrive at
+  // destination", and a steady 6 m bias afterwards kept it there.
+  withDocument(() => {
+    const h = walkingLocal([[0, 0], [121.6, 0], [121.6, 20], [0, 20]], ['left', 'left']);
+    h.nav.start();
+    strideAlong(h, 0, 0.06, { stepKm: 0.0014 });
+    for (const x of [60, 61.4, 62.8]) h.nav.moved(local([x, 17]), { accuracy: 10 });
+    assert.equal(h.nav.stepIndex(), 1, 'the corners went with three fixes beside you');
+    assert.equal(liveSign(h).instruction, instructionFor('left'));
+
+    for (let x = 64; x <= 110; x += 1.4) {
+      h.nav.moved(local([x, 6]), { accuracy: 10 });
+      assert.equal(h.nav.stepIndex(), 1, `step ${h.nav.stepIndex()} at x=${x}`);
+    }
+  });
+});
+
+test('a leap to the door is not arriving; the next fix there is', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    strideAlong(h, 0, 0.03);
+    const door = WALK.geometry.coordinates[3];
+    for (let i = 0; i < JUMP_FIXES; i++) h.nav.moved(door, { accuracy: 5 });
+    assert.equal(h.nav.stepIndex(), WALK.maneuvers.length - 1, 'the precondition: the leap was believed');
+    t.mock.timers.tick(BANNER_SWAP_MS);
+    assert.notEqual(liveSign(h).distance, 'Arrived', 'a leap said you had arrived');
+    assert.equal(liveSign(h).instruction, instructionFor('arrive'));
+
+    h.nav.moved(door, { accuracy: 5 });
+    assert.equal(liveSign(h).distance, 'Arrived');
+  });
+});
+
+test('standing at the door in noise never shows a distance beside "you have arrived"', (t) => {
+  // Fixes either side of ARRIVED_FEET used to take "Arrived" down by
+  // rewriting only the distance: "50 ft | You have reached your destination".
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  withDocument(() => {
+    const h = walkingTheU();
+    h.nav.start();
+    strideAlong(h, 0, h.route.totalKm);
+    t.mock.timers.tick(BANNER_SWAP_MS);
+    h.nav.moved(at(h, h.route.totalKm), { accuracy: 12 });
+    assert.equal(liveSign(h).distance, 'Arrived');
+
+    for (const back of [15, 2, 18, 0, 12, 40, 40, 40, 0, 0]) {
+      h.nav.moved(at(h, h.route.totalKm - back / 1000), { accuracy: 12 });
+      t.mock.timers.tick(BANNER_SWAP_MS);
+      const sign = liveSign(h);
+      if (/reached your destination/i.test(sign.instruction)) {
+        assert.equal(sign.distance, 'Arrived', `"${sign.distance} | ${sign.instruction}" ${back} m back`);
+      } else {
+        assert.notEqual(sign.distance, 'Arrived');
+      }
+      // A few metres back in noise does not take it down at all.
+      if (back <= 18) assert.equal(sign.distance, 'Arrived', `unsaid ${back} m back`);
+    }
+  });
+});
+
+for (const stride of [25, 30, 40]) {
+  test(`fixes ${stride} m apart round the U keep the camera and the sign moving`, () => {
+    // On a walk that doubles back, the back of the window sits on the way out
+    // and can be nearer the fix than its front: catching up has to follow the
+    // fix up the line all the same. It used to freeze the camera for two
+    // fixes after the second corner, with the sign on "Turn left 20 ft".
+    for (const phase of [0, 7, 14]) {
+      withDocument(() => {
+        const h = walkingTheU();
+        h.nav.start();
+        const seen = new Set([h.nav.stepIndex()]);
+        let last = 0;
+        for (let km = (stride + phase) / 1000; km < h.route.totalKm; km += stride / 1000) {
+          const eases = h.map.eases.length;
+          h.nav.moved(at(h, km), { accuracy: 5 });
+          assert.equal(h.map.eases.length, eases + 1, `the camera froze at ${km} km (phase ${phase})`);
+          const now = believedKm(h);
+          assert.ok(now > last, `stalled at ${last} km with a fix at ${km} km (phase ${phase})`);
+          assert.ok(km - now < stride / 1000, `believed at ${now} km, walking at ${km} km`);
+          last = now;
+          seen.add(h.nav.stepIndex());
+        }
+        h.nav.moved(at(h, h.route.totalKm), { accuracy: 5 });
+        assert.equal(h.nav.stepIndex(), U_WALK.maneuvers.length - 1);
+        if (stride < 40) assert.ok(seen.has(2), `the second corner was never shown (phase ${phase})`);
+      });
+    }
+  });
+}
+
+test('a jogger whose phone reports every twenty seconds is followed on every fix', () => {
+  // 61 m and 70 m a fix: further than SNAP_CATCH_UP_M, and further apart than
+  // any fixed agreement distance. With the fixes' own times the catch-up
+  // reaches as far as SNAP_PACE_MPS would carry you since the last one.
+  for (const stride of [61, 70]) {
+    withDocument(() => {
+      const h = walkingLocal([[0, 0], [564, 0]], []);
+      h.nav.start();
+      let last = 0;
+      for (let k = 1; k * stride < 564; k++) {
+        h.nav.moved(at(h, (k * stride) / 1000), { accuracy: 5, timestamp: k * 20_000 });
+        const now = believedKm(h);
+        assert.ok(Math.abs(now - (k * stride) / 1000) < 0.002, `believed at ${now} km, walking at ${k * stride} m`);
+        assert.ok(now > last);
+        last = now;
+      }
+    });
+  }
+});
+
+test('without times, a jogger far ahead of the window waits for one leap and is then followed', () => {
+  // Further on than SNAP_CATCH_UP_M with no time to say it could be, so the
+  // first JUMP_FIXES - 1 wait to be agreed like any leap. The run of agreeing
+  // leaps then carries on once believed, rather than starting again from one
+  // at every fix.
+  withDocument(() => {
+    const h = walkingLocal([[0, 0], [564, 0]], []);
+    h.nav.start();
+    strideAlong(h, 0, 0.01);
+    let stalled = 0;
+    for (let k = 1; k <= 8; k++) {
+      const before = believedKm(h);
+      h.nav.moved(at(h, 0.01 + k * 0.061), { accuracy: 5 });
+      if (believedKm(h) === before) stalled++;
+    }
+    assert.equal(stalled, JUMP_FIXES - 1);
+    assert.ok(Math.abs(believedKm(h) - (0.01 + 8 * 0.061)) < 0.002);
+  });
+});
+
+test('a sparse fix past a corner turns the sign at once', () => {
+  // A phone reporting every 30 m is not jitter: waiting for a second fix kept
+  // the sign on a corner the walker was already 40 m past.
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    const steps = {};
+    for (let k = 0; k <= 10; k++) {
+      const m = 10 + k * 30;
+      h.nav.moved(at(h, m / 1000), { accuracy: 5 });
+      steps[m] = h.nav.stepIndex();
+    }
+    assert.equal(steps[70], 1);
+    assert.equal(steps[100], 2, 'the first corner is at 87 m');
+    assert.equal(steps[190], 2);
+    assert.equal(steps[220], 3, 'the second corner is at 198 m');
+  });
+});
+
+test('standing short of a corner in noise does not flip the sign back and forth', () => {
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    const corner = h.route.maneuverKm(1);
+    strideAlong(h, 0, corner - 0.01);
+    const seen = [];
+    for (const d of [-6, -6, -19, -19, -6, -6, -19, -19, -19]) {
+      h.nav.moved(at(h, corner + d / 1000), { accuracy: 16 });
+      seen.push(h.nav.stepIndex());
+    }
+    const changes = seen.filter((s, i) => i > 0 && s !== seen[i - 1]).length;
+    assert.ok(changes <= 1, `the sign changed ${changes} times: ${seen.join('')}`);
+  });
+});
+
+test('hovering around OFF_ROUTE_M on the way to the line is still approaching it', () => {
+  // One fix at 39 m used to join the walk to the line, and the next three at
+  // 41-43 m — ordinary noise on a walker heading straight for it — said you
+  // had left the route.
+  withDocument(() => {
+    const h = walkingLocal([[0, 0], [87, 0], [87, 111], [217, 111]], ['right', 'left']);
+    h.nav.start();
+    for (let m = REACH_M; m >= 60; m -= 20) h.nav.moved(local([0, -m]), { accuracy: 20 });
+    for (const m of [39, 43, 42, 41, 38, 44, 42, 41]) {
+      h.nav.moved(local([0, -m]), { accuracy: 20 });
+      assert.equal(h.nav.isOffRoute(), false, `off route ${m} m out`);
+      assert.doesNotMatch(liveSign(h).instruction, /back to the route/i);
+    }
+  });
+});
+
+test('one optimistic fix on the way to the line does not make standing still "walking away"', () => {
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    for (const m of [300, 255, 300, 300, 300, 300]) {
+      h.nav.moved(north(WALK.geometry.coordinates[0], -m), { accuracy: 30 });
+      assert.equal(h.nav.isOffRoute(), false, `off route at ${m} m`);
+    }
+  });
+});
+
+test('back on the line while a rejoin is agreed, the sign does not say "0 ft, head back"', () => {
+  withDocument(() => {
+    const h = walkingLocal([[0, 0], [400, 0]], []);
+    h.nav.start();
+    strideAlong(h, 0, 0.05);
+    for (let i = 0; i < OFF_ROUTE_FIXES + 1; i++) h.nav.moved(local([50, -60]), { accuracy: 5 });
+    assert.equal(h.nav.isOffRoute(), true);
+
+    for (const km of [0.15, 0.152]) {
+      const eases = h.map.eases.length;
+      h.nav.moved(at(h, km), { accuracy: 5 });
+      assert.doesNotMatch(liveSign(h).instruction, /back to the route/i, `at ${km} km`);
+      assert.match(liveSign(h).instruction, /rejoining/i);
+      assert.equal(h.map.eases.length, eases + 1, 'the camera stopped following');
+    }
+    h.nav.moved(at(h, 0.154), { accuracy: 5 });
+    assert.equal(liveSign(h).instruction, instructionFor('arrive'));
+  });
+});
+
+test('joining the line away from its start keeps the camera following', () => {
+  // An off-network start whose walk first meets the line 100 m along it: the
+  // fix that joins is outside the window, so it waits for JUMP_FIXES like a
+  // leap, and with nothing yet believed the camera used to stop for them.
+  withDocument(() => {
+    const h = walkingLocal([[0, 0], [400, 0]], []);
+    h.nav.start();
+    for (let m = 250; m >= 0; m -= 10) {
+      const eases = h.map.eases.length;
+      h.nav.moved(local([100, -m]), { accuracy: 8 });
+      assert.equal(h.map.eases.length, eases + 1, `the camera stopped ${m} m from the line`);
+    }
+    assert.ok(Math.abs(believedKm(h) - 0.1) < 0.002);
   });
 });
