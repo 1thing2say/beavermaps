@@ -167,3 +167,53 @@ test('no row promises somewhere to go without having one', () => {
   }
   assert.ok(checked > 600, `only ${checked} rows exercised`);
 });
+
+test('two schedule buildings sharing the map name both answer to it', () => {
+  // Fine Arts and its one-room "Makeup room" are both Fine & Applied Arts on
+  // the map; Science and Science Portable are both Science & Engineering. When
+  // a name held one building, the second replaced the first and the name on the
+  // sign found nothing for the main building.
+  assert.equal(find('Fine & Applied Arts 501')[0]?.name, 'Room 501');
+  assert.equal(find('Fine & Applied Arts 501')[0]?.place, 'Fine & Applied Arts');
+  assert.equal(find('Fine & Applied Arts 519')[0]?.name, 'Room 519');
+  assert.equal(find('Science & Engineering 401')[0]?.name, 'Room 401');
+  assert.equal(find('Science & Engineering 401').length, 1, 'the TEW 401 leaked into a named query');
+  assert.equal(find('Science & Engineering 490')[0]?.name, 'Room 490', 'the portable was lost');
+});
+
+test('every name on the sign finds the building, abbreviation included', () => {
+  // The map labels say "Technical Education West (TEW)"; people say TEW.
+  for (const [q, place] of [
+    ['TEW 400', 'Technical Education West (TEW)'],
+    ['Technical Education West 400', 'Technical Education West (TEW)'],
+    ['LRC 125', 'Learning Resource Center (LRC)'],
+    ['ER 001', 'Environmental Resources (ER)'],
+    ['CDC 350', 'Child Development Center (CDC)'],
+  ]) {
+    const hits = find(q);
+    assert.equal(hits.length, 1, `"${q}" returned ${hits.length} rows`);
+    assert.equal(hits[0].place, place, `"${q}" went to ${hits[0].place}`);
+  }
+  // A lettered room in a building that has it.
+  assert.equal(find('Library L108')[0]?.place, 'Library');
+  assert.equal(find('l108')[0]?.place, 'Library');
+});
+
+test('the title a room row carries reads back as that room', () => {
+  // Picking a room writes "Room 320" into the field, so refocusing it has to
+  // find the same room again rather than nothing.
+  assert.deepEqual(find('Room 320'), find('320'));
+  assert.deepEqual(find('room 401'), find('401'));
+  assert.deepEqual(find('rm 320'), find('320'));
+  assert.equal(find('Room 320').length, 1);
+});
+
+test('every course in the schedule can be found by its code', () => {
+  // Including the Cal-GETC common numbers — ENGL C1000, STAT C1000H — whose
+  // number starts with a letter and once failed the room-shape gate before the
+  // course reading was ever tried.
+  const lost = Object.keys(data.courses).filter((code) =>
+    !find(code).some((hit) => hit.name.startsWith(`${code} — `)));
+  assert.deepEqual(lost, []);
+  assert.match(find('engl c1000')[0]?.name ?? '', /^ENGL C1000 — /);
+});
