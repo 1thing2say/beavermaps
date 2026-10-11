@@ -40,6 +40,7 @@ import { createLongPress } from './long-press.js';
 import { FIT_MARGIN, paddingAround } from './viewport.js';
 import { createStatusLine } from './status-line.js';
 import { createApi } from './api.js';
+import { createDrawGate } from './draw-gate.js';
 import { createChoreography } from './pin-choreography.js';
 import { createPinState, POI_LABEL_LAYERS } from './pin-state.js';
 import { createBuildingsLighting, BUILDING_EMISSIVE } from './buildings-lighting.js';
@@ -1235,7 +1236,10 @@ function startApp() {
     // on every device. Lost when main.js was split into modules.
     openBuilding: (props) => cards.openBuilding(props),
     openPlace: (place) => openPlace(place),
-    addCategoryLayer: () => markers.addCategory(),
+    // Gated like every other overlay layer: the legend enables itself when the
+    // amenities land, which can be before there is a style to add a layer to.
+    // style.load's rebuild adds it then. See `draw`.
+    addCategoryLayer: () => { if (styleBuilt) markers.addCategory(); },
     buildingSub: (props) => buildingSub(props),
   });
   const shownCategory = () => legend.shownCategory();
@@ -1253,7 +1257,7 @@ function startApp() {
   // looks broken rather than early.
   legend.renderKinds();
 
-  map.on('load', async () => {
+  map.on('load', () => {
     // From here on the sky is followed rather than sampled once. See
     // watchDaylight.
     watchDaylight();
@@ -1356,183 +1360,209 @@ function startApp() {
     // A page reloaded with the debug fixture already set asked for the blue dot
     // before this control existed. It exists now.
     if (geolocation.fixture) startLocating();
-
-    // All from the same server, so ask together — and DRAW EACH ONE AS IT
-    // LANDS, rather than waiting for the slowest.
-    //
-    // This used to be one `await Promise.allSettled([...])` with the handling
-    // below it, which meant nothing appeared until every request had finished.
-    // Measured at 8 Mbps: seven of the eight were done at 13.8 s and the
-    // basemap sheet at 15.3 s, so buildings — 37 KB, arrived at 13.5 s — sat in
-    // hand for nearly two seconds waiting on a 1.6 MB file it has no
-    // relationship to. The campus then appeared all at once, which is why a
-    // fully drawn Google basemap with a campus-shaped hole in it was the normal
-    // sight on a phone. Their tiles paint one at a time; ours had one gate.
-    //
-    // Each branch is independent and each one degrades alone: lose a file and
-    // the layer it draws is missing, not the load. Only two orderings exist and
-    // both are stated where they are needed — labels wait on the sheet, and the
-    // routing tail waits on both of its own requests.
-    //
-    // Said out loud while it happens, because until the network settles the map
-    // is a picture — and the hint under the distance is describing a gesture
-    // that will not do anything yet. The failure mode without this is somebody
-    // pressing and holding on a map that has not finished arriving and
-    // concluding the app is broken.
-    setBusy(true);
-    setProgress('Loading the campus…');
-
-    /** A source that failed is one missing layer, so it is logged and stepped over. */
-    const orElse = (whenMissing) => (reason) => { console.error(reason); whenMissing?.(); };
-
-    const buildingsReady = fetchOverlay('buildings').then((data) => {
-      campusBuildings = data;
-      if (navigating()) addBuildingsLayer();
-      buildLegendIndex();
-    }, orElse());
-
-    const basemapReady = fetchOverlay('basemap').then((data) => {
-      // Trimmed to the campus on the way in. my campus's sheet carries the streets
-      // around it, both north arrows and the trees along the verge, and every
-      // one of those lands on a ground that is already drawing them — see
-      // src/campus-clip.js. Its perimeter walkways are trimmed by the same rule
-      // as the network drawn over them, so the band and the ribbon break, or
-      // do not, in the same places.
-      campusBasemap = trimToCampus(data, CAMPUS_RING);
-      addBasemapLayers();
-      // The footprints the network is cut against for imagery have landed;
-      // a network that came first is re-cut now. A no-op before it.
-      routeLayers.paintNetwork();
-      // The sheet arriving is what this was waiting for — the closed block is
-      // one of its shapes, so on a cold load style.load has already been and
-      // gone with nothing for addClosedLayers to draw.
-      addClosedLayers();
-      buildLegendIndex();
-    }, orElse());
-
-    const amenitiesReady = fetchOverlay('amenities').then((data) => {
-      // Named on the way in, the same way the labels are classified: only the
-      // four amenities whose label identifies them keep one to print. See
-      // withAmenityNames — the other eighty said the icon's own meaning, in
-      // type, four times over on a single building.
-      campusAmenities = withAmenityNames(data);
-      addLampLayers();
-      addAmenityLayer();
-      enableCategories();
-      buildLegendIndex();
-    }, orElse());
-
-    const placesReady = fetchOverlay('places').then((data) => {
-      // The directory keeps the rows my campus lists without a room so a search index
-      // can still be built from the file, but a null geometry is not something
-      // a vector source can tile — drop them on the way in.
-      campusPlaces = {
-        type: 'FeatureCollection',
-        features: data.features.filter((feature) => feature.geometry),
-      };
-      buildSearchIndex();
-      enableCategories();
-      buildLegendIndex();
-    }, orElse());
-
-    const directoryReady = fetchOverlay('directory').then((data) => {
-      campusDirectory = data;
-      // The cold-start half of the suggestion order is read off this file, so
-      // the ranking is only complete once it is here.
-      refreshPopularity();
-      addDirectoryLayers();
-      // Built once, on arrival, rather than when the debug menu opens: it is
-      // thirty rows off a file that is already in hand, and doing it now means
-      // the menu is never briefly empty on the frame it is opened.
-      //
-      // No re-frame after it. The list used to be in the left column, where
-      // thirty rows landing was a chunk of canvas that had not been reserved
-      // when the campus was first fitted; a card that floats over the map on
-      // request costs the framing nothing.
-      renderBuildings();
-      buildLegendIndex();
-    }, orElse(() => {
-      // Nothing to list, so the section goes rather than sitting empty under a
-      // heading. Its own hidden state, not the debug menu's — the rest of the
-      // card is unaffected by a directory that failed to load.
-      buildingsPanel.classList.add('hidden');
-    }));
-
-    // THE ONE ORDERING AMONG THE OVERLAYS. Requested now, with the rest, so it
-    // is on the wire in parallel; applied only once the sheet has been dealt
-    // with, because withParkingMarks reads it. `basemapReady` has already
-    // swallowed its own failure, so this runs either way — and if the sheet
-    // never came, withParkingMarks adds nothing and the five named lots still
-    // get their P.
-    const labelsArrived = fetchOverlay('labels');
-    const labelsReady = basemapReady.then(() => labelsArrived).then((data) => {
-      // Classified on the way in rather than in the build script: which disc a
-      // building name earns is presentation, and labels.json stays exactly what
-      // my campus's cartographer set. See src/poi.js.
-      // ...and the lots my campus never named get a marker before that runs, so the
-      // generated ones and the printed ones are classified by the same pass and
-      // cannot end up wearing different discs.
-      campusLabels = withPoiIcons(withParkingMarks(data, campusBasemap));
-      addLabelLayers();
-    }, orElse());
-
-    // The routing tail, which is the only branch that needs two of its own
-    // requests and the only one whose failure is worth telling somebody about:
-    // an overlay that does not arrive costs a layer, and this costs the app.
-    const routingReady = Promise.allSettled([fetchNetwork(), fetchVertices()])
-      .then(([networkResult, vertexResult]) => {
-        if (networkResult.status === 'rejected') {
-          console.error(networkResult.reason);
-          setStatus('Routing server unreachable — is `npm run dev` still running?', true);
-          return;
-        }
-        const routable = networkResult.value;
-
-        // Snapping targets come from /api/vertices, which is the whole routing
-        // graph. Falling back to the drawn network keeps clicks working on
-        // campus if that one request fails — degraded, not broken: a start point
-        // outside the fence would be dragged in to the nearest campus path.
-        const vertices = vertexResult.status === 'fulfilled'
-          ? vertexResult.value.vertices
-          : [...new Map(routable.features
-            .flatMap((f) => f.geometry.coordinates)
-            .map((c) => [`${c[0]},${c[1]}`, c])).values()];
-        if (vertexResult.status === 'rejected') console.error(vertexResult.reason);
-        networkPoints = featureCollection(vertices.map(v => point(v)));
-
-        // The moment a press-and-hold starts meaning something, and therefore
-        // the moment it is honest to advertise one. Until here the strip has
-        // been showing "Loading the campus…" over a map that could not be
-        // routed on.
-        setIdleStatus();
-
-        // Drawn only as far as the fence. my campus's driveways are drawn running out
-        // to the public road, and past the boundary that white ribbon lands on
-        // top of a road the basemap is already drawing. Cut rather than dropped,
-        // so a driveway still reaches the gate instead of stopping at the
-        // junction inside it — the route still runs the whole way, over their
-        // linework. A perimeter walkway that strays over the line and comes
-        // back is NOT cut: the line is OpenStreetMap's, and the walkway is
-        // campus on both sides of it. See EXCURSION_M in src/campus-clip.js.
-        customNetwork = trimToCampus(routable, CAMPUS_RING);
-
-        // Through route-layers rather than straight onto the source, which
-        // marks the stretches under a roof for the imagery filter on the way.
-        routeLayers.paintNetwork();
-
-        // The lamps along it follow: dropped from the stubs that were cut away,
-        // restored on the stretches past the fence that were kept.
-        shownLamps = trimPointsAlong(campusLamps, customNetwork, CAMPUS_RING);
-        map.getSource('campus-lamps')?.setData(shownLamps);
-      });
-
-    // The spinner belongs to the whole errand, so it stops when the last of
-    // these does — not when the first layer appears.
-    await Promise.allSettled([
-      buildingsReady, basemapReady, amenitiesReady, placesReady,
-      directoryReady, labelsReady, routingReady,
-    ]).finally(() => setBusy(false));
   });
+
+  // All from the same server, so ask together — and DRAW EACH ONE AS IT
+  // LANDS, rather than waiting for the slowest.
+  //
+  // AND ASK NOW, NOT ON `load`. These used to be sent from inside the map's
+  // `load` handler, and `load` waits for the whole first basemap render — the
+  // style, its imports, the sprite, every tile in view and the landmark models.
+  // So the campus, the search index and the routing graph queued behind
+  // somebody else's tiles, and one stalled tile meant they were never asked
+  // for at all: no search, no legend, no routing, from a server that was fine.
+  // They go out with the basemap now, and each one is drawn when there is a
+  // style to draw it into — see `draw` below.
+  //
+  // This used to be one `await Promise.allSettled([...])` with the handling
+  // below it, which meant nothing appeared until every request had finished.
+  // Measured at 8 Mbps: seven of the eight were done at 13.8 s and the
+  // basemap sheet at 15.3 s, so buildings — 37 KB, arrived at 13.5 s — sat in
+  // hand for nearly two seconds waiting on a 1.6 MB file it has no
+  // relationship to. The campus then appeared all at once, which is why a
+  // fully drawn Google basemap with a campus-shaped hole in it was the normal
+  // sight on a phone. Their tiles paint one at a time; ours had one gate.
+  //
+  // Each branch is independent and each one degrades alone: lose a file and
+  // the layer it draws is missing, not the load. Only two orderings exist and
+  // both are stated where they are needed — labels wait on the sheet, and the
+  // routing tail waits on both of its own requests.
+  //
+  // Said out loud while it happens, because until the network settles the map
+  // is a picture — and the hint under the distance is describing a gesture
+  // that will not do anything yet. The failure mode without this is somebody
+  // pressing and holding on a map that has not finished arriving and
+  // concluding the app is broken.
+  setBusy(true);
+  setProgress('Loading the campus…');
+
+  /** A source that failed is one missing layer, so it is logged and stepped over. */
+  const orElse = (whenMissing) => (reason) => { console.error(reason); whenMissing?.(); };
+
+  /**
+   * Draw into the map if there is a style to draw into; otherwise leave it to
+   * style.load, whose rebuild (addNetworkLayers) draws every layer from the
+   * data stored by then. See src/draw-gate.js.
+   *
+   * There often is not: data can land before the first style has, and during
+   * any setStyle. The throw that followed used to land in the middle of these
+   * handlers, inside a `.then` whose `orElse` cannot catch its own callback's
+   * error: the rest of the handler never ran, and basemapReady rejected —
+   * taking labelsReady with it, so the building names were never stored and
+   * no later style.load could draw them. So every handler stores its data and
+   * does its map-free work first, and draws LAST, through this.
+   */
+  const draw = createDrawGate(() => styleBuilt);
+
+  const buildingsReady = fetchOverlay('buildings').then((data) => {
+    campusBuildings = data;
+    buildLegendIndex();
+    if (navigating()) draw(addBuildingsLayer);
+  }, orElse());
+
+  const basemapReady = fetchOverlay('basemap').then((data) => {
+    // Trimmed to the campus on the way in. my campus's sheet carries the streets
+    // around it, both north arrows and the trees along the verge, and every
+    // one of those lands on a ground that is already drawing them — see
+    // src/campus-clip.js. Its perimeter walkways are trimmed by the same rule
+    // as the network drawn over them, so the band and the ribbon break, or
+    // do not, in the same places.
+    campusBasemap = trimToCampus(data, CAMPUS_RING);
+    buildLegendIndex();
+    // The footprints the network is cut against for imagery have landed;
+    // a network that came first is re-cut now. A no-op before it.
+    routeLayers.paintNetwork();
+    // The sheet arriving is what this was waiting for — the closed block is
+    // one of its shapes, so on a cold load style.load has already been and
+    // gone with nothing for addClosedLayers to draw.
+    draw(addBasemapLayers, addClosedLayers);
+  }, orElse());
+
+  const amenitiesReady = fetchOverlay('amenities').then((data) => {
+    // Named on the way in, the same way the labels are classified: only the
+    // four amenities whose label identifies them keep one to print. See
+    // withAmenityNames — the other eighty said the icon's own meaning, in
+    // type, four times over on a single building.
+    campusAmenities = withAmenityNames(data);
+    // Its category layer is drawn through `draw` too — see addCategoryLayer
+    // where the legend is built — so the legend is enabled either way.
+    enableCategories();
+    buildLegendIndex();
+    draw(addLampLayers, addAmenityLayer);
+  }, orElse());
+
+  const placesReady = fetchOverlay('places').then((data) => {
+    // The directory keeps the rows my campus lists without a room so a search index
+    // can still be built from the file, but a null geometry is not something
+    // a vector source can tile — drop them on the way in.
+    campusPlaces = {
+      type: 'FeatureCollection',
+      features: data.features.filter((feature) => feature.geometry),
+    };
+    buildSearchIndex();
+    enableCategories();
+    buildLegendIndex();
+  }, orElse());
+
+  const directoryReady = fetchOverlay('directory').then((data) => {
+    campusDirectory = data;
+    // The cold-start half of the suggestion order is read off this file, so
+    // the ranking is only complete once it is here.
+    refreshPopularity();
+    // Built once, on arrival, rather than when the debug menu opens: it is
+    // thirty rows off a file that is already in hand, and doing it now means
+    // the menu is never briefly empty on the frame it is opened.
+    //
+    // No re-frame after it. The list used to be in the left column, where
+    // thirty rows landing was a chunk of canvas that had not been reserved
+    // when the campus was first fitted; a card that floats over the map on
+    // request costs the framing nothing.
+    renderBuildings();
+    buildLegendIndex();
+    draw(addDirectoryLayers);
+  }, orElse(() => {
+    // Nothing to list, so the section goes rather than sitting empty under a
+    // heading. Its own hidden state, not the debug menu's — the rest of the
+    // card is unaffected by a directory that failed to load.
+    buildingsPanel.classList.add('hidden');
+  }));
+
+  // THE ONE ORDERING AMONG THE OVERLAYS. Requested now, with the rest, so it
+  // is on the wire in parallel; applied only once the sheet has been dealt
+  // with, because withParkingMarks reads it. Whatever happened to the sheet,
+  // this runs — `basemapReady` swallows a failed request, and the catch here
+  // covers anything else — and if the sheet never came, withParkingMarks adds
+  // nothing and the five named lots still get their P.
+  const labelsArrived = fetchOverlay('labels');
+  // Held until it is read, so an early failure is not an unhandled rejection.
+  labelsArrived.catch(() => {});
+  const labelsReady = basemapReady.catch(() => {}).then(() => labelsArrived).then((data) => {
+    // Classified on the way in rather than in the build script: which disc a
+    // building name earns is presentation, and labels.json stays exactly what
+    // my campus's cartographer set. See src/poi.js.
+    // ...and the lots my campus never named get a marker before that runs, so the
+    // generated ones and the printed ones are classified by the same pass and
+    // cannot end up wearing different discs.
+    campusLabels = withPoiIcons(withParkingMarks(data, campusBasemap));
+    draw(addLabelLayers);
+  }, orElse());
+
+  // The routing tail, which is the only branch that needs two of its own
+  // requests and the only one whose failure is worth telling somebody about:
+  // an overlay that does not arrive costs a layer, and this costs the app.
+  const routingReady = Promise.allSettled([fetchNetwork(), fetchVertices()])
+    .then(([networkResult, vertexResult]) => {
+      if (networkResult.status === 'rejected') {
+        console.error(networkResult.reason);
+        setStatus('Routing server unreachable — is `npm run dev` still running?', true);
+        return;
+      }
+      const routable = networkResult.value;
+
+      // Snapping targets come from /api/vertices, which is the whole routing
+      // graph. Falling back to the drawn network keeps clicks working on
+      // campus if that one request fails — degraded, not broken: a start point
+      // outside the fence would be dragged in to the nearest campus path.
+      const vertices = vertexResult.status === 'fulfilled'
+        ? vertexResult.value.vertices
+        : [...new Map(routable.features
+          .flatMap((f) => f.geometry.coordinates)
+          .map((c) => [`${c[0]},${c[1]}`, c])).values()];
+      if (vertexResult.status === 'rejected') console.error(vertexResult.reason);
+      networkPoints = featureCollection(vertices.map(v => point(v)));
+
+      // The moment a press-and-hold starts meaning something, and therefore
+      // the moment it is honest to advertise one. Until here the strip has
+      // been showing "Loading the campus…" over a map that could not be
+      // routed on.
+      setIdleStatus();
+
+      // Drawn only as far as the fence. my campus's driveways are drawn running out
+      // to the public road, and past the boundary that white ribbon lands on
+      // top of a road the basemap is already drawing. Cut rather than dropped,
+      // so a driveway still reaches the gate instead of stopping at the
+      // junction inside it — the route still runs the whole way, over their
+      // linework. A perimeter walkway that strays over the line and comes
+      // back is NOT cut: the line is OpenStreetMap's, and the walkway is
+      // campus on both sides of it. See EXCURSION_M in src/campus-clip.js.
+      customNetwork = trimToCampus(routable, CAMPUS_RING);
+
+      // Through route-layers rather than straight onto the source, which
+      // marks the stretches under a roof for the imagery filter on the way.
+      routeLayers.paintNetwork();
+
+      // The lamps along it follow: dropped from the stubs that were cut away,
+      // restored on the stretches past the fence that were kept.
+      shownLamps = trimPointsAlong(campusLamps, customNetwork, CAMPUS_RING);
+      map.getSource('campus-lamps')?.setData(shownLamps);
+    });
+
+  // The spinner belongs to the whole errand, so it stops when the last of
+  // these does — not when the first layer appears.
+  Promise.allSettled([
+    buildingsReady, basemapReady, amenitiesReady, placesReady,
+    directoryReady, labelsReady, routingReady,
+  ]).finally(() => setBusy(false));
 
   // -------------------------------------------------------------------------
   // Setting the two ends
