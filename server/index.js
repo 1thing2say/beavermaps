@@ -333,6 +333,20 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[beavermaps] listening on http://0.0.0.0:${PORT}`);
+/*
+ * Express 5 hands a bind failure (EADDRINUSE, EACCES) to this callback rather
+ * than throwing it. Ignoring the argument meant a port that was already taken
+ * logged "listening" and then exited 0 once the event loop drained, so a
+ * supervisor saw a clean stop and the log claimed success. Say what went
+ * wrong and exit non-zero instead.
+ *
+ * The port in the log is the one actually bound, which differs from PORT when
+ * PORT is 0.
+ */
+const server = app.listen(PORT, '0.0.0.0', (err) => {
+  if (err) {
+    console.error(`[beavermaps] could not listen on port ${PORT}: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`[beavermaps] listening on http://0.0.0.0:${server.address().port}`);
 });
