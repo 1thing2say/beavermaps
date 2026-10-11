@@ -1,8 +1,10 @@
 // src/buildings-lighting.js — what the extrusions leave behind.
 //
-// A campus repaint that found no style to draw on was still recorded as done,
-// so the daylight timer saw nothing left to do and the campus stayed painted
-// for day beside a city at dusk.
+// Two bugs that only showed on the map hours later. A campus repaint that found
+// no style to draw on was still recorded as done, so the daylight timer saw
+// nothing left to do and the campus stayed painted for day beside a city at
+// dusk. And ending a walk took the extrusions down but left the app's own sun
+// lighting the whole city in place of Standard's preset lights.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -68,4 +70,30 @@ test('a campus repaint that did not happen is asked for again', () => {
   state.preset = 'dusk';
   lighting.applyLighting();
   assert.equal(state.repaints, 3);
+});
+
+test('ending a walk puts Standard\'s own lights back', () => {
+  const map = stubMap();
+  const { lighting, state } = lightingOn(map);
+
+  state.navigating = true;
+  lighting.add();
+  assert.ok(map.getLayer('campus-buildings'));
+  const walking = map.lights.at(-1);
+  assert.notEqual(walking[0].properties.intensity, 'STANDARD', 'the app\'s sun while standing');
+
+  // navigation.js stops navigating before it asks for the layer back.
+  state.navigating = false;
+  lighting.remove();
+  assert.equal(map.getLayer('campus-buildings'), false);
+  const after = map.lights.at(-1);
+  assert.deepEqual(after.map((l) => l.id), ['ambient', 'directional']);
+  assert.equal(after.find((l) => l.id === 'directional').properties.intensity, 'STANDARD');
+});
+
+test('remove with nothing standing leaves the lights alone', () => {
+  const map = stubMap();
+  const { lighting } = lightingOn(map);
+  lighting.remove();
+  assert.equal(map.lights.length, 0);
 });

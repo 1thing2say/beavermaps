@@ -198,7 +198,7 @@ export function createBuildingsLighting({
     if (active?.buildings) {
       if (!map.getLayer('campus-buildings')) add();
     } else if (!navigating()) {
-      remove();
+      drop();
     }
 
     // The camera, and only when the bench actually moved it. applyLighting runs
@@ -324,8 +324,25 @@ export function createBuildingsLighting({
    * standing, which on the dark theme is a campus full of black blocks over a
    * map that is supposed to be flat.
    */
-  function remove() {
+  function drop() {
     if (map.getLayer('campus-buildings')) map.removeLayer('campus-buildings');
+  }
+
+  /**
+   * The walk is over: take the extrusions down, and the app's sun with them.
+   *
+   * Not just `drop`. Standing the layer up swapped Standard's lights for
+   * sunLights, and only applyLighting puts them back — so a walk that ended with
+   * the layer merely removed left the whole city under the app's pale ambient
+   * (or its shadow-casting sun) until the next theme change or daylight tick.
+   * The caller has already stopped navigating, so the pass below sees a flat
+   * campus and restores the captured lights. Skipped when nothing was standing,
+   * since then there is nothing of ours on the map to undo.
+   */
+  function remove() {
+    const had = Boolean(map.getLayer('campus-buildings'));
+    drop();
+    if (had) applyLighting();
   }
   return { add, remove, applyLighting };
 }
