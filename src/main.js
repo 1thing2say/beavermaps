@@ -1296,10 +1296,14 @@ function startApp() {
     // inside one can be raised past the sheet on its own. Raising the whole
     // bottom-RIGHT corner would float the zoom and locate buttons over the card
     // as well. Bottom-left holds nothing but credits, so it can go over the
-    // sheet whole, and the two licence terms end up in one line instead of one
-    // in each corner with a card between them.
+    // sheet whole, and the two licence terms end up in one row instead of one
+    // in each corner with a card between them. One row, not always one line:
+    // on a 390px phone Mapbox's notice fits beside the wordmark whole, and
+    // Google's — longer, with Google's mark and OpenStreetMap's credit in it —
+    // wraps to two lines inside its own pill rather than dropping under the
+    // wordmark. The widths are measured beside the phone rule in the stylesheet.
     //
-    // ONE LINE, TWO OBJECTS. Mapbox's wordmark stays in that corner under both
+    // ONE ROW, TWO OBJECTS. Mapbox's wordmark stays in that corner under both
     // providers — their terms want it on any map their SDK draws, whoever's
     // data is on it — and under Google this notice leads with Google's mark.
     // Google's policy wants the two marks clearly apart, so the stylesheet

@@ -247,7 +247,9 @@ const GRID_CELLS = 24;
 const GRID_DEPTH_M = -8;
 
 /**
- * Google requires attribution and it is per-tile. Shown until tiles say more.
+ * Google's mark in the 3D caption, as text until the logo asset lands. Always
+ * shown, beside the per-tile sources — it is never replaced by them; the
+ * sources are the part that fills in as tiles report (see `tileCredits`).
  *
  * "Google Maps" rather than "Google", because that is the text Google's
  * attribution policy asks for wherever its logo is not shown. Which is the

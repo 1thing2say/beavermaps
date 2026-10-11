@@ -2756,11 +2756,13 @@ body.navigating .app-chrome {
  * still grows upward from the corner, and DOM order still runs top to bottom.
  * `float` is simply ignored on a flex item.
  *
- * The bottom padding rather than a margin is deliberate: the last child is the
- * attribution, and 10px of padding puts it exactly level with the Mapbox
- * wordmark in the opposite corner, which stands on 10px of padding of its own
- * (see the row rule beside the wordmark further down). The
- * bottom of the screen is one credit band across both corners.
+ * The bottom padding rather than a margin is deliberate: 10px of it puts the
+ * bottom of this stack exactly level with the credit row in the opposite
+ * corner, which stands on 10px of padding of its own (see the row rule beside
+ * the wordmark further down). The attribution is not in this stack — it went
+ * to bottom-left, beside the wordmark (see the note on the AttributionControl
+ * in main.js) — so the bottom of the screen is one line across both corners:
+ * the credits on the left, the controls on the right, standing on it together.
  *
  * The layers switcher is a member of this stack too, added from main.js rather
  * than placed by this file, so it is spaced by the same `gap` as the rest. */
@@ -4726,7 +4728,7 @@ body.no-dirbutton .g-directions {
        one past the column, which is the only thing it has to clear.
 
        A row, because Mapbox floats these and two floated credits in a corner
-       that is now only one line tall would stack rather than sit side by side.
+       that is now only one row tall would stack rather than sit side by side.
 
        IT RIDES ABOVE THE SHEET RATHER THAN ON IT, and the difference is the
        whole design. Laying it over the card was the first attempt and it fails
@@ -4771,7 +4773,10 @@ body.no-dirbutton .g-directions {
            since moved to the top-right, and then by a scale bar that is gone
            (see below) — so the reservation outlived both things it was
            reserving for, and it was the only reason the notice and the wordmark
-           could not sit on one line. 252 + 88 needs 348; this gives 370. */
+           could not sit on one row. This gives 370: under Mapbox at 390 the
+           row is one line in 364 of it; under Google, whose notice is longer,
+           it is still one row, with the notice wrapping inside its own pill
+           (see the zero-basis rule on .mapboxgl-ctrl-attrib further down). */
         right: var(--g-edge-right);
         display: flex;
         flex-wrap: wrap;
@@ -4781,7 +4786,9 @@ body.no-dirbutton .g-directions {
            and Google's policy wants the two marks clearly apart — 6px of map
            between two logos reads as one lock-up. Down is only a notice that
            wrapped under the wordmark, and needs no more than it had.
-           88 + 12 + the 258px notice pill still fits the 370 under Mapbox. */
+           10 + 84 of wordmark, 12 and the 258px notice pill still fit the
+           370 under Mapbox; under Google the pill is narrowed to fit instead
+           (see the zero-basis rule on .mapboxgl-ctrl-attrib further down). */
         gap: 6px 12px;
     }
 
@@ -5202,15 +5209,15 @@ body.no-dirbutton .g-directions {
         box-shadow: none;
     }
 
-    /* ONE CREDIT LINE, not three things at three heights.
+    /* ONE CREDIT ROW, not three things at three heights.
        ------------------------------------------------------------------
        The notice, the wordmark and the scale bar sat at y717, y743 and y753 —
        a staircase down the bottom of the map, each on its own background or
        none. They are all the same KIND of thing: small print that has to be
-       legible and must not be covered. So they share one line, and the
+       legible and must not be covered. So they share one row, and the
        wordmark loses the bottom margin that was floating it 6px off it.
 
-       ONE LINE, NOT ONE SURFACE, which it was. The strip carried a single
+       ONE ROW, NOT ONE SURFACE, which it was. The strip carried a single
        scrim behind both the wordmark and the notice, and under Google that
        put Mapbox's mark and Google's on one chip, run together — where
        Google's policy wants its mark clearly apart from any other. So the
@@ -5221,13 +5228,17 @@ body.no-dirbutton .g-directions {
        The notice itself is untouched in every way that matters — same words,
        same size, still wrapping rather than truncating, never hidden. */
     .mapboxgl-ctrl-bottom-left {
-        /* ONE LINE. Stacked, the notice and the wordmark made a 63px block that
+        /* ONE ROW. Stacked, the notice and the wordmark made a 63px block that
            read as a second sheet above the real one — which is the opposite of
-           what small print should do. Side by side they measure 252 + 88 and
-           fit the 370px between the margins with room over. Still wrapping
-           rather than truncating if a device disagrees about the font: the
-           block grows, and a notice that has been cut off is a notice that has
-           not been given. */
+           what small print should do. Measured at 390 under Mapbox, side by
+           side they are the wordmark's 10px margin and 84px, the 12px gap and
+           a 258px pill — 364 of the 370 between the margins, one line, 33px
+           tall. Under Google the notice is longer — Google's mark in front of
+           it, OpenStreetMap's credit after it — and the pill alone is 315px,
+           which cannot share a line with the wordmark at its full length.
+           That is what the rule below is for. Still wrapping rather than truncating
+           if a device disagrees about the font: the block grows, and a notice
+           that has been cut off is a notice that has not been given. */
         display: flex;
         flex-direction: row;
         align-items: center;
@@ -5244,6 +5255,35 @@ body.no-dirbutton .g-directions {
 
     .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl-logo {
         margin-bottom: 0;
+    }
+
+    /* THE NOTICE WRAPS INSIDE ITS PILL, NOT UNDER THE WORDMARK.
+       ------------------------------------------------------------------
+       A flex item wraps to the next line on its full max-content width, so a
+       pill wider than what is left beside the wordmark drops whole beneath it
+       — which under Google at 390 it always did: a 315px pill against the 264
+       the row has over (370 less the wordmark's 10 + 84 and the 12px gap),
+       and the corner stood 63px tall above the sheet in exactly the stacked
+       arrangement the rule above says was taken out.
+
+       A zero basis is what changes that. The line is now broken on the pill's
+       MIN-content width — the "Google Maps" mark, which never wraps — so it
+       always stays beside the wordmark, and `grow` hands it the rest of the
+       row, where its own words wrap (see the flex row on
+       .mapboxgl-ctrl-attrib-inner). Measured at 390 under Google: the pill
+       264 wide on two lines, the corner 44px tall rather than 63, the
+       wordmark centred against it. Under Mapbox at 390 nothing moves — the
+       corner is `fit-content`, sized from the pill's max-content, so `grow`
+       gives it exactly its own words' width and it is the same one 33px
+       line. Narrower phones gain under both: at 375 and 320 Mapbox's pill no
+       longer fits whole either, and the corner is 44px rather than 63 (and
+       Google's 64 rather than 83 at 320).
+
+       `min-width` is left at `auto`, which for a flex item is its min-content:
+       the notice can be narrowed to its longest unbreakable run and never
+       past it, so nothing is clipped. */
+    .mapboxgl-ctrl-bottom-left > .mapboxgl-ctrl-attrib {
+        flex: 1 1 0;
     }
 
     /* THE LIST IS A SECTION OF THE SHEET.

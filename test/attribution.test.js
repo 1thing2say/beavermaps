@@ -130,6 +130,20 @@ test('nothing in the stylesheet hides the Mapbox wordmark', () => {
   }
 });
 
+test('on a phone the notice narrows beside the wordmark rather than dropping under it', () => {
+  // A flex item wraps to the next line on its max-content width, and Google's
+  // notice — the mark, the copyright, OSM's link — is 315px against the 264
+  // beside the wordmark at 390, so at its natural basis the corner stacked
+  // into a 63px block over the sheet. A zero basis keeps it on the row and
+  // lets its own words wrap inside the pill.
+  const phone = rules.slice(rules.indexOf('@media (max-width: 640px)'));
+  const rule = phone.match(/\.mapboxgl-ctrl-bottom-left\s*>\s*\.mapboxgl-ctrl-attrib\s*\{([^}]*)\}/);
+  assert.ok(rule, 'no phone rule sizes the notice inside the credit row');
+  assert.match(rule[1], /flex\s*:\s*1\s+1\s+0(px|%)?\s*;/);
+  // ...and never shrinks it past its own longest run, which would clip it.
+  assert.doesNotMatch(rule[1], /min-width|overflow\s*:\s*hidden|text-overflow/);
+});
+
 test('Google\'s mark in the 2D credit is "Google Maps", not the G', () => {
   assert.match(rules, /\.mapboxgl-ctrl-attrib-inner::before\s*\{[^}]*content:\s*"Google Maps"/);
   assert.doesNotMatch(rules, /google-g\.svg/);
