@@ -7,6 +7,13 @@ app = "beavermaps"
 # using it. Set before `fly launch` creates the app — moving a running app's
 # region later means new machines, not an edit.
 primary_region = "sjc"
+# How Fly stops a machine — every deploy, every scale-to-zero. SIGTERM is one
+# of the two signals server/shutdown.js catches to finish the requests in
+# flight, and ten seconds is how long Fly then waits before SIGKILL. Its
+# default is five, and GRACE_MS has to finish a second inside whatever this
+# says; test/shutdown.test.js reads both lines to hold it to that.
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
 
 # Deliberately empty. Both front-end keys are --build-arg values supplied by
 # `npm run deploy` from .env; writing them into [build.args] here would publish

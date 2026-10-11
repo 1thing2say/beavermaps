@@ -79,18 +79,30 @@ test('a close error is an exit 1, not a clean one', () => {
 });
 
 test('the grace period fits inside the kill_timeout fly.toml actually leaves', () => {
-  // Read from fly.toml rather than assumed, so the two cannot drift apart: with
-  // no kill_timeout there, Fly's default of 5 s is the window, and GRACE_MS has
-  // to end inside it with a second to spare for the log line and the exit, or
-  // SIGKILL arrives first and the fallback never gets to say anything. If
-  // fly.toml later sets a longer one, this still holds and GRACE_MS is free to
-  // grow into it.
+  // Read from fly.toml rather than assumed, so the two cannot drift apart:
+  // GRACE_MS has to end inside the window with a second to spare for the log
+  // line and the exit, or SIGKILL arrives first and the fallback never gets to
+  // say anything. fly.toml sets ten seconds; were the line ever dropped, Fly's
+  // default of 5 s would be the window and this would fail GRACE_MS's eight.
   const toml = readFileSync(path.join(root, 'fly.toml'), 'utf8');
   const set = toml.match(/^\s*kill_timeout\s*=\s*"?(\d+)(ms|s)?"?/m);
   const windowMs = set ? Number(set[1]) * (set[2] === 'ms' ? 1 : 1000) : 5000;
   assert.ok(GRACE_MS <= windowMs - 1000,
     `GRACE_MS ${GRACE_MS} leaves no second before Fly's SIGKILL at ${windowMs}ms`);
   assert.ok(GRACE_MS >= 1000, 'too short to let an ordinary request finish');
+});
+
+test('fly.toml stops machines with the signal the server listens for', () => {
+  // closeOnSignal listens for SIGTERM and SIGINT, and nothing else. Fly's
+  // default kill_signal is SIGINT, which would be caught too; but one of the
+  // others it accepts — SIGQUIT, SIGUSR1 — would kill the process outright and
+  // the grace period would never start. Written out, it is the signal the
+  // server's comments and the real-SIGTERM test below are about.
+  const toml = readFileSync(path.join(root, 'fly.toml'), 'utf8');
+  // Top level: before the first [table], or Fly reads it as part of that table.
+  const top = toml.split(/^\s*\[/m)[0];
+  assert.match(top, /^kill_signal\s*=\s*"SIGTERM"\s*$/m);
+  assert.match(top, /^kill_timeout\s*=\s*"10s"\s*$/m);
 });
 
 test('the real server exits 0 on SIGTERM', { timeout: 30_000 }, async () => {
