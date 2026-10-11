@@ -6,8 +6,8 @@
 // GOOGLE'S FAILURE ARRIVES AS A REJECTED PROMISE. googleGround() cannot even
 // request a tile until a session token has been minted, so a refusal comes back
 // once, as one object, carrying Google's own sentence — "API not enabled",
-// "referrer not allowed" — and that sentence goes straight to the panel. See
-// addGoogleGround in main.js.
+// "referrer not allowed" — and that sentence is what the deployer is shown.
+// See addGoogleGround in src/ground.js, and forVisitor below for who else.
 //
 // MAPBOX'S ARRIVES AS WEATHER. There is no handshake to refuse: the style names
 // its sources and the renderer asks for tiles, so a rejected token produces one
@@ -21,11 +21,18 @@
 // it said nothing whatsoever in a build. The two failures were never different
 // in kind; one of them was just louder in a way nobody was listening to.
 //
-// The point of this file is that a refusal names the way forward. A visitor
-// cannot act on any of this, but the person setting the app up is the only one
-// who will ever see it, and for them "403" and "add this origin to the token"
-// are very different sentences. Same rule as the routing refusals in
-// directions.js.
+// The point of this file is that a refusal names the way forward. For the
+// person setting the app up, "403" and "add this origin to the token" are very
+// different sentences. Same rule as the routing refusals in directions.js.
+//
+// BUT A VISITOR CANNOT ACT ON ANY OF IT, and on the deployed site they are
+// nearly everybody who sees it. "Mapbox refused this origin: https://… Add it
+// to the token's URL restrictions" is a configuration screen read aloud to the
+// public — and Google's own sentences quote the key's settings back. So the
+// detailed sentence goes to the console every time, and to the screen only for
+// the people who can use it: the dev server, or anybody who opened the page
+// with `?debug` (the same switch that opens the back room — see src/debug.js).
+// Everybody else gets a plain line. See forVisitor.
 
 /** Every failure here comes from Mapbox's API host; nothing else is ours to explain. */
 export const MAPBOX_HOST = 'api.mapbox.com';
@@ -63,4 +70,88 @@ export function mapboxRefusal(status, origin) {
       + 'restrictions, or use a token that has none.';
   }
   return null;
+}
+
+/**
+ * Whether this page is being looked at by somebody who can act on a detail.
+ *
+ * The dev server, or a URL carrying `?debug` or `#debug` — read the way
+ * src/debug.js reads it, as a query KEY, so a search for something called
+ * "debug" cannot switch it on. Not the debug menu's stored state: this is about
+ * who is reading the sentence right now, and a link without the flag is a
+ * visitor's link.
+ *
+ * `import.meta.env?.DEV` because node runs this file for the tests with no
+ * Vite in front of it, and there `import.meta.env` is undefined.
+ *
+ * @param {object}  [options]  both injectable, for tests
+ * @param {boolean} [options.dev]
+ * @param {{search?: string, hash?: string}} [options.location]
+ */
+export function showsDetail({
+  dev = Boolean(import.meta.env?.DEV),
+  location = globalThis.location,
+} = {}) {
+  if (dev) return true;
+  try {
+    return new URLSearchParams(location?.search ?? '').has('debug')
+      || (location?.hash ?? '').replace('#', '') === 'debug';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The sentence to put on screen: the detail for somebody who can use it, the
+ * plain line for everybody else. See the note at the top of this file.
+ *
+ * Does not log. Every caller console.errors the detail itself, next to the
+ * error object it came from — which is the thing worth having in a console,
+ * and which a string passed through here would have lost.
+ *
+ * @param {string} detail  what actually went wrong, provider's words included
+ * @param {string} plain   what a visitor is told instead
+ * @param {object} [options]  see showsDetail
+ */
+export function forVisitor(detail, plain, options) {
+  return showsDetail(options) ? detail : plain;
+}
+
+/** What a visitor is told when the map's own tiles are refused. */
+export const PLAIN_MAP_PROBLEM = 'The map could not load right now. Please try again later.';
+
+/** ...when Google's ground was refused and the map fell back to Mapbox's. */
+// Named by the provider because the layers menu names them that way — its
+// toggle reads "Google" and "Mapbox" — so this is the word on the button that
+// just flipped back.
+export const PLAIN_GOOGLE_FALLBACK = 'The Google basemap is unavailable right now, so the Mapbox one is showing instead.';
+
+/** ...and when the aerial view on a building card cannot be drawn. */
+export const PLAIN_AERIAL_PROBLEM = 'Aerial view unavailable right now.';
+
+/**
+ * Whether an unhandled rejection is the 3D tileset's root being refused.
+ *
+ * deck.gl's Tile3DLayer loads its root itself and does not catch what that
+ * throws, so a refused root — which src/flyover-view.js has already noticed and
+ * said on the card — ALSO arrives as an uncaught rejection: a red line in the
+ * console for something the page has handled. loaders.gl's FetchError carries
+ * the URL it failed on, so the match is on that URL's host and path rather than
+ * on a message, whose wording is the library's and changes. Nothing else is
+ * matched: a tile below the root failing, or any other rejection on the page,
+ * is still somebody's bug and stays loud.
+ *
+ * @param {unknown} reason  the rejection's reason
+ * @param {string}  rootUrl the tileset root
+ */
+export function isTilesetRootFailure(reason, rootUrl) {
+  const url = reason?.url;
+  if (typeof url !== 'string' || !url) return false;
+  try {
+    const failed = new URL(url);
+    const root = new URL(rootUrl);
+    return failed.host === root.host && failed.pathname === root.pathname;
+  } catch {
+    return false;
+  }
 }

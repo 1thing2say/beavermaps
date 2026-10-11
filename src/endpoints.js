@@ -12,8 +12,9 @@
 // asynchronous: a GPS fix, a round trip to the router, a card opening. Any of
 // them can be superseded while it is in flight, and the guard that catches that
 // has to be read by the code that sets the state and by the code that clears
-// it. Scattered, it was a variable anyone could increment; here there is one
-// place it goes up and one place it is checked.
+// it. Scattered, it was a variable anyone could increment; here it goes up only
+// where something supersedes what is in flight — a reset, a new destination, a
+// new route request — and nothing outside this file can touch it.
 //
 // WHAT A CHOSEN PLACE MEANS still belongs to the caller. This module knows how
 // to plant a pin and ask for a route; the place cards and the route panel's
@@ -27,6 +28,21 @@ import { distance } from '@turf/distance';
 import { nearestPoint } from '@turf/nearest-point';
 import { routePin, liftedOffset, ROUTE_PIN_W } from './map-images.js';
 import { reachProblem, locationProblem } from './directions.js';
+import { UNREACHABLE } from './api.js';
+
+/**
+ * What to say when the phone is outside the map's fence and nothing recorded
+ * where.
+ *
+ * `{ code: 'outside' }` is ours rather than the browser's — see currentPosition
+ * — so it is answered here, beside the code that raises it, and every other
+ * code still goes to locationProblem. It ends the way those do, with the hold
+ * that is always a way forward. Normally it is not reached at all: the fix the
+ * fence turned away is in hand, and reachProblem says how far off it is, which
+ * is the more useful sentence.
+ */
+export const OUTSIDE_FENCE = 'You are outside the area this map covers, so it cannot route from '
+  + 'where you are. Press and hold the map to set a starting point instead.';
 
 // Google's own pin colours, for the two markers the router plants. Origin green
 // and destination red is their convention as well as the one this app already
@@ -41,6 +57,13 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
  * @param {object} deps  every collaborator, named for what it does
  * @param {() => object|null} deps.geolocateControl  a GETTER: the control is
  *        built on map load, long after this is
+ * @param {() => {at: number[]}|null} [deps.lastPosition]  the last position the
+ *        geolocation seam delivered, fence or no fence — see currentPosition
+ * @param {(colour: string, title: string, at: number[]) => object} [deps.plantPin]
+ *        puts one of the route's two pins on the map and returns the marker.
+ *        Mapbox's by default; a seam because a Marker wants a whole browser
+ *        under it, and the sequencing these pins take part in is exactly what
+ *        test/endpoints.test.js has to drive end to end.
  */
 export function createEndpoints({
   map,
@@ -49,6 +72,7 @@ export function createEndpoints({
   camera,
   api,
   geolocateControl,
+  lastPosition = () => null,
   networkPoints,
   routingEnabled,
   status,
@@ -58,6 +82,13 @@ export function createEndpoints({
   clearSelection,
   clearSearchField,
   startLocating,
+  plantPin = (colour, title, at) => new mapboxgl.Marker({
+    element: routePin(colour, { title }),
+    anchor: 'bottom',
+    offset: liftedOffset(ROUTE_PIN_W),
+  })
+    .setLngLat(at)
+    .addTo(map),
 }) {
   const { setStatus, setBusy, setRouteSummary, setNavButtonsEnabled, setIdleStatus } = status;
   const { startCoordText, endCoordText } = ui;
@@ -161,6 +192,30 @@ export function createEndpoints({
   /** A fix this fresh is worth reusing rather than waking the radio for. */
   const FIX_FRESH_MS = 30_000;
 
+  const isFresh = (seen) => Boolean(seen) && Date.now() - seen.when < FIX_FRESH_MS;
+
+  /**
+   * The newest thing known about where the phone is, as { at, when }, or null.
+   *
+   * `lastFix` is fed by `geolocate` alone, so it never holds a fix the fence
+   * turned away — and THE FENCE TURNS ONE AWAY ONLY ONCE. On an out-of-bounds
+   * fix Mapbox puts its button into the error state and fires `outofmaxbounds`,
+   * but it does not fire `trackuserlocationend`: the watch keeps running and
+   * locate.js rightly goes on believing the control is locating. So the second
+   * Directions press asked for nothing — startLocating was a no-op — and waited
+   * on the next report from a watch that, on a desk or in a pocket, may not
+   * report again until the phone moves. Nine seconds later, with `lastFix`
+   * still empty, it said "Locating timed out" to the same phone that had
+   * answered the first press at once. The seam's record holds that fix, so a
+   * FRESH one newer than `lastFix` is the answer; otherwise `lastFix` is, at
+   * whatever age (see the timer in currentPosition for why age is no bar).
+   */
+  function lastSeen() {
+    const recorded = lastPosition();
+    const newer = isFresh(recorded) && (!lastFix || recorded.when > lastFix.when);
+    return newer ? recorded : lastFix;
+  }
+
   /**
    * Where the phone says it is, as a promise.
    *
@@ -183,10 +238,23 @@ export function createEndpoints({
    *
    * The fixture reaches this the same way — it delivers through the control's
    * watch like a real fix does, so nothing here needs to know which it has.
+   *
+   * OUTSIDE THE FENCE THE CONTROL SAYS SOMETHING ELSE. The map has maxBounds,
+   * and for a fix beyond them the control fires `outofmaxbounds` instead of
+   * `geolocate`. Nothing listened for it, so a phone at home answered at once
+   * and Directions still spun for the full nine seconds and then said
+   * "Locating timed out" — the one thing that had not happened. The event is
+   * built by copying the position's own properties, and a real position has
+   * none (its coords are prototype getters), so where it was is read from the
+   * geolocation seam's own record instead. With that in hand locateStart's
+   * reach check says how far away you are; without it, `{ code: 'outside' }`
+   * says you are off the map, which is all that is known. And the second press
+   * after that is answered from the same record before anything is waited on —
+   * see lastSeen.
    */
   function currentPosition() {
-    const fresh = lastFix && Date.now() - lastFix.when < FIX_FRESH_MS;
-    if (fresh) return Promise.resolve(lastFix.at);
+    const seen = lastSeen();
+    if (isFresh(seen)) return Promise.resolve(seen.at);
 
     return new Promise((resolve, reject) => {
       // THROUGH THE GETTER. main.js hands this over as `() => control`, because
@@ -206,21 +274,35 @@ export function createEndpoints({
         clearTimeout(timer);
         control.off('geolocate', onFix);
         control.off('error', onFail);
+        control.off('outofmaxbounds', onOutside);
         fn(value);
       };
       const onFix = (e) => finish(resolve, [e.coords.longitude, e.coords.latitude]);
       const onFail = (error) => finish(reject, error);
+      const onOutside = (e) => {
+        // `e.coords` first, in case a later Mapbox starts passing it through.
+        const at = e?.coords
+          ? [e.coords.longitude, e.coords.latitude]
+          : lastPosition()?.at;
+        if (at && Number.isFinite(at[0]) && Number.isFinite(at[1])) finish(resolve, at);
+        else finish(reject, { code: 'outside' });
+      };
       const timer = setTimeout(() => {
         // A STALE FIX BEATS A REFUSAL. A watch that has locked on and gone
         // quiet is what a stationary phone looks like — some browsers report
         // once and then say nothing until you move — and the last thing it said
         // is still where you are standing. Refusing to route somebody who has
         // not moved, because they have not moved, is the worst reading of this.
-        if (lastFix) finish(resolve, lastFix.at);
+        //
+        // The seam's record counts too, which is the case it is there for: see
+        // lastSeen.
+        const last = lastSeen();
+        if (last) finish(resolve, last.at);
         else finish(reject, { code: 3 });
       }, FIX_TIMEOUT_MS);
       control.on('geolocate', onFix);
       control.on('error', onFail);
+      control.on('outofmaxbounds', onOutside);
       // No-op if it is already locked on, in which case the next fix its watch
       // delivers is the one resolved above.
       startLocating();
@@ -236,9 +318,10 @@ export function createEndpoints({
    * adopt was the debug fixture. Everybody without the debug menu open was
    * being asked to tell a map with a GPS in it where they were standing.
    *
-   * Three ways to fail, and all three are said out loud rather than swallowed:
-   * the browser refuses or times out (see locationProblem), or the fix lands
-   * outside the routing graph (see reachProblem). The last is the quiet one —
+   * Four ways to fail, and all four are said out loud rather than swallowed:
+   * the browser refuses or times out (see locationProblem), the phone is past
+   * the map's fence with no fix on record (see OUTSIDE_FENCE), or the fix
+   * lands outside the routing graph (see reachProblem). The last is the quiet one —
    * the router snaps a start onto the network with no notion of "too far",
    * so opening this at home ten miles away would otherwise draw a confident
    * eight-minute walk between two places neither of which is where you are.
@@ -253,6 +336,16 @@ export function createEndpoints({
     // failed even when a fix arrived, as did Start here on any card.
     if (!routingEnabled() || !networkPoints()) return false;
 
+    // A fix can take nine seconds, and Clear or Close pressed in the meantime
+    // is somebody changing their mind. Both go through resetMap, which bumps
+    // the sequence — as does a newer setDestination, which is the same change
+    // of mind made by picking somewhere else — so the answer that arrives
+    // afterwards is checked against this and dropped. It used to put the start
+    // back, and its failure used to write "Locating timed out" over the idle
+    // line the reset had just put up. Same guard placeEnd keeps, for the same
+    // reason.
+    const seq = requestSeq;
+
     // The fixture answers on the next tick, so this spinner is a real wait only
     // for a real GPS — which is exactly when it is worth showing.
     setBusy(true);
@@ -261,11 +354,14 @@ export function createEndpoints({
     try {
       at = await currentPosition();
     } catch (error) {
-      setStatus(locationProblem(error), true);
+      if (seq === requestSeq) {
+        setStatus(error?.code === 'outside' ? OUTSIDE_FENCE : locationProblem(error), true);
+      }
       return false;
     } finally {
       setBusy(false);
     }
+    if (seq !== requestSeq) return false;
 
     // The nearest VERTEX is only the reach check here. It is never nearer
     // than the nearest point on an edge, which is what the server measures,
@@ -330,13 +426,7 @@ export function createEndpoints({
     // than replacing it with a GPS fix. See startIsMine.
     startIsMine = false;
     startMarker?.remove();
-    startMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_GREEN, { title: 'Start' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords)
-      .addTo(map);
+    startMarker = plantPin(GOOGLE_GREEN, 'Start', coords);
     startCoordText.value = label ?? coordLabel(coords);
     return true;
   }
@@ -367,13 +457,7 @@ export function createEndpoints({
     panel.show();
     endPoint = point(coords);
     endMarker?.remove();
-    endMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Destination' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords)
-      .addTo(map);
+    endMarker = plantPin(GOOGLE_RED, 'Destination', coords);
     endCoordText.value = label ?? coordLabel(coords);
     setStatus('Calculating route…');
 
@@ -393,8 +477,10 @@ export function createEndpoints({
     try {
       result = await api.route(startPoint.geometry.coordinates, coords);
     } catch (error) {
+      // The detail is for the console; the visitor gets a sentence they can
+      // act on, which is not the dev-server question. See UNREACHABLE.
       console.error(error);
-      failure = 'Routing server unreachable — is `npm run dev` still running?';
+      failure = UNREACHABLE;
     } finally {
       setBusy(false);
     }
@@ -490,12 +576,7 @@ export function createEndpoints({
     });
     pendingEnd = { coords, name };
     endMarker?.remove();
-    endMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Destination' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords).addTo(map);
+    endMarker = plantPin(GOOGLE_RED, 'Destination', coords);
     endCoordText.value = name ?? coordLabel(coords);
   }
 
@@ -528,16 +609,35 @@ export function createEndpoints({
     const keep = startPoint && !startIsMine ? startPoint : null;
     if (startPoint && endPoint) resetMap();
     if (keep) { startPoint = keep; startIsMine = false; }
+    // BUMPED, not just read, because a newer destination supersedes this one.
+    // It was only read, on the reasoning that nothing but Clear or Close could
+    // move it while the GPS was being asked — and a second Directions is the
+    // other thing. Pick A, then B while the spinner is still up (nine seconds
+    // of it is a long time not to tap another card): with no start point there
+    // was no reset, so both calls held the same number; the fix resumed A
+    // first, A's placeEnd bumped it, and B — the place actually wanted — saw
+    // the change and quietly stood down. Taking a number of our own means A's
+    // locateStart and A here are the ones that find it moved, and both stand
+    // down without a word, as they would for Clear. After the reset above, so
+    // that bump is not mistaken for somebody else's. See locateStart.
+    const seq = ++requestSeq;
     // Before the flyTo below, so the camera is framing the space the panel has
     // already taken rather than the space it is about to.
     panel.show();
 
-    if (!(startPoint && !startIsMine) && !(await locateStart())) {
-      // No fix, and locateStart has already said why. The destination still
-      // goes down, so that sentence is read next to a map showing where you
-      // asked to go rather than next to nothing.
-      parkDestination(coords, name);
-      return;
+    if (!(startPoint && !startIsMine)) {
+      const located = await locateStart();
+      // Cleared while locating: neither branch below is wanted any more. Parking
+      // would put back the red pin that Clear just took away, and routing would
+      // draw a walk nobody is still asking for.
+      if (seq !== requestSeq) return;
+      if (!located) {
+        // No fix, and locateStart has already said why. The destination still
+        // goes down, so that sentence is read next to a map showing where you
+        // asked to go rather than next to nothing.
+        parkDestination(coords, name);
+        return;
+      }
     }
 
     if (endPoint) await rerouteTo(coords, name);

@@ -32,14 +32,16 @@ import { createLitPalette } from './lit-palette.js';
 import { createLightingControl } from './lighting.js';
 import { FONTS, SATELLITE, styleKey } from './palette.js';
 
-import { tokenRefusal, showSetupProblem } from './setup-problem.js';
+import {
+  tokenRefusal, showSetupProblem, webglMissing, WEBGL_PROBLEM,
+} from './setup-problem.js';
 import { CAMPUS_BOUNDS, ROUTABLE_BOUNDS } from './campus-bounds.js';
 import { createRoute } from './route-state.js';
 import { createNavigation, SIM_TICK_MS } from './navigation.js';
 import { createLongPress } from './long-press.js';
 import { FIT_MARGIN, paddingAround } from './viewport.js';
 import { createStatusLine } from './status-line.js';
-import { createApi } from './api.js';
+import { createApi, ROUTING_OUTAGE } from './api.js';
 import { createChoreography } from './pin-choreography.js';
 import { createPinState, POI_LABEL_LAYERS } from './pin-state.js';
 import { createBuildingsLighting, BUILDING_EMISSIVE } from './buildings-lighting.js';
@@ -84,15 +86,75 @@ const CAMPUS_RING = ringOf(campusBoundary);
 // stops meaning "the middle of the campus" the next time the ring is redrawn.
 const CAMPUS_CENTRE = centreOf(CAMPUS_RING);
 
-const setupProblem = tokenRefusal(accessToken);
+/**
+ * A tab left open across a deploy, asking for a chunk that is no longer there.
+ *
+ * Every build renames its chunks by content hash and the old ones are gone
+ * with the old machine, so a tab opened before a redeploy that then opens its
+ * first building card asks for a flyover chunk that does not exist — and the
+ * card said "Failed to fetch dynamically imported module" for as long as it
+ * was open, on every card after it, until somebody thought to reload. Vite
+ * announces exactly that failure as `vite:preloadError`, and a reload is the
+ * whole fix: the fresh page names the chunks the server has.
+ *
+ * ONCE, and only when there is a network to reload from. Offline, the same
+ * event means the connection dropped rather than that the build moved on, and
+ * a reload would swap a working map for the browser's offline page. And a
+ * chunk still missing after a reload is a broken deploy, not a stale tab, so a
+ * second failure inside ten seconds is left to surface rather than looping the
+ * page. sessionStorage holds the mark across the reload; it throws in some
+ * private modes, where the guard simply never fires twice, which is the safe
+ * way round.
+ */
+window.addEventListener('vite:preloadError', (event) => {
+  if (!navigator.onLine) return;
+  let last = 0;
+  try { last = Number(sessionStorage.getItem('chunkReloadAt')) || 0; } catch { /* storage off */ }
+  if (Date.now() - last < 10_000) return;
+  try { sessionStorage.setItem('chunkReloadAt', String(Date.now())); } catch { /* storage off */ }
+  event.preventDefault();
+  window.location.reload();
+});
+
+/**
+ * Put a refusal where the map would have been, in the look the visitor chose.
+ *
+ * The theme and skin attributes are normally published inside startApp(), and
+ * a refusal is by definition a startApp() that did not run — or did not get
+ * far. Published here as well, so the card is drawn from the right tokens
+ * rather than the plain defaults. See showSetupProblem.
+ */
+function refuseToStart(sentence) {
+  applyThemeAttribute(preferredTheme());
+  applySkinAttribute(preferredSkin());
+  showSetupProblem(sentence);
+}
+
+// Two things the app cannot start without, asked before building anything: a
+// token, and a browser that will give the map a WebGL 2 context. Either one
+// missing used to be a blank page — the token's because the whole app was the
+// `else` branch behind a console.warn, WebGL's because Mapbox's constructor
+// threw out of startApp() before a single control existed.
+const setupProblem = tokenRefusal(accessToken) ?? (webglMissing() ? WEBGL_PROBLEM : null);
 if (setupProblem) {
-  // On the screen, not in the console. See src/setup-problem.js — this is the
-  // one failure with no degraded mode to fall back to, so the sentence has to
-  // go where the map would have been.
+  // On the screen, not in the console. See src/setup-problem.js — these are the
+  // failures with no degraded mode to fall back to, so the sentence has to go
+  // where the map would have been.
   console.warn(`[beavermaps] ${setupProblem}`);
-  showSetupProblem(setupProblem);
+  refuseToStart(setupProblem);
 } else {
-  startApp();
+  try {
+    startApp();
+  } catch (error) {
+    // The probe above can pass and the map still be refused — a context lost
+    // between the two, a GPU process that crashed. Mapbox's message names
+    // WebGL when that is the cause, and only that case is turned into the
+    // card: any other exception is a bug, rethrown so it still reads as one,
+    // rather than a working map replaced by a sentence about graphics.
+    if (!/webgl/i.test(error?.message ?? '')) throw error;
+    console.error(error);
+    refuseToStart(WEBGL_PROBLEM);
+  }
 }
 
 /**
@@ -900,6 +962,9 @@ function startApp() {
     camera,
     api,
     geolocateControl: () => geolocateControl,
+    // The fix the fence turned away, which the control will not pass on. See
+    // `last` in src/geolocation.js.
+    lastPosition: () => geolocation.lastPosition(),
     networkPoints: () => networkPoints,
     routingEnabled: () => routingEnabled,
     status: { setStatus, setBusy, setRouteSummary, setNavButtonsEnabled, setIdleStatus },
@@ -1386,7 +1451,12 @@ function startApp() {
     setBusy(true);
     setProgress('Loading the campus…');
 
-    /** A source that failed is one missing layer, so it is logged and stepped over. */
+    /**
+     * A source that failed is one missing layer, so it is logged and stepped
+     * over. "Failed" means after the api's retries — see withRetry — so a
+     * server that blinked during a deploy no longer costs a layer for the
+     * session; one that stayed away for six seconds still does.
+     */
     const orElse = (whenMissing) => (reason) => { console.error(reason); whenMissing?.(); };
 
     const buildingsReady = fetchOverlay('buildings').then((data) => {
@@ -1426,7 +1496,17 @@ function startApp() {
       buildLegendIndex();
     }, orElse());
 
-    const placesReady = fetchOverlay('places').then((data) => {
+    /**
+     * The places file, which is the whole of search.
+     *
+     * A FUNCTION, because it may be asked for twice. The field is disabled in
+     * the markup until an index exists, and this was the only thing that ever
+     * enabled it — so one failed request, retries and all, left the search
+     * field greyed out for the rest of the session with nothing on screen
+     * saying why or what to do. A failure now opens the field as its own
+     * retry button instead. See offerSearchRetry.
+     */
+    const loadPlaces = () => fetchOverlay('places').then((data) => {
       // The directory keeps the rows my campus lists without a room so a search index
       // can still be built from the file, but a null geometry is not something
       // a vector source can tile — drop them on the way in.
@@ -1434,10 +1514,12 @@ function startApp() {
         type: 'FeatureCollection',
         features: data.features.filter((feature) => feature.geometry),
       };
+      searchAvailable();
       buildSearchIndex();
       enableCategories();
       buildLegendIndex();
-    }, orElse());
+    }, orElse(() => offerSearchRetry(loadPlaces)));
+    const placesReady = loadPlaces();
 
     const directoryReady = fetchOverlay('directory').then((data) => {
       campusDirectory = data;
@@ -1485,9 +1567,13 @@ function startApp() {
     // an overlay that does not arrive costs a layer, and this costs the app.
     const routingReady = Promise.allSettled([fetchNetwork(), fetchVertices()])
       .then(([networkResult, vertexResult]) => {
+        // Already retried by the api — see withRetry — so a rejection here is
+        // a server that stayed away for the whole schedule, and nothing in this
+        // session will bring the graph back short of loading the page again.
+        // The sentence says so, rather than asking a visitor about a dev server.
         if (networkResult.status === 'rejected') {
           console.error(networkResult.reason);
-          setStatus('Routing server unreachable — is `npm run dev` still running?', true);
+          setStatus(ROUTING_OUTAGE, true);
           return;
         }
         const routable = networkResult.value;
@@ -1842,6 +1928,43 @@ function startApp() {
   });
   const searchInput = searchBox.input;
   const searchClear = searchBox.clear;
+
+  /**
+   * The search field as its own retry button, for a places file that never came.
+   *
+   * THE FIELD RATHER THAN A NEW CONTROL. It is where somebody goes to search,
+   * so it is where the news that search is down has to be, and it already wears
+   * the glass every other control does — a separate "retry" chip would be one
+   * more thing to style and one more place to look. Enabled so it can be
+   * tapped, read-only so nothing can be typed into an index that does not
+   * exist, and the placeholder says both what happened and what to do.
+   *
+   * Enter as well as a tap, so a keyboard can reach it. The retry goes through
+   * the api's own schedule again; while it runs the placeholder says so, and a
+   * second failure puts the offer back.
+   */
+  let searchPlaceholder = null;
+  function offerSearchRetry(load) {
+    searchPlaceholder ??= searchInput.placeholder;
+    searchInput.disabled = false;
+    searchInput.readOnly = true;
+    searchInput.placeholder = 'Search unavailable — tap to retry';
+    const retry = (event) => {
+      if (event.type === 'keydown' && event.key !== 'Enter') return;
+      searchInput.removeEventListener('click', retry);
+      searchInput.removeEventListener('keydown', retry);
+      searchInput.placeholder = 'Loading search…';
+      load();
+    };
+    searchInput.addEventListener('click', retry);
+    searchInput.addEventListener('keydown', retry);
+  }
+  /** The field back to itself once places have landed. A no-op on a clean boot. */
+  function searchAvailable() {
+    if (searchPlaceholder === null) return;
+    searchInput.readOnly = false;
+    searchInput.placeholder = searchPlaceholder;
+  }
   const closeResults = () => searchBox.closeResults();
   const buildSearchIndex = () => searchBox.buildIndex();
   const refreshPopularity = () => searchBox.refreshPopularity();

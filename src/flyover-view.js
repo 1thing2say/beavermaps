@@ -54,6 +54,7 @@ import {
   pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS, DROP_MS, warmPinIcons,
 } from './flyover-pin.js';
 import { highlightLayers, HIGHLIGHT_UP_MS } from './flyover-cage.js';
+import { forVisitor, PLAIN_AERIAL_PROBLEM, isTilesetRootFailure } from './basemap-problem.js';
 
 /**
  * Whether the flown-over building is boxed at all. Off for now, by request.
@@ -317,13 +318,17 @@ function keyedFetch(key) {
     // spinning at twelve seconds, and on every card after it.
     //
     // Said here because this is the only code on that path that is ours.
-    // Google's own sentence is the message when it sent one, which is the
-    // policy src/ground.js already follows for the same key's 2D half.
+    // Google's own sentence is the detail when it sent one, and it goes where
+    // src/ground.js sends the same key's 2D refusal: always to the console,
+    // and onto the card only in dev or under ?debug. A visitor gets the plain
+    // line — see forVisitor.
     if (!response.ok && target.pathname === new URL(TILESET).pathname) {
-      let message = `Aerial view unavailable (HTTP ${response.status})`;
+      let detail = `Aerial view unavailable (HTTP ${response.status})`;
       try {
-        message = (await response.clone().json())?.error?.message ?? message;
+        detail = (await response.clone().json())?.error?.message ?? detail;
       } catch { /* not JSON: the status is all there is */ }
+      console.error(`[beavermaps] 3D tiles refused: ${detail}`);
+      const message = forVisitor(detail, PLAIN_AERIAL_PROBLEM);
       stage.refused = message;
       stage.onRefused?.(message);
     }
@@ -498,7 +503,8 @@ const stage = {
   /** ...and the same for a tileset Google refused. See keyedFetch. */
   onRefused: null,
   /**
-   * Google's sentence, once the root has been refused.
+   * What the card says once the root has been refused — Google's sentence in
+   * dev or under ?debug, the plain line otherwise. See keyedFetch.
    *
    * Kept because the refusal only happens once. The layer and its tileset
    * outlive every card, so the root is requested once per page and never again
@@ -537,6 +543,27 @@ const stage = {
    */
   base: [],
 };
+
+/**
+ * The refused root's second report, kept out of the console.
+ *
+ * keyedFetch hears the refusal and puts it on the card, but it hands the
+ * response back regardless — it has to, the layer is waiting for it — and
+ * Tile3DLayer then throws on it from a promise nobody catches. So every refused
+ * key produced an "Uncaught (in promise)" on top of the sentence that had
+ * already handled it, which reads as a second, unexplained failure to anybody
+ * looking.
+ *
+ * Module-level, and once, because the stage is: the layer and its root outlive
+ * every card. Narrow on purpose — only after keyedFetch has recorded a refusal,
+ * and only a rejection carrying the root's own URL (see isTilesetRootFailure).
+ * Everything else that rejects on this page is still somebody's bug, and still
+ * reaches the console as one. loaders.gl's own "A 3D tile failed to load" line
+ * is a console.error inside the library, not a rejection, and is left alone.
+ */
+globalThis.addEventListener?.('unhandledrejection', (event) => {
+  if (stage.refused && isTilesetRootFailure(event.reason, TILESET)) event.preventDefault();
+});
 
 /**
  * The tile layer, built fresh for each building because the clip is a prop.
@@ -970,6 +997,18 @@ export function createFlyover({
     el.append(note);
   }
 
+  /**
+   * A failure that arrived as an exception rather than as Google's refusal:
+   * the toolkit's chunks not loading, a Deck that could not get a WebGL
+   * context. The exception's own message is a developer's — "Failed to fetch
+   * dynamically imported module: /assets/…" — so it goes to the console with
+   * its stack, and to the card only where forVisitor says somebody can use it.
+   */
+  function failWith(error) {
+    console.error('[beavermaps] aerial view failed:', error);
+    fail(forVisitor(error?.message || PLAIN_AERIAL_PROBLEM, PLAIN_AERIAL_PROBLEM));
+  }
+
   function destroy() {
     dead = true;
     cancelAnimationFrame(frame);
@@ -1059,7 +1098,7 @@ export function createFlyover({
       try {
         buildStage(tools, view);
       } catch (error) {
-        fail(error?.message ?? 'Aerial view unavailable');
+        failWith(error);
         return;
       }
     } else {
@@ -1268,7 +1307,7 @@ export function createFlyover({
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-  }).catch((error) => fail(error?.message ?? 'Aerial view unavailable'));
+  }).catch((error) => failWith(error));
 
   return { el, destroy };
 }

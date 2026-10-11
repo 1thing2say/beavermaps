@@ -12,7 +12,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tokenRefusal, showSetupProblem } from '../src/setup-problem.js';
+import {
+  tokenRefusal, showSetupProblem, webglMissing, WEBGL_PROBLEM,
+} from '../src/setup-problem.js';
 
 test('a real token is not a problem', () => {
   assert.equal(tokenRefusal('pk.eyJ1IjoiZXhhbXBsZSJ9.abc'), null);
@@ -110,6 +112,60 @@ test('it carries its own colours, because the stylesheet may be what failed', ()
     assert.match(box.style.cssText, /background:/);
     assert.match(box.style.cssText, /font:/);
   });
+});
+
+test('the card is drawn from the glass tokens, with the plain card as fallback', () => {
+  // With the stylesheet it is one more card in the app's material; without it,
+  // every var() falls back to the opaque card this used to be.
+  withDocument(() => {
+    const box = showSetupProblem('gone', fakeElement());
+    const card = box.children[0].style.cssText;
+    assert.match(card, /background-color:var\(--g-card-bg,#fff\)/);
+    assert.match(card, /backdrop-filter:var\(--g-card-filter,none\)/);
+    assert.match(card, /-webkit-backdrop-filter:/);
+    assert.doesNotMatch(card, /saturate/, 'Apple ships no saturate() in its material');
+  });
+});
+
+// --- WebGL ------------------------------------------------------------------
+
+/** A document whose canvases hand out `context`, and count the releases. */
+function canvasDocument(context) {
+  const released = [];
+  const doc = {
+    createElement: () => ({
+      getContext: (kind) => (kind === 'webgl2' ? context : null),
+    }),
+  };
+  if (context) {
+    context.getExtension = (name) => (name === 'WEBGL_lose_context'
+      ? { loseContext: () => released.push(name) }
+      : null);
+  }
+  return { doc, released };
+}
+
+test('a browser that hands out WebGL 2 is fine, and the probe gives its context back', () => {
+  // Browsers cap the contexts a page may hold, and the map is about to want one.
+  const { doc, released } = canvasDocument({});
+  assert.equal(webglMissing(doc), false);
+  assert.deepEqual(released, ['WEBGL_lose_context']);
+});
+
+test('no WebGL 2 context is missing — WebGL 1 is not enough for Mapbox GL v3', () => {
+  assert.equal(webglMissing(canvasDocument(null).doc), true);
+});
+
+test('a probe that throws counts as missing, not as a crash', () => {
+  const doc = { createElement: () => { throw new Error('blocked'); } };
+  assert.equal(webglMissing(doc), true);
+});
+
+test('the WebGL sentence is written to the visitor, with something to do', () => {
+  // Unlike the token, this one is theirs to fix.
+  assert.match(WEBGL_PROBLEM, /WebGL/);
+  assert.match(WEBGL_PROBLEM, /hardware acceleration|browser/i);
+  assert.doesNotMatch(WEBGL_PROBLEM, /VITE_|\.env|build/);
 });
 
 test('no container is not a crash', () => {
