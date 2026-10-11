@@ -16,10 +16,13 @@ import {
   LOOK_AHEAD_KM,
   MANEUVER_REACHED_KM,
   JUMP_FIXES,
+  OFF_ROUTE_M,
   OFF_ROUTE_FIXES,
+  GIVE_BACK_M,
   BANNER_SWAP_MS,
 } from '../src/navigation.js';
 import { instructionFor } from '../src/maneuvers.js';
+import { REACH_M } from '../src/directions.js';
 import { createRoute } from '../src/route-state.js';
 import { element, withDocument } from './fake-dom.js';
 import { point } from '@turf/helpers';
@@ -270,6 +273,10 @@ test('on a long straight the aim is the full look-ahead', () => {
     const h = walking();
     h.nav.start();
     walkTo(h, WALK.geometry.coordinates[2]);     // onto the last, longest leg
+    // A second fix at the corner. The sign turns over only once two fixes in
+    // a row want it to (see `advanceSteps`), and walked at a fix every 10 m
+    // the corner fix is the first of them to be within a stride of it.
+    h.nav.moved(WALK.geometry.coordinates[2]);
     const aim = h.nav.aimKm(h.route.maneuverKm(2));
     assert.ok(aim > h.route.maneuverKm(2), 'the aim collapsed onto our own position');
   });
@@ -543,6 +550,10 @@ test('walking away from the route says so, and coming back puts the sign back', 
   withDocument(() => {
     const h = walkingTheU();
     h.nav.start();
+    // A fix at the start first: the walker has been on the route. Without one,
+    // fixes 60 m off are someone still walking to it from where the route was
+    // asked for — see the off-network starts further down.
+    h.nav.moved(U_WALK.geometry.coordinates[0], { accuracy: 8 });
     const away = north(U_WALK.geometry.coordinates[0], -60);   // 60 m south, off the line
     const sign = () => h.dom.stack.children.at(-1);
 
@@ -559,5 +570,240 @@ test('walking away from the route says so, and coming back puts the sign back', 
     h.nav.moved(U_WALK.geometry.coordinates[0], { accuracy: 8 });
     assert.equal(h.nav.isOffRoute(), false);
     assert.equal(sign().querySelector('.nav-instruction').textContent, instructionFor('left'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GPS noise — what one fix may and may not do to the sign
+// ---------------------------------------------------------------------------
+
+/** The point `km` along the route `h` is walking. */
+const at = (h, km) => along(h.route.line, km).geometry.coordinates;
+
+/** The sign that owns the countdown: the newest one, mid-swap or not. */
+const liveSign = (h) => {
+  const el = h.dom.stack.children.at(-1);
+  return {
+    arrow: el.querySelector('.nav-arrow').innerHTML,
+    distance: el.querySelector('.nav-distance').textContent,
+    instruction: el.querySelector('.nav-instruction').textContent,
+  };
+};
+
+/** How far along the route the camera was last put, in km — where navigation believes you are. */
+const believedKm = (h) =>
+  nearestPointOnLine(h.route.line, point(h.map.eases.at(-1).center)).properties.location;
+
+/** Accurate fixes every `stepKm` from `fromKm` up to `toKm`, both ends included. */
+function strideAlong(h, fromKm, toKm, { stepKm = 0.01, accuracy = 5 } = {}) {
+  for (let km = fromKm; km < toKm; km += stepKm) h.nav.moved(at(h, km), { accuracy });
+  h.nav.moved(at(h, toKm), { accuracy });
+}
+
+test('one fix drifted toward the return leg at the bottom of the U skips no corner', () => {
+  // The reviewer's case. Walked accurately to 105 m, the first corner 17 m
+  // ahead, then one fix 11 m north with accuracy 10: 11 m from the path you are
+  // on and 9 m from the way home. The first windowed version snapped it onto
+  // the way home, took both corners and read "Arrive at destination", and
+  // accurate fixes afterwards never gave the corners back.
+  withDocument(() => {
+    const h = walkingTheU();
+    h.nav.start();
+    strideAlong(h, 0, 0.105);
+    assert.equal(h.nav.stepIndex(), 1);
+
+    const drifted = north(at(h, 0.105), 11);
+    // The precondition: the whole line's nearest point really is the way home.
+    const naive = nearestPointOnLine(h.route.line, point(drifted)).properties.location;
+    assert.ok(naive > h.route.maneuverKm(2), `the fix is not ambiguous (${naive} km)`);
+
+    h.nav.moved(drifted, { accuracy: 10 });
+    assert.equal(h.nav.stepIndex(), 1, 'one drifted fix retired a corner');
+    assert.equal(liveSign(h).instruction, instructionFor('left'));
+    assert.notEqual(liveSign(h).instruction, instructionFor('arrive'));
+
+    // And the accurate fixes after it carry on from the outbound leg.
+    strideAlong(h, 0.106, 0.11);
+    assert.equal(h.nav.stepIndex(), 1);
+    assert.ok(Math.abs(believedKm(h) - 0.11) < 0.002, `believed at ${believedKm(h)} km, not 0.11`);
+  });
+});
+
+test('a corner retired too early comes back once fixes put you well short of it', () => {
+  // Two fixes in a row at the corner while the walker is really 30 m short of
+  // it — enough, by design, to turn the sign over. The next accurate fixes
+  // have to be able to turn it back, or the mistake is as permanent as it was
+  // when the sign only ever counted up.
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    const corner = h.route.maneuverKm(1);
+    strideAlong(h, 0, corner - 0.03);
+
+    for (const km of [corner - 0.015, corner - 0.004, corner - 0.004]) h.nav.moved(at(h, km), { accuracy: 5 });
+    assert.equal(h.nav.stepIndex(), 2, 'the precondition: the corner was retired');
+    assert.equal(liveSign(h).instruction, instructionFor('left'));
+
+    // Short of where it was retired, but by less than GIVE_BACK_M: a walker
+    // standing at a corner in noise does not see it come and go.
+    const retiredAt = corner - MANEUVER_REACHED_KM;
+    for (let i = 0; i < 3; i++) h.nav.moved(at(h, retiredAt - GIVE_BACK_M / 2000), { accuracy: 5 });
+    assert.equal(h.nav.stepIndex(), 2, 'given back inside the slack');
+
+    // GIVE_BACK_M short of it and more: the corner is yours again.
+    const back = retiredAt - GIVE_BACK_M / 1000 - 0.002;
+    h.nav.moved(at(h, back), { accuracy: 5 });
+    h.nav.moved(at(h, back), { accuracy: 5 });
+    assert.equal(h.nav.stepIndex(), 1, 'the corner never came back');
+    assert.equal(liveSign(h).instruction, instructionFor('right'));
+  });
+});
+
+test('a single stray fix never changes the sign', () => {
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    const corner = h.route.maneuverKm(1);
+    strideAlong(h, 0, corner - 0.012);
+    const before = liveSign(h);
+    const signs = h.dom.stack.children.length;
+
+    const strays = [
+      at(h, corner - 0.002),                       // inside the window, a stride from the corner
+      at(h, h.route.totalKm - 0.01),               // on the line, nearly at the door
+      north(at(h, corner - 0.012), -60),           // nowhere near the line
+      north(at(h, corner - 0.012), 14),            // beside you, on the second leg's side
+    ];
+    for (const stray of strays) {
+      h.nav.moved(stray, { accuracy: 8 });
+      h.nav.moved(at(h, corner - 0.012), { accuracy: 5 });   // and straight back
+      assert.equal(h.nav.stepIndex(), 1, `${stray} moved the step`);
+      assert.equal(liveSign(h).instruction, before.instruction, `${stray} rewrote the sign`);
+      assert.equal(liveSign(h).arrow, before.arrow);
+      assert.equal(h.dom.stack.children.length, signs, `${stray} started a swap`);
+    }
+  });
+});
+
+for (const stride of [25, 30]) {
+  test(`fixes ${stride} m apart still carry you up the route, every one of them`, () => {
+    // A brisk walk with a phone that reports every few seconds, or a jog. The
+    // window ahead is short on purpose (see SNAP_AHEAD_M), and a fix beyond it
+    // must not have to wait for JUMP_FIXES others to agree before it counts:
+    // that is two fixes in every three standing still. A fix just past the
+    // window, or just round a corner from its end, fits there and is held
+    // there, so it can lag — by less than the stride, and the next fix
+    // catches up.
+    withDocument(() => {
+      const h = walking();
+      h.nav.start();
+      let last = 0;
+      for (let km = stride / 1000; km < h.route.totalKm; km += stride / 1000) {
+        h.nav.moved(at(h, km), { accuracy: 5 });
+        const now = believedKm(h);
+        assert.ok(now > last, `stalled at ${last} km with a fix at ${km} km`);
+        assert.ok(km - now < stride / 1000, `believed at ${now} km, walking at ${km} km`);
+        last = now;
+      }
+      h.nav.moved(at(h, h.route.totalKm), { accuracy: 5 });
+      assert.equal(h.nav.stepIndex(), WALK.maneuvers.length - 1);
+    });
+  });
+}
+
+test('a real leap far up the route is believed on the third agreeing fix', () => {
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    strideAlong(h, 0, 0.03);
+    const far = h.route.maneuverKm(2) + 0.02;     // past the last corner, 200 m on
+    for (let i = 0; i < JUMP_FIXES - 1; i++) {
+      h.nav.moved(at(h, far + i * 0.005), { accuracy: 5 });
+      assert.equal(h.nav.stepIndex(), 1, `believed after ${i + 1} fix(es)`);
+      assert.ok(believedKm(h) < 0.05, 'the camera went with an unagreed fix');
+    }
+    h.nav.moved(at(h, far + (JUMP_FIXES - 1) * 0.005), { accuracy: 5 });
+    assert.equal(h.nav.stepIndex(), WALK.maneuvers.length - 1);
+    assert.ok(Math.abs(believedKm(h) - (far + (JUMP_FIXES - 1) * 0.005)) < 0.002);
+    assert.equal(liveSign(h).instruction, instructionFor('arrive'));
+  });
+});
+
+test('starting as far off the network as a route may start is not being off the route', () => {
+  // The server routes from anywhere within REACH_M of the network, and the
+  // line it sends back starts where the walk joins the network, not where you
+  // are standing. Every fix on the way to it is further than OFF_ROUTE_M from
+  // the line, and none of them is a walker who has left the route.
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    const start = WALK.geometry.coordinates[0];
+    const before = liveSign(h);
+
+    // Down to OFF_ROUTE_M out; nearer than that the fix is on the line's
+    // doorstep and is placed on it like any other.
+    for (let m = REACH_M; m > OFF_ROUTE_M; m -= 20) {
+      const fix = north(start, -m);                 // due south, straight at the start
+      h.nav.moved(fix, { accuracy: 10 });
+      assert.equal(h.nav.isOffRoute(), false, `off route ${m} m out`);
+      assert.doesNotMatch(liveSign(h).instruction, /back to the route/i, `warned ${m} m out`);
+      assert.equal(liveSign(h).instruction, before.instruction);
+      assert.equal(h.nav.stepIndex(), 1);
+      assert.deepEqual(h.map.eases.at(-1).center, fix, 'the camera stayed at the start of the line');
+    }
+
+    // On the line now, and it is an ordinary walk.
+    strideAlong(h, 0, h.route.maneuverKm(1) + 0.01);
+    assert.equal(h.nav.stepIndex(), 2);
+    assert.equal(liveSign(h).instruction, instructionFor('left'));
+  });
+});
+
+test('walking away before reaching the route still says so', () => {
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    const start = WALK.geometry.coordinates[0];
+    h.nav.moved(north(start, -150), { accuracy: 10 });
+    h.nav.moved(north(start, -120), { accuracy: 10 });            // the nearest you have been
+    for (let i = 0; i < OFF_ROUTE_FIXES; i++) {
+      h.nav.moved(north(start, -(120 + OFF_ROUTE_M + 20)), { accuracy: 10 });
+    }
+    assert.equal(h.nav.isOffRoute(), true);
+    assert.match(liveSign(h).instruction, /back to the route/i);
+  });
+});
+
+test('coming back onto the line somewhere new never freezes the sign', () => {
+  // Off the route, then back onto it further up — a shortcut across a lawn.
+  // The place you rejoin is outside the window, so `track` waits for
+  // JUMP_FIXES to agree on it; the sign must keep saying something true and
+  // the camera keep following while it waits.
+  withDocument(() => {
+    const h = walking();
+    h.nav.start();
+    strideAlong(h, 0, 0.03);
+    const away = north(at(h, 0.03), -70);
+    for (let i = 0; i < OFF_ROUTE_FIXES; i++) h.nav.moved(away, { accuracy: 8 });
+    assert.equal(h.nav.isOffRoute(), true);
+
+    // Back toward the line, rejoining 60 m further along the first leg.
+    const rejoin = h.route.maneuverKm(1) - 0.005;
+    const fixes = [north(at(h, rejoin), -30), north(at(h, rejoin), -15), at(h, rejoin), at(h, rejoin + 0.002), at(h, rejoin + 0.004)];
+    const shown = [];
+    for (const fix of fixes) {
+      const eases = h.map.eases.length;
+      h.nav.moved(fix, { accuracy: 8 });
+      assert.equal(h.map.eases.length, eases + 1, `the camera stopped following at ${fix}`);
+      shown.push(`${liveSign(h).distance} ${liveSign(h).instruction}`);
+    }
+    // Every fix said something different until the sign was back — no frozen
+    // distance — and it is back by the end, pointing at the right corner.
+    const warnings = shown.filter((s) => /back to the route/i.test(s));
+    assert.equal(new Set(warnings).size, warnings.length, `the warning froze: ${shown.join(' | ')}`);
+    assert.equal(h.nav.isOffRoute(), false);
+    assert.doesNotMatch(liveSign(h).instruction, /back to the route/i);
+    assert.equal(h.nav.stepIndex(), 2);
+    assert.equal(liveSign(h).instruction, instructionFor('left'));
   });
 });

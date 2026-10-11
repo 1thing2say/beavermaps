@@ -1434,7 +1434,7 @@ function startApp() {
       //
       // The fix's own accuracy goes with it: navigation will not let a fix
       // vaguer than the gap between two walkways move you along the route.
-      // See `track` in src/navigation.js.
+      // See MAX_ACCURACY_M in src/navigation.js.
       nav.moved([e.coords.longitude, e.coords.latitude], {
         duration: nav.isSimulating() ? SIM_TICK_MS : 1000,
         accuracy: e.coords.accuracy,
