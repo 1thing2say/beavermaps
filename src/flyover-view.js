@@ -54,6 +54,7 @@ import {
   pinLayers, dropPixels, pinHeight, CLEAR_M, HOLD_MS, SETTLED_MS, DROP_MS, warmPinIcons,
 } from './flyover-pin.js';
 import { highlightLayers, HIGHLIGHT_UP_MS } from './flyover-cage.js';
+import { tileCredits } from './google-tiles.js';
 
 /**
  * Whether the flown-over building is boxed at all. Off for now, by request.
@@ -245,8 +246,16 @@ const GRID_CELLS = 24;
  */
 const GRID_DEPTH_M = -8;
 
-/** Google requires attribution and it is per-tile. Shown until tiles say more. */
-const FALLBACK_CREDIT = 'Google';
+/**
+ * Google requires attribution and it is per-tile. Shown until tiles say more.
+ *
+ * "Google Maps" rather than "Google", because that is the text Google's
+ * attribution policy asks for wherever its logo is not shown. Which is the
+ * case today: there is no logo asset yet, so the caption's mark IS this text
+ * (see the TODO in createFlyover), and the sources beside it stay empty until
+ * a tile names some rather than printing the same two words twice.
+ */
+const FALLBACK_CREDIT = 'Google Maps';
 
 /**
  * deck.gl and loaders.gl, fetched the first time somebody opens a building and
@@ -491,7 +500,18 @@ const stage = {
   host: null,
   canvas: null,
   deck: null,
-  credits: new Set(),
+  /**
+   * The tiles being drawn, as of the last traversal — what the credit line is
+   * counted from. See `tileCredits` in src/google-tiles.js.
+   *
+   * Kept from `onTraversalComplete` rather than read off `tileset.selectedTiles`
+   * because the callback runs BEFORE the library assigns that list: it is
+   * handed the traversal's raw selection, and what it returns becomes the
+   * selection. Read from inside the callback, `selectedTiles` is still the
+   * unfiltered list — the coarse slabs and off-campus tiles this callback is
+   * about to unselect, and therefore credits for imagery nobody is shown.
+   */
+  drawn: [],
   owner: null,
   /** Set by whichever flyover holds the canvas, so traversals reach the right card. */
   onReady: null,
@@ -700,6 +720,7 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
             for (const tile of kept.splice(MAX_TILES_DRAWN)) tile.unselect();
           }
 
+          stage.drawn = kept;
           if (kept.some((tile) => tile.contentAvailable && showsSubject(tile, stage.roof))) {
             stage.onReady?.();
           }
@@ -707,26 +728,22 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
         },
       },
     },
-    onTileLoad: (tile) => {
-      // Collected from the tiles themselves. Google's copyright is not a
-      // constant — it is a property of whose imagery is under you — and it
-      // arrives in each glTF's `asset.copyright`, not in the tileset JSON. The
-      // tileset carries none at any level; every leaf carries its own.
+    onTileLoad: () => {
+      // Google's copyright is not a constant — it is a property of whose
+      // imagery is under you — and it arrives in each glTF's `asset.copyright`,
+      // not in the tileset JSON. The tileset carries none at any level; every
+      // leaf carries its own. So a tile arriving can change the credit line,
+      // and the caption is repainted here rather than written once: the first
+      // traversal completes on a handful of tiles and the rest of the sources
+      // turn up over the next few seconds.
       //
-      // SPLIT ON THE SEMICOLON, and this is not tidying. Each tile's string is
-      // already a list — "Google;Data SIO, NOAA, U.S. Navy, NGA, GEBCO;IBCAO" —
-      // and neighbouring tiles carry overlapping but not identical lists.
-      // Collected whole, twenty tiles produced twenty near-duplicate entries
-      // and the caption grew to five lines covering a third of the picture.
-      // Split into its sources, the whole campus is one line of about ten
-      // names, because that is how many distinct sources there actually are.
-      for (const part of (tile?.content?.gltf?.asset?.copyright ?? '').split(';')) {
-        const source = part.trim();
-        if (source) stage.credits.add(source);
-      }
-      // The caption has to be repainted as tiles arrive, not written once: the
-      // first traversal completes on a handful of tiles and the rest of the
-      // sources turn up over the next few seconds.
+      // Nothing is collected here any more. This used to add every loaded
+      // tile's sources to a set for the card, which credited what had been
+      // LOADED rather than what is DRAWN — a tile fetched on the way down the
+      // tree and then refined away kept its sources in the caption — and could
+      // not say which source covered more of the view, which is the order
+      // Google asks for. The line is counted from `stage.drawn` instead; see
+      // `tileCredits` in src/google-tiles.js.
       stage.onReady?.();
     },
     onTileError: () => {},
@@ -943,9 +960,28 @@ export function createFlyover({
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', name ? `Aerial view of ${name}` : 'Aerial view');
 
+  // Google's mark and Google's sources, in one caption over the imagery. The
+  // box had the sources alone, and the policy for 3D tiles asks for both: the
+  // Google Maps logo bottom-left over the picture, and the data credits beside
+  // it. One caption rather than two absolutely placed things so the sources
+  // wrap AROUND the mark instead of running under it on a narrow card.
   const credit = document.createElement('figcaption');
   credit.className = 'g-flyover-credit';
-  credit.textContent = FALLBACK_CREDIT;
+  // TODO: Google Maps logo. This must be Google's official asset — the
+  // outlined ("over imagery") variant, 16-19px tall, alt "Google Maps" —
+  // dropped into the repo and used here as an <img>. Nothing in this repo or
+  // in node_modules is that file, and a logo is not something to redraw or
+  // hotlink, so until it is added the mark is the text wordmark, which is
+  // what Google's attribution policy allows where the logo cannot be shown.
+  // When the <img> goes in, give `sources` FALLBACK_CREDIT as its empty-state
+  // text again (here and in onReady): with a logo beside it, the words are no
+  // longer a repeat of the mark.
+  const mark = document.createElement('span');
+  mark.className = 'g-flyover-mark';
+  mark.textContent = FALLBACK_CREDIT;
+  const sources = document.createElement('span');
+  sources.className = 'g-flyover-sources';
+  credit.append(mark, sources);
   el.append(credit);
   // Over the picture and over the credit, because it is a reading of the thing
   // underneath it rather than part of the picture.
@@ -1073,11 +1109,12 @@ export function createFlyover({
       });
     }
     stage.owner = token;
-    // Cleared per building, not per tab. The requirement is to credit the
-    // imagery being SHOWN, and the tileset outlives any one card — left to
-    // accumulate, a card would eventually be crediting sources for a building
-    // three taps ago that is nowhere on screen.
-    stage.credits.clear();
+    // Emptied per building, not per tab. The requirement is to credit the
+    // imagery being SHOWN, and the tileset outlives any one card — until this
+    // building's first traversal lands, the last one's tiles are a building
+    // three taps ago that is nowhere on screen, and this card shows only the
+    // mark rather than crediting them.
+    stage.drawn = [];
     el.prepend(stage.host);
 
     // The refusal, for this card: now if it has already happened, or whenever
@@ -1089,7 +1126,9 @@ export function createFlyover({
     // so it does two jobs and has to be safe to call repeatedly.
     stage.onReady = () => {
       if (dead) return;
-      credit.textContent = [...stage.credits].join(', ') || FALLBACK_CREDIT;
+      sources.textContent = tileCredits(
+        stage.drawn.map((tile) => tile.content?.gltf?.asset?.copyright),
+      );
       // HALF of the drop's condition. This one says a fine tile covering the
       // roof has ARRIVED; the other half, `drawn`, says deck.gl has built
       // geometry out of it, and is checked per frame because it becomes true

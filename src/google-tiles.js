@@ -39,6 +39,50 @@ export const GOOGLE_MAP_TYPE = {
 const FALLBACK_ATTRIBUTION = 'Map data ©Google';
 
 /**
+ * The 3D flyover's credit line, out of the copyright strings of the tiles on
+ * screen — one string per tile, as each glTF's `asset.copyright` carries it.
+ *
+ * Here rather than in src/flyover-view.js because it is Google's rule, not the
+ * view's, and because that module drags deck.gl and a stylesheet in with it and
+ * cannot be imported by a test. The rule, from the Map Tiles API's 3D policy:
+ * collect the sources from every tile being DRAWN, and list them most frequent
+ * first. Frequency is what makes the order mean something — the source that
+ * supplied most of the picture is the one named first, and a global bathymetry
+ * credit carried by one coarse tile at the horizon trails it.
+ *
+ * Counted ONCE PER TILE. Each tile's string is already a list,
+ * "Google;Data SIO, NOAA, U.S. Navy, NGA, GEBCO;IBCAO", and a tile that happens
+ * to name a source twice still only shows it once — the count is how much of
+ * the view a source covers, not how many times its name was printed.
+ *
+ * Ties keep the order the sources were first met in, which is the draw order of
+ * the tiles: Array#sort is stable, so equal counts do not shuffle between two
+ * repaints of the same view. Joined with '; ' because that is the separator
+ * Google's own strings use between sources — a comma is already inside one
+ * ("Data SIO, NOAA, U.S. Navy") and would merge two sources into one run.
+ *
+ * Empty when no tile has said anything yet, so the caller keeps its fallback.
+ *
+ * @param {Iterable<string | null | undefined>} copyrights one per drawn tile
+ * @returns {string}
+ */
+export function tileCredits(copyrights) {
+  const counts = new Map();
+  for (const copyright of copyrights) {
+    const sources = new Set();
+    for (const part of (copyright ?? '').split(';')) {
+      const source = part.trim();
+      if (source) sources.add(source);
+    }
+    for (const source of sources) counts.set(source, (counts.get(source) ?? 0) + 1);
+  }
+  return [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .map(([source]) => source)
+    .join('; ');
+}
+
+/**
  * Dark styling for the roadmap tiles under the CLASSIC look, in Google's own
  * style-array schema.
  *
