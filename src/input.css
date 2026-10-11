@@ -9,6 +9,15 @@
 }
 
 :root {
+    /* Which way round the browser's OWN chrome is drawn: scrollbars, form
+       controls, the caret. Stated, because nothing else told it — the theme
+       is an attribute, not the OS preference the browser would otherwise go
+       by — so with data-theme="dark" a classic scrollbar was a bright white
+       track down the edge of the dark glass sidebar, the results list, the
+       legend and the phone sheet. The boot script in index.html writes the
+       attribute before first paint, so this is right from the first frame. */
+    color-scheme: light;
+
     /* One grid colour, one cell size, nudged off the corner so the ruling never
        lines up with the sign's edges. Proportions follow the DS menu that
        inspired it: a 28px cell with a 3px line, roughly its 8:1 ratio. */
@@ -227,6 +236,8 @@
 }
 
 :root[data-theme="dark"] {
+    color-scheme: dark;
+
     /* Not white. The grid IS the object; the ground it is ruled on follows the
        surface it sits in, and a white rectangle here would be the brightest
        thing on a night screen — in the one card that opens without being asked
@@ -3993,6 +4004,17 @@ body.no-dirbutton .g-directions {
 
 .g-endpoint-input::placeholder {
     color: var(--g-text-dim);
+}
+
+/* A little more ink in the Apple dark field. --g-text-dim is measured against
+   the bare material, but these placeholders sit on the field's own fill on
+   top of it: rgba(235,235,245,0.6) over rgba(120,120,128,0.24) on the dark
+   sheet is 4.38:1, under the 4.5 that 14-16px text needs — and with the
+   label visually hidden, the placeholder is the field's only visible name.
+   0.68 is about 5:1 on the same fill. */
+[data-skin="apple"][data-theme="dark"] .g-search-input::placeholder,
+[data-skin="apple"][data-theme="dark"] .g-endpoint-input::placeholder {
+    color: rgba(235, 235, 245, 0.68);
 }
 
 .g-endpoint-input {
