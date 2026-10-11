@@ -16,7 +16,9 @@
 // second telling of something they already know.
 
 import { googleGround } from './google-tiles.js';
-import { mapboxRefusal, MAPBOX_HOST } from './basemap-problem.js';
+import {
+  mapboxRefusal, MAPBOX_HOST, forVisitor, PLAIN_MAP_PROBLEM, PLAIN_GOOGLE_FALLBACK,
+} from './basemap-problem.js';
 import { styleKey } from './palette.js';
 import { CAMPUS_BOUNDS } from './campus-bounds.js';
 
@@ -86,7 +88,12 @@ export function createGround({
     const problem = mapboxRefusal(status, window.location.origin);
     if (!problem) return;
     refusals.add(status);
-    setStatus(problem, true);
+    // The full sentence to the console every time, in a build too — it is the
+    // only place the deployer of a public site will find it. The screen gets
+    // it only in dev or under ?debug; a visitor gets a line they can read
+    // without being handed the token's configuration. See forVisitor.
+    console.error(`[beavermaps] ${problem}`);
+    setStatus(forVisitor(problem, PLAIN_MAP_PROBLEM), true);
   });
 
   // Mapbox Standard hides its layers behind a style package, so when something
@@ -168,9 +175,12 @@ export function createGround({
     } catch (error) {
       // A refused key is not a bug the user can see the shape of, and Google's
       // own message names the cause (API not enabled, referrer not allowed, key
-      // invalid), so the sentence goes to the strip — for the person who
-      // deployed this, who is the only one who can act on it and may well be
-      // reading it on a phone with no console to look in.
+      // invalid). That sentence always goes to the console, and to the strip
+      // in dev or under ?debug — for the person who deployed this, who is the
+      // only one who can act on it and may well be reading it on a phone with
+      // no console to look in. A visitor gets the plain line instead: Google's
+      // wording quotes the key's own settings back, and is no use to them.
+      // See forVisitor.
       //
       // A NOTICE RATHER THAN A REFUSAL, though, and the two lines below are why:
       // the toggle drops back to a provider that works, so by the time this is
@@ -181,7 +191,7 @@ export function createGround({
       // src/status-line.js: it holds the strip the way a problem does and
       // leaves the layout alone.
       console.error('Google basemap unavailable:', error);
-      setNotice(`Google basemap unavailable: ${error.message}`);
+      setNotice(forVisitor(`Google basemap unavailable: ${error.message}`, PLAIN_GOOGLE_FALLBACK));
       if (generation !== groundGeneration) return;
       setProvider('mapbox');
       providerControl()?.revert();
