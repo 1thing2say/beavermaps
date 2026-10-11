@@ -260,6 +260,42 @@ export const networkFilter = (colors) => (colors.land ? null : ['!=', ['get', 'r
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
 /**
+ * OpenStreetMap's credit, carried by the two sources in this file that draw
+ * OSM data: the campus boundary, which is OSM's own `amenity=college` way, and
+ * the route, which leaves the campus along OSM's streets — the approach network
+ * in src/approach-paths.json is built from them (scripts/build-approach-network.mjs).
+ *
+ * ON THE SOURCES, not in a custom attribution on the control, because that is
+ * what makes it appear exactly when it is owed. Mapbox's AttributionControl
+ * lists the `attribution` of every source a visible layer is drawing from and
+ * no others — so over imagery, where the mask is not drawn, the boundary
+ * credits nothing, which is right: it is not on screen. The route's layers
+ * stand for the life of the style, so its credit shows for a route that never
+ * leaves the campus too. Over-crediting a licensor is harmless, and a geojson
+ * source's attribution is fixed when the source is added.
+ *
+ * UNDER GOOGLE ONLY. Both of Mapbox's styles here, Standard and Standard
+ * Satellite, are built on OSM and already put "© OpenStreetMap" in the line;
+ * the control only drops a credit that another one CONTAINS, and these two
+ * strings differ, so under Mapbox this would have printed OpenStreetMap twice
+ * in a notice that already has to fit a phone. Under Google it was missing
+ * altogether — the style under us is blank and Google's copyright line was the
+ * only other credit on screen — and ODbL wants the credit wherever the data is
+ * shown, whichever company drew the ground. Decided at addSource, which is safe
+ * because changing provider always changes the style key and so always goes
+ * through a full setStyle and style.load, which adds these sources again (see
+ * `syncBasemapStyle` in src/ground.js).
+ *
+ * "© OpenStreetMap", linked to their copyright page, rather than the longer
+ * "© OpenStreetMap contributors": OSM's attribution guidelines accept either
+ * as long as the link is there, it is the form Mapbox's own line uses, and
+ * on a 390px phone the longer one pushed Google's notice onto two lines in a
+ * corner that sits directly over the sheet.
+ */
+export const OSM_ATTRIBUTION = '<a href="https://www.openstreetmap.org/copyright" '
+  + 'target="_blank" rel="noopener">© OpenStreetMap</a>';
+
+/**
  * @param {object} deps
  * @param {object} deps.map
  * @param {Function} deps.litPalette  the palette at the current time of day
@@ -281,6 +317,9 @@ export function createRouteLayers({
   // it was made from, because a style swap re-adds the source and should not
   // redo the cutting for files that have not changed.
   let drawn = { network: undefined, sheet: undefined, data: EMPTY };
+
+  /** OSM's credit for a source drawn from OSM, when the style lacks one. See OSM_ATTRIBUTION. */
+  const osmCredit = () => (provider() === 'google' ? OSM_ATTRIBUTION : undefined);
   function drawnNetwork() {
     if (drawn.network !== network() || drawn.sheet !== sheet()) {
       drawn = {
@@ -328,7 +367,9 @@ export function createRouteLayers({
     const colors = litPalette();
 
     if (!map.getSource('campus-boundary')) {
-      map.addSource('campus-boundary', { type: 'geojson', data: boundary });
+      map.addSource('campus-boundary', {
+        type: 'geojson', data: boundary, attribution: osmCredit(),
+      });
     }
 
     // Nothing to clip when Google draws the ground: the style under us is
@@ -416,7 +457,9 @@ export function createRouteLayers({
       map.addSource('custom-network', { type: 'geojson', data: drawnNetwork() });
     }
     if (!map.getSource('calculated-route')) {
-      map.addSource('calculated-route', { type: 'geojson', data: route.feature() });
+      map.addSource('calculated-route', {
+        type: 'geojson', data: route.feature(), attribution: osmCredit(),
+      });
     }
     if (!map.getSource('route-legs')) {
       map.addSource('route-legs', {
