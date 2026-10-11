@@ -860,24 +860,34 @@ function landOnLine(act, tol) {
 // and printed beside the junction stage's. The price is 16 m more under roofs
 // than peeling both, all of it on the two strokes above.
 //
-// What is still under a roof is all passage, and the decision is not close.
-// The one passage cut, 39 m of walkway through the corner of the Evangelisti
-// Culinary Arts Center, with a second walkway drawn just outside the wall
-// beside it, has a way round 1.9 times as long; the least-needed passage kept,
-// 8 times. Any ratio from 2 to 8 draws the same line. What stays:
+// What is still under a roof is all passage, and the ratio's decision is not
+// close. The one passage it cuts, 39 m of walkway through the corner of the
+// Evangelisti Culinary Arts Center, with a second walkway drawn just outside
+// the wall beside it, has a way round 1.9 times as long; the least-needed
+// passage it keeps, 8 times. Any ratio from 2 to 8 draws the same line.
+//
+// The ratio is not the only question, though: a passage on which no pavement
+// shows at all is cut, rejoined outside the wall or listed in path-links.json
+// whatever the ratio says (see BARE_M). What stays:
 //
 //   - 64 m: the 9.9 m driveway alongside the Gym, its centreline 0.86 m inside
 //     the wall — most of its drawn width is outside it and plainly visible.
-//   - 44 m: walkway 1287 threading five Health Education portables. Joined at
-//     its south end as above, it now has a way round, 152-164 m against 5-17 m
-//     through each roof — 9 to 32 times — bar a 1.3 m corner at its west end
-//     with none.
 //   - 10 m: the joint of 1295 and 1296 under the Science Success Center, with
-//     no way round; it is the only way to the visible 1295.
-//   - 9 m: a corner of the stadium-side walkway under a small unnamed building.
-//   - 5 m: a corner tucked into the Student Center's notch.
+//     no way round; it is the only way to the visible 1295. Listed.
+//   - 9 m: a corner of the stadium-side walkway under a small unnamed building,
+//     530 m round. Listed.
+//   - 6 m: walkway 1287's south end beside portable 2003, its band showing
+//     past the portable's east wall.
 //   - 11 m in six places, none deeper than 0.9 m: wide paths whose edge a wall
 //     outline clips.
+//
+// And what no longer does. Walkway 1287 threaded four Health Education
+// portables (1987, 1988, 1989, 1998), 36 m under their roofs and 29 m of it
+// with no pavement showing, and is cut at each: the walk across the complex goes
+// round, 150-160 m, and the 40 m of 1287 and 1288 left between the portables,
+// which the sheet reaches only through them, goes with the fragments. The
+// bend of a walkway tucked into the Student Center's notch is rejoined by the
+// 3.3 m outside it.
 
 /** The footprints painted over an edge: later in the sheet than every stroke drawn down it. */
 function hidersOf(key) {
@@ -958,6 +968,40 @@ function edgeHidden(key) {
   return hidersOf(key).some((F) => inFootprint(m, F));
 }
 
+/**
+ * BARE: metres of an edge where no pavement shows at all — where every point
+ * across the width drawn down it is under a footprint painted over it. A
+ * passage along a wall, or a wide driveway whose edge a wall clips, shows its
+ * pavement beside the roof; a walkway with a portable set down on top of it
+ * shows none. Sampled every SHOW_STEP_M along the edge at nine points across
+ * the widest stroke drawn down it. A connector carries the strokes it joins
+ * and is measured at their width.
+ */
+const SHOW_STEP_M = 0.25;
+function bareMetres(key) {
+  const [u, v] = edges.get(key);
+  const a = coord[u], b = coord[v], L = dist(a, b);
+  const over = hidersOf(key);
+  if (L === 0 || !over.length) return 0;
+  let width = 0;
+  for (const s of edgeS.get(key) ?? []) width = Math.max(width, kept[s].width);
+  const half = (width || (edgeW.get(key) ?? 1)) / 2;
+  const nx = -(b[1] - a[1]) / L, ny = (b[0] - a[0]) / L;
+  const steps = Math.max(1, Math.round(L / SHOW_STEP_M));
+  let bare = 0;
+  for (let k = 0; k < steps; k += 1) {
+    const t = (k + 0.5) / steps;
+    const m = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+    let shows = false;
+    for (let j = -4; j <= 4 && !shows; j += 1) {
+      const p = [m[0] + nx * half * (j / 4), m[1] + ny * half * (j / 4)];
+      shows = !over.some((F) => inFootprint(p, F));
+    }
+    if (!shows) bare += L / steps;
+  }
+  return bare;
+}
+
 /** Shortest walk from `from` to every node over the given edges, no further than cap. */
 function walkOver(edgeList, from, cap = Infinity) {
   const adj = new Map();
@@ -988,6 +1032,43 @@ function walkOver(edgeList, from, cap = Infinity) {
  * connector; here, whether a hidden stretch is worth keeping.
  */
 const PASS_RATIO = JUNCTION_RATIO;
+/**
+ * A passage with at least this much of it bare (see bareMetres()) is not kept
+ * for being the shorter walk. The ratio asks only whether the walk round is
+ * long, never whether anyone could walk where the passage runs, and kept 49 m
+ * of walkway on which the sheet shows no pavement at all: walkway 1287 down
+ * the middle of four Health Education portables set on top of it, a joint of
+ * two walkways under the Science Success Center, another under a small
+ * building on the stadium side, and the bend of a walkway tucked into the
+ * Student Center's notch. 220 of 3,907 random walks went through portable
+ * 1998 alone, and the route ribbon, which nothing hides, drew them across its
+ * roof.
+ *
+ * Such a passage is, in order:
+ *
+ *   - REJOINED OUTSIDE THE WALL, where it has two ways out and the straight
+ *     line between them is at most JUNCTION_M and under no roof: the stroke
+ *     bends round a corner of the building and its pavement shows round the
+ *     outside of the bend. The hidden piece goes, as a cut passage does, and
+ *     the two wall nodes are joined by a connector, counted like the junction
+ *     stage's. The Student Center's notch, 3.3 m outside against 5 m under.
+ *   - KEPT, where path-links.json lists the footprint under `passages`, with a
+ *     `why`: a decision written down, not a side effect of the ratio.
+ *   - CUT otherwise, like any passage the ratio turns down, and its ways out
+ *     are doors.
+ *
+ * One metre, so the corner of a roof clipping a wide stroke — the six passages
+ * of under a metre each that the ratio kept, which all show pavement beside
+ * them — is never the question.
+ */
+const BARE_M = 1.0;
+const passageExceptions = new Map();
+{
+  const file = src('path-links.json');
+  const listed = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).passages ?? [] : [];
+  for (const p of listed) passageExceptions.set(p.under, { ...p, used: false });
+}
+let bareKept = 0, wallChords = 0, wallChordMetres = 0;
 let wallMetres = 0, wallPieces = 0;
 const passages = [];
 /**
@@ -1228,9 +1309,47 @@ function clipAtWalls(judge) {
       const m = [(coord[u][0] + coord[v][0]) / 2, (coord[u][1] + coord[v][1]) / 2];
       for (const F of hidersOf(key)) if (inFootprint(m, F)) under.add(F.i);
     }
-    const keep = worst > PASS_RATIO;
-    passages.push({ at: unflat(coord[doors[0]]), under: [...under].sort((x, y) => x - y), metres, through, around, keep });
-    if (!keep) for (const key of keys) drop(key);
+    // A passage with no pavement showing over it is not kept on the ratio
+    // alone: see BARE_M.
+    const bare = [...keys].reduce((sum, key) => sum + bareMetres(key), 0);
+    let keep = worst > PASS_RATIO, outcome = keep ? 'kept' : 'cut';
+    let chord = null;
+    if (keep && bare >= BARE_M) {
+      const excepted = [...under].map((i) => passageExceptions.get(i)).find(Boolean);
+      const [a, b] = doors.map((n) => coord[n]);
+      if (doors.length === 2 && dist(a, b) <= JUNCTION_M && !underRoof(a, b)) {
+        chord = doors;
+        outcome = 'rejoined outside the wall';
+      } else if (excepted) {
+        excepted.used = true;
+        outcome = 'kept, a listed exception';
+      } else {
+        keep = false;
+        outcome = 'cut, no pavement shows';
+      }
+    }
+    passages.push({ at: unflat(coord[doors[0]]), under: [...under].sort((x, y) => x - y), metres, bare, through, around, outcome });
+    if (keep && !chord && bare >= BARE_M) bareKept += bare;
+    if (keep && !chord) continue;
+    if (!chord) {
+      for (const key of keys) drop(key);
+      continue;
+    }
+    // Rejoined: the stroke bends round the outside of the wall, so the piece
+    // under the roof is no approach path, and its two ends are not doors. It
+    // goes without being written down in DOORS: recorded, the Student
+    // Center's notch gave two rooms 2.7 m apart a door each, 3.3 m apart along
+    // the chord, and a "walk" between them out of one and in at the other.
+    const strokesUnder = new Set([...keys].flatMap((key) => [...(edgeS.get(key) ?? [])]));
+    for (const key of keys) {
+      const [u, v] = edges.get(key);
+      wallMetres += dist(coord[u], coord[v]);
+      edges.delete(key);
+      hidden.delete(key);
+    }
+    wallChords += 1;
+    wallChordMetres += dist(coord[chord[0]], coord[chord[1]]);
+    addEdge(chord[0], chord[1], 1, strokesUnder);
   }
 
   // Count what went, as connected pieces rather than segments.
@@ -1912,8 +2031,14 @@ for (const j of roofJoined) {
 }
 for (const p of passages) {
   const around = Number.isFinite(p.around) ? `${Math.round(p.around)} m` : 'no way';
-  console.log(`[walk-network]    through sheet ${p.under.join('+')} at ${p.at.join(',')}: ${Math.round(p.metres)} m under the roof, `
-    + `${p.keep ? 'kept' : 'cut'} (${around} round against ${Math.round(p.through)} m through)`);
+  const bare = p.bare >= BARE_M ? `, ${p.bare.toFixed(1)} m of it bare` : '';
+  console.log(`[walk-network]    through sheet ${p.under.join('+')} at ${p.at.join(',')}: ${Math.round(p.metres)} m under the roof${bare}, `
+    + `${p.outcome} (${around} round against ${Math.round(p.through)} m through)`);
+}
+console.log(`[walk-network]    ${bareKept.toFixed(1)} m kept where no pavement shows, all of it listed in path-links.json; `
+  + `${wallChords} passage(s) rejoined outside the wall: ${wallChordMetres.toFixed(1)} m the sheet does not draw`);
+for (const [i, p] of passageExceptions) {
+  if (!p.used) console.warn(`[walk-network]    WARNING: path-links.json lists a passage under sheet ${i} that no longer needs it`);
 }
 console.log(`[walk-network] ${teed} dead ends teed onto the stroke they stopped short of within ${TEE_M} m`);
 console.log(`[walk-network] ${welded} near-miss junctions welded within ${JUNCTION_M} m (only where the graph made you walk ${JUNCTION_RATIO}x further around)`);

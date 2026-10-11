@@ -328,3 +328,56 @@ test('every door in doors.json is on its building\'s wall and on the network', (
     }
   }
 });
+
+test('the network runs nowhere under a roof that shows no pavement, bar the passages listed', () => {
+  // Every building on the sheet is painted after every walkway, so a path
+  // under a roof shows only where its drawn band reaches out past the wall.
+  // The walls stage used to keep a passage on the ratio of the walk round to
+  // the walk through alone, and kept 49 m on which no pavement shows at all:
+  // walkway 1287 down the middle of four Health Education portables, and the
+  // route ribbon drawn across their roofs. Sampled every 0.25 m, at nine
+  // points across a 3.3 m walkway band (the narrowest drawn); a sample is bare
+  // when all nine are under a footprint. Bare metres are allowed only under
+  // the footprints path-links.json lists as reviewed passages.
+  const roofs = load('basemap').features
+    .filter((f) => ['building', 'closed'].includes(f.properties.kind))
+    .flatMap((f) => (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates)
+      .map((rings) => ({ i: f.properties.i, ring: rings[0], holes: rings.slice(1) })));
+  const under = (p) => roofs.find(({ ring, holes }) => pointInRing(p, ring) && !holes.some((h) => pointInRing(p, h)));
+  const allowed = new Set((load('path-links').passages ?? []).map((p) => p.under));
+  const mx = metresBetween([0, 38.65], [1e-4, 38.65]) / 1e-4, my = metresBetween([0, 38.65], [0, 38.6501]) / 1e-4;
+  const bare = new Map();
+  let deepest = { d: 0 };
+  for (const s of segments) {
+    const [a, b] = s.geometry.coordinates;
+    const L = metresBetween(a, b);
+    if (L === 0) continue;
+    const ux = ((b[0] - a[0]) * mx) / L, uy = ((b[1] - a[1]) * my) / L;
+    const steps = Math.max(1, Math.round(L / 0.25));
+    for (let k = 0; k < steps; k += 1) {
+      const t = (k + 0.5) / steps;
+      const m = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+      const roof = under(m);
+      if (!roof) continue;
+      if (roof.i === 1988 || roof.i === 1989) {
+        let toWall = Infinity;
+        for (let q = 1; q < roof.ring.length; q += 1) {
+          const [p0, p1] = [roof.ring[q - 1], roof.ring[q]];
+          for (let r = 0; r <= 20; r += 1) {
+            toWall = Math.min(toWall, metresBetween(m, [p0[0] + (r / 20) * (p1[0] - p0[0]), p0[1] + (r / 20) * (p1[1] - p0[1])]));
+          }
+        }
+        if (toWall > deepest.d) deepest = { d: toWall, at: m, i: roof.i };
+      }
+      let shows = false;
+      for (let j = -4; j <= 4 && !shows; j += 1) {
+        const off = (1.65 * j) / 4;
+        shows = !under([m[0] - (uy * off) / mx, m[1] + (ux * off) / my]);
+      }
+      if (!shows) bare.set(roof.i, (bare.get(roof.i) ?? 0) + L / steps);
+    }
+  }
+  const unlisted = [...bare].filter(([i, metres]) => !allowed.has(i) && metres > 0.5);
+  assert.deepEqual(unlisted.map(([i, metres]) => `${metres.toFixed(1)} m under sheet ${i}`), []);
+  assert.ok(deepest.d < 2, `the network runs ${deepest.d.toFixed(1)} m deep inside portable ${deepest.i} at ${deepest.at}`);
+});
