@@ -45,7 +45,7 @@ import { createPinState, POI_LABEL_LAYERS } from './pin-state.js';
 import { createBuildingsLighting, BUILDING_EMISSIVE } from './buildings-lighting.js';
 import { createCampusSheet, CLOSED_TEXT } from './campus-sheet.js';
 import { createMarkerLayers } from './marker-layers.js';
-import { createLabelLayers, NOTHING_SELECTED } from './label-layers.js';
+import { createLabelLayers } from './label-layers.js';
 import { createRouteLayers } from './route-layers.js';
 import { createCamera } from './camera.js';
 import { createCards } from './cards.js';
@@ -690,15 +690,10 @@ function startApp() {
   const labelPaint = (kind, colors) => labels.labelPaint(kind, colors);
 
   function highlightBuilding(officialName) {
-    // The name used to be kept in a `selectedBuilding` variable alongside a
-    // second one holding the open card, back when the card was a Mapbox popup
-    // that had to be kept and removed. The card is the contents of #place-panel
-    // now, so the panel's own hidden state is the whole of it — and the name
-    // was written here and read nowhere, which is what a linter is for.
-    const filter = officialName ? ['==', ['get', 'officialName'], officialName] : NOTHING_SELECTED;
-    for (const id of ['campus-directory-fill', 'campus-directory-line']) {
-      if (map.getLayer(id)) map.setFilter(id, filter);
-    }
+    // The name is kept by src/label-layers.js now rather than nowhere: a style
+    // swap rebuilds the outline layers, and they have to come back filtered to
+    // the building whose card is still open.
+    labels.select(officialName);
   }
 
   /**
