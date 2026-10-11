@@ -1564,7 +1564,8 @@ be the production pair at the time.
 beavermaps/
 ├── index.html              # Page shell: search field, sheet, panels, icon links
 ├── server/
-│   ├── index.js            # HTTP only: routes, headers, static, error shape
+│   ├── index.js            # Boot: reads the data, builds the graph, listens
+│   ├── app.js              # HTTP only: routes, headers, static, error shape
 │   ├── graph.js            # The routing graph and the reach check — testable
 │   ├── limit.js            # How often one caller may ask for a route
 │   └── wire.js             # What goes on the wire, and in which encoding

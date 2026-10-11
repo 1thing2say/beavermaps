@@ -57,8 +57,8 @@ ENV NODE_ENV=production
 # client are devDependencies — they reach visitors through dist/, already
 # bundled, so installing them here was ~280MB of node_modules nobody executes
 # where the server's own are 20MB.
-# test/runtime-deps.test.js walks the server's imports and fails if the two
-# lists ever disagree.
+# test/deploy.test.js ('dependencies are exactly what the server imports')
+# walks the server's imports and fails if the two lists ever disagree.
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
