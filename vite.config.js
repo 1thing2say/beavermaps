@@ -107,8 +107,8 @@ function devCompression() {
  *
  * index.html documents itself the way the rest of this codebase does, in long
  * notes about WHY a meta tag or a wrapper div is there, and those notes are
- * most of the file: measured at 64.6 KB built, 17.1 KB gzipped, against 4.5 KB
- * gzipped once they are gone. Every visitor downloaded the essay on every cold
+ * most of the file: measured at 69.7 KB built, 18.8 KB gzipped, against
+ * 27.6 KB built, 4.7 KB gzipped once they are gone. Every visitor downloaded the essay on every cold
  * load, ahead of the bundle that actually draws the map, and the page is served
  * `no-cache` (see server/wire.js) so it is revalidated rather than remembered.
  *

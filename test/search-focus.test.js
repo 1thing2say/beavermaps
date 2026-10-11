@@ -51,7 +51,14 @@ function node(className = '', tag = 'div', id = '') {
   el.removeAttribute = (name) => attrs.delete(name);
   el.hasAttribute = (name) => attrs.has(name);
   el.scrollIntoView = () => {};
-  el.focus = (options) => { doc.activeElement = el; el.focusOptions = options; };
+  // A browser ignores focus() on an element it is not drawing, without a
+  // word, and that silence is the bug this file had to learn about the hard
+  // way: see 'picking a result…' below. So the fake ignores it too.
+  el.focus = (options) => {
+    if (!rendered(el)) return;
+    doc.activeElement = el;
+    el.focusOptions = options;
+  };
   el.blur = () => { if (doc.activeElement === el) doc.activeElement = doc.body; el.blurred = true; };
   el.contains = (other) => other === el || [...el.descendants()].includes(other);
   el.closest = (selector) => {
@@ -59,7 +66,7 @@ function node(className = '', tag = 'div', id = '') {
     return null;
   };
   el.matches = (selector) => matches(el, selector);
-  el.getClientRects = () => (el.visible ? [{}] : []);
+  el.getClientRects = () => (rendered(el) ? [{}] : []);
   Object.defineProperty(el, 'isConnected', {
     get() {
       let at = el;
@@ -74,6 +81,17 @@ function node(className = '', tag = 'div', id = '') {
     return event;
   };
   return el;
+}
+
+/**
+ * Whether the browser would be drawing this: it and every box around it.
+ *
+ * `visible` is the fake's stand-in for the stylesheet, which this DOM does not
+ * have — false is display:none from whatever rule would say so.
+ */
+function rendered(el) {
+  for (let at = el; at; at = at.parent) if (at.visible === false) return false;
+  return true;
 }
 
 /** Just enough selector: `.class`, `#id`, a tag list, and `[role="…"]`. */
@@ -147,6 +165,13 @@ async function searchBox(dom, { openPlace = () => {} } = {}) {
       heading.tabIndex = -1;
       dom.panel.replaceChildren(heading);
       dom.panel.classList.remove('hidden');
+      // ...in a column that does not show it yet. The panel is open but not
+      // `data-front`, which src/input.css draws as display:none, and
+      // src/sheet-stack.js only marks it front from a MutationObserver — a
+      // microtask, after the task that opened it has finished. Queued the same
+      // way here so the fake gets the order the browser does.
+      dom.panel.visible = false;
+      queueMicrotask(() => { dom.panel.visible = true; });
       openPlace(place);
     },
     directoryRow: () => null,
@@ -212,6 +237,10 @@ test('a query that matches is announced as a count, not read out row by row', as
   assert.equal(dom.results.children[0].className, '');
 });
 
+// A turn of the event loop, and then some: what anything deferred with
+// setTimeout(…, 0) has had time to do.
+const tick = () => new Promise((resolve) => { setTimeout(resolve, 5); });
+
 test('picking a result puts focus on the card it opened, not on <body>', async () => {
   const dom = page();
   const { opened } = await searchBox(dom);
@@ -221,12 +250,31 @@ test('picking a result puts focus on the card it opened, not on <body>', async (
 
   assert.equal(opened.length, 1);
   assert.equal(opened[0].name, 'Library');
+  // The field lets go at once — that is what puts a phone's keyboard down —
+  // whether or not the card is on screen yet.
+  assert.equal(dom.input.blurred, true);
+  assert.notEqual(doc.activeElement, dom.input);
+
+  // And the heading takes focus once the stack has brought the card to the
+  // front, which a focus() on the same line as the open could not.
+  await tick();
   const heading = dom.panel.children[0];
   assert.equal(doc.activeElement, heading, 'focus is on the card heading');
   assert.deepEqual(heading.focusOptions, { preventScroll: true });
-  // The field let go because focus moved, not because it was blurred to body.
-  assert.notEqual(doc.activeElement, doc.body);
-  assert.equal(dom.input.blurred, undefined);
+});
+
+test('a pick does not take focus back from wherever it went in the meantime', async () => {
+  const dom = page();
+  await searchBox(dom);
+  dom.input.focus();
+  type(dom.input, 'library');
+  dom.input.dispatch('keydown', { key: 'Enter' });
+  // Somebody tabbed or tapped somewhere before the turn came round.
+  const elsewhere = node('', 'button');
+  doc.body.appendChild(elsewhere);
+  elsewhere.focus();
+  await tick();
+  assert.equal(doc.activeElement, elsewhere);
 });
 
 test('the route fields show the same row and cannot pick it', async () => {
@@ -254,9 +302,34 @@ test('the route fields show the same row and cannot pick it', async () => {
   assert.equal(dom.endList.classList.contains('hidden'), true);
 });
 
-// ---------------------------------------------------------------- the card
+test('focusing a route field that holds something nobody typed opens no "No results" row', async () => {
+  const dom = page();
+  const { box } = await searchBox(dom);
+  box.wireEndpointField({ input: dom.endInput, list: dom.endList, offerHere: false, onPick: () => {} });
 
-const tick = () => new Promise((resolve) => { setTimeout(resolve, 5); });
+  // What src/endpoints.js writes for a dropped-pin destination.
+  for (const held of ['38.5612, -121.4234', 'Dropped pin']) {
+    dom.status.textContent = '';
+    dom.endInput.value = held;
+    dom.endInput.dispatch('focus');
+    assert.equal(dom.endList.classList.contains('hidden'), true, `closed for ${held}`);
+    assert.equal(dom.endList.children.length, 0);
+    assert.equal(dom.endInput.getAttribute('aria-expanded'), 'false');
+    assert.equal(dom.status.textContent, '', 'nothing announced on focus');
+  }
+
+  // Typing the same text is a query, and does get the row.
+  type(dom.endInput, '38.5612, -121.4234');
+  assert.equal(dom.endList.children[0]?.className, 'g-result-empty');
+
+  // A held value that IS in the index still opens its suggestions on focus.
+  dom.endInput.value = 'Library';
+  dom.endInput.dispatch('focus');
+  assert.equal(dom.endList.classList.contains('hidden'), false);
+  assert.equal(dom.endList.children[0].children[0].textContent, 'Library');
+});
+
+// ---------------------------------------------------------------- the card
 
 async function card(dom, { opener }) {
   const { pinCard } = await import('../src/building-popup.js');

@@ -373,24 +373,39 @@ export function createSearchBox({
     openPlace({ coords, name: entry.name, sub });
     // FOCUS GOES TO WHAT WAS OPENED, not to nowhere. This used to be a bare
     // `searchInput.blur()`, which is how a phone is told to put its keyboard
-    // away — and how a keyboard or screen reader user was dropped on <body>,
-    // at the top of the document, with the card they had just asked for
-    // somewhere further down and no way to know it had arrived. Moving focus
-    // to the card's heading does both jobs: the field loses focus so the
-    // keyboard still goes, and the next thing read out is the name of the
-    // place. The heading carries tabindex="-1" for this — see head() in
-    // src/building-popup.js — so it can be focused from here without becoming
-    // a Tab stop of its own.
+    // away — and how a keyboard or screen reader user was then left on
+    // <body>, at the top of the document, with the card they had just asked
+    // for somewhere further down and no way to know it had arrived. So the
+    // blur stays, and focus then moves on to the card's heading, so the next
+    // thing read out is the name of the place. The heading carries
+    // tabindex="-1" for this — see head() in src/building-popup.js — so it can
+    // be focused from here without becoming a Tab stop of its own.
+    //
+    // THE BLUR NOW, THE HEADING A TURN LATER. The obvious version focused the
+    // heading on the very next line, and that does nothing in the case that
+    // matters most — no card open before this one. The column is a stack
+    // (src/sheet-stack.js): a panel that is open but not marked `data-front`
+    // is display:none (see ONE PANEL AT A TIME in src/input.css), and the mark
+    // is written from a MutationObserver that does not run until this task has
+    // finished. At this line the heading is inside a panel the browser is not
+    // drawing, and focus() on it is silently ignored — the field kept focus
+    // and with it the phone's keyboard, over the card it had just opened. The
+    // blur cannot wait, because it is what puts the keyboard down whatever
+    // happens next; the heading can, and returnFocus in src/building-popup.js
+    // waits the same turn for the same reason.
+    //
+    // Only if focus is still where the blur left it: anything that took focus
+    // in the meantime was put there by somebody, which beats a guess from here.
     //
     // preventScroll because the sheet and the camera have already decided
     // where everything goes, and the browser scrolling the column to put the
     // heading at its idea of "in view" would undo that.
-    //
-    // Falls back to the old blur when there is no heading to go to: a card
-    // that failed to build should still let the keyboard down.
-    const heading = document.querySelector('#place-panel .g-panel-title');
-    if (heading) heading.focus({ preventScroll: true });
-    else searchInput.blur();
+    searchInput.blur();
+    setTimeout(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      document.querySelector('#place-panel .g-panel-title')?.focus({ preventScroll: true });
+    }, 0);
   }
 
   searchInput.addEventListener('input', () => {
@@ -516,7 +531,14 @@ export function createSearchBox({
       render(endpointSuggestions(input.value, offerHere), input.value);
       if (normalise(input.value)) announce(hits.length ? countSentence(hits.length) : 'No results');
     });
-    input.addEventListener('focus', () => render(endpointSuggestions(input.value, offerHere), input.value));
+    // No query on focus, so an unmatched value closes the list rather than
+    // getting a "No results" row. What these fields hold when they are focused
+    // is often not something anybody typed: src/endpoints.js fills them with
+    // "Dropped pin", a pin card's own name or a coordinate label like
+    // "38.5612, -121.4234", none of which is in the index — and tapping the
+    // start to change a dropped pin should not open a row telling you it could
+    // not find the thing you have not searched for yet.
+    input.addEventListener('focus', () => render(endpointSuggestions(input.value, offerHere)));
     input.addEventListener('blur', () => setTimeout(close, 120));
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { close(); return; }
