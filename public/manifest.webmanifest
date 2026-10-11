@@ -1,7 +1,8 @@
 {
+  "id": "/",
   "name": "beavermaps",
   "short_name": "beavermaps",
-  "description": "my campus's campus map: search, browse, building cards and walking directions over my campus's own drawn pavement.",
+  "description": "A campus map: search for a place, browse the buildings, and get walking directions.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -18,6 +19,12 @@
       "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "/apple-touch-icon.png",
