@@ -92,3 +92,60 @@ test('niceFeet rounds to increments a person can act on', () => {
   // Never a negative distance, however the caller arrived at one.
   assert.equal(niceFeet(-3), '0 ft');
 });
+
+// --- Bends a few feet apart -------------------------------------------------
+//
+// Snapped edges and door spurs leave the network with bends a stride apart,
+// and each used to be its own maneuver: a sideways jog said "Bear right", then
+// "Bear left" eight feet later, on about one route in eleven.
+
+/** `feet` from `from` on compass heading `heading`. Flat-earth, which at this scale is exact enough. */
+function go(from, heading, feet) {
+  const rad = (heading * Math.PI) / 180;
+  const degLat = feet / FEET_PER_KM / 111.2;
+  const degLng = degLat / Math.cos((from[1] * Math.PI) / 180);
+  return [from[0] + Math.sin(rad) * degLng, from[1] + Math.cos(rad) * degLat];
+}
+
+/** A walk that follows `legs` — [heading, feet] pairs — from O. */
+function walkOf(legs) {
+  const coords = [O];
+  for (const [heading, feet] of legs) coords.push(go(coords.at(-1), heading, feet));
+  return coords;
+}
+
+test('a sideways jog inside the path is no turn at all', () => {
+  // North, a 30-degree step to the right for 8 ft, north again.
+  const maneuvers = buildManeuvers(walkOf([[0, 300], [30, 8], [0, 300]]));
+  assert.deepEqual(maneuvers.map((m) => m.type), ['depart', 'arrive']);
+  assert.ok(Math.abs(maneuvers.at(-1).distanceFeet - 608) <= 1, `${maneuvers.at(-1).distanceFeet} ft`);
+});
+
+test('two half-turns a stride apart are the one turn they add up to', () => {
+  const maneuvers = buildManeuvers(walkOf([[0, 300], [45, 8], [90, 300]]));
+  assert.deepEqual(maneuvers.map((m) => m.type), ['depart', 'right', 'arrive']);
+  const [, turn, arrive] = maneuvers;
+  // At the first bend, and the feet folded into it go on the leg after.
+  assert.equal(turn.index, 1);
+  assert.ok(Math.abs(turn.distanceFeet - 300) <= 1, `${turn.distanceFeet} ft`);
+  assert.ok(Math.abs(arrive.distanceFeet - 308) <= 1, `${arrive.distanceFeet} ft`);
+});
+
+test('turns a real distance apart are still two turns', () => {
+  const types = buildManeuvers(walkOf([[0, 300], [90, 50], [0, 300]])).map((m) => m.type);
+  assert.deepEqual(types, ['depart', 'right', 'left', 'arrive']);
+});
+
+test('a dogleg wider than the path keeps both its turns, however short', () => {
+  // Left off the path, 18 ft, right into a door: the walker has to leave the
+  // line they are on, and folding the pair would walk them straight past.
+  const types = buildManeuvers(walkOf([[0, 300], [270, 18], [0, 10]])).map((m) => m.type);
+  assert.deepEqual(types, ['depart', 'left', 'right', 'arrive']);
+});
+
+test('a bend more than a stride on is not folded into the one before', () => {
+  // The second bend is past JOG_FEET, so each is its own maneuver even though
+  // the two cancel.
+  const types = buildManeuvers(walkOf([[0, 300], [30, 25], [0, 300]])).map((m) => m.type);
+  assert.deepEqual(types, ['depart', 'slight-right', 'slight-left', 'arrive']);
+});
