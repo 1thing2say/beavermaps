@@ -51,6 +51,26 @@ export function createSearchBox({
   const searchResults = document.getElementById('place-results');
   const searchClear = document.getElementById('place-clear');
   const placeShortcuts = document.getElementById('place-shortcuts');
+  // The polite live region in index.html. Optional, so a page without it — or a
+  // test that does not build one — loses the announcement and nothing else.
+  const liveStatus = document.getElementById('sr-status');
+
+  /**
+   * Say how a query went, for somebody who cannot see the list change.
+   *
+   * Only for what was TYPED: a list that opens because the field was focused
+   * is the same suggestions every time, and announcing them on every focus
+   * would talk over the field's own label.
+   *
+   * The count rather than the names: the names are in the list, one arrow
+   * press away, and reading five building names after every keystroke is a
+   * paragraph nobody can type over.
+   */
+  function announce(sentence) {
+    if (liveStatus) liveStatus.textContent = sentence;
+  }
+
+  const countSentence = (n) => (n === 1 ? '1 result' : `${n} results`);
 
   // Built once from the committed artifact, which is static — unlike the place
   // index below, which waits on a fetch.
@@ -183,9 +203,28 @@ export function createSearchBox({
     }
   }
 
-  function renderResults(hits) {
+  /**
+   * @param {object[]} hits
+   * @param {string} [query]  what was typed, when the list is an answer to
+   *        typing — absent for the empty-field list, which has nothing to have
+   *        failed to find
+   */
+  function renderResults(hits, query = '') {
     searchHits = hits;
-    if (!hits.length) { closeResults(); return; }
+    if (!hits.length) {
+      // A query that found nothing used to CLOSE the list, which on screen is
+      // indistinguishable from the list not having caught up yet: type a
+      // misspelt building and the suggestions simply vanished, with nothing to
+      // say whether the app had looked. So a typed query that matches nothing
+      // gets a row saying so; only an empty field still closes.
+      if (!normalise(query)) { closeResults(); return; }
+      showNothingFound(searchResults, query);
+      placeShortcuts?.classList.add('hidden');
+      searchInput.setAttribute('aria-expanded', 'true');
+      searchInput.removeAttribute('aria-activedescendant');
+      activeHit = -1;
+      return;
+    }
     searchResults.replaceChildren(...hits.map((entry, i) => {
       const li = document.createElement('li');
       li.id = `place-result-${i}`;
@@ -241,6 +280,31 @@ export function createSearchBox({
     searchResults.classList.remove('is-navigating');
     searchInput.setAttribute('aria-expanded', 'true');
     highlight(0);
+  }
+
+  /**
+   * Put the one row a list shows when a typed query found nothing.
+   *
+   * textContent, never markup: the query is whatever somebody typed, and a row
+   * that interpolated it into innerHTML would run it.
+   *
+   * NOT SELECTABLE, which takes three things rather than one. It is an option
+   * with aria-disabled, because a listbox's children are options and a
+   * screen reader meeting anything else inside one has to guess; the callers
+   * keep their hit lists empty, so no arrow key or Enter can land on it; and a
+   * mousedown on it is swallowed, so pressing it neither picks anything nor
+   * blurs the field and closes the list out from under the pointer.
+   */
+  function showNothingFound(list, query) {
+    const li = document.createElement('li');
+    li.className = 'g-result-empty';
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-disabled', 'true');
+    li.setAttribute('aria-selected', 'false');
+    li.textContent = `No results for “${query.trim()}”`;
+    li.addEventListener('mousedown', (event) => event.preventDefault());
+    list.replaceChildren(li);
+    list.classList.remove('hidden', 'is-navigating');
   }
 
   /** The instance of a multi-location entry nearest whatever we can measure from. */
@@ -303,16 +367,37 @@ export function createSearchBox({
     searchInput.value = entry.name;
     searchClear.classList.remove('hidden');
     closeResults();
-    searchInput.blur();
     // The nearest of several is the one the card is about, so the hint that
     // counted them would describe the list rather than the card.
     const sub = entry.points.length > 1 ? (entry.description ?? null) : hintFor(entry);
     openPlace({ coords, name: entry.name, sub });
+    // FOCUS GOES TO WHAT WAS OPENED, not to nowhere. This used to be a bare
+    // `searchInput.blur()`, which is how a phone is told to put its keyboard
+    // away — and how a keyboard or screen reader user was dropped on <body>,
+    // at the top of the document, with the card they had just asked for
+    // somewhere further down and no way to know it had arrived. Moving focus
+    // to the card's heading does both jobs: the field loses focus so the
+    // keyboard still goes, and the next thing read out is the name of the
+    // place. The heading carries tabindex="-1" for this — see head() in
+    // src/building-popup.js — so it can be focused from here without becoming
+    // a Tab stop of its own.
+    //
+    // preventScroll because the sheet and the camera have already decided
+    // where everything goes, and the browser scrolling the column to put the
+    // heading at its idea of "in view" would undo that.
+    //
+    // Falls back to the old blur when there is no heading to go to: a card
+    // that failed to build should still let the keyboard down.
+    const heading = document.querySelector('#place-panel .g-panel-title');
+    if (heading) heading.focus({ preventScroll: true });
+    else searchInput.blur();
   }
 
   searchInput.addEventListener('input', () => {
-    searchClear.classList.toggle('hidden', !searchInput.value);
-    renderResults(searchInput.value ? runSearch(searchInput.value) : popularHits());
+    const query = searchInput.value;
+    searchClear.classList.toggle('hidden', !query);
+    renderResults(query ? runSearch(query) : popularHits(), query);
+    if (normalise(query)) announce(searchHits.length ? countSentence(searchHits.length) : 'No results');
   });
 
   // -------------------------------------------------------------------------
@@ -369,9 +454,19 @@ export function createSearchBox({
       [...list.children].forEach((li, i) => li.setAttribute('aria-selected', String(i === index)));
     };
 
-    const render = (found) => {
+    const render = (found, query = '') => {
       hits = found;
-      if (!found.length) { close(); return; }
+      if (!found.length) {
+        // The same "no results" row the search box shows, for the same reason:
+        // a list that vanishes under a misspelt name looks like a list that
+        // has not caught up. `hits` stays empty, so the arrows and Enter below
+        // have nothing to land on and the row cannot be picked.
+        if (!normalise(query)) { close(); return; }
+        showNothingFound(list, query);
+        input.setAttribute('aria-expanded', 'true');
+        active = -1;
+        return;
+      }
       list.replaceChildren(...found.map((entry, i) => {
         const li = document.createElement('li');
         li.setAttribute('role', 'option');
@@ -417,8 +512,11 @@ export function createSearchBox({
       await onPick(nearestInstance(entry), entry.name, false);
     }
 
-    input.addEventListener('input', () => render(endpointSuggestions(input.value, offerHere)));
-    input.addEventListener('focus', () => render(endpointSuggestions(input.value, offerHere)));
+    input.addEventListener('input', () => {
+      render(endpointSuggestions(input.value, offerHere), input.value);
+      if (normalise(input.value)) announce(hits.length ? countSentence(hits.length) : 'No results');
+    });
+    input.addEventListener('focus', () => render(endpointSuggestions(input.value, offerHere), input.value));
     input.addEventListener('blur', () => setTimeout(close, 120));
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { close(); return; }
@@ -450,7 +548,8 @@ export function createSearchBox({
   });
 
   searchInput.addEventListener('focus', () => {
-    renderResults(searchInput.value ? runSearch(searchInput.value) : popularHits());
+    const query = searchInput.value;
+    renderResults(query ? runSearch(query) : popularHits(), query);
   });
   searchInput.addEventListener('blur', () => setTimeout(closeResults, 0));
 
