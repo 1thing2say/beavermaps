@@ -65,6 +65,9 @@ function harness({ lastPosition } = {}) {
     clearSelection() {},
     clearSearchField() {},
     startLocating() {},
+    // A Mapbox Marker needs a browser; these tests need only that a pin went
+    // down and can be taken up again.
+    plantPin: () => ({ remove() {}, setLngLat() { return this; } }),
   });
   return { endpoints, control, said, routed, last: () => said.at(-1) };
 }
@@ -81,17 +84,35 @@ class GetterPosition {
 }
 const outOfBoundsEvent = (position) => ({ type: 'outofmaxbounds', ...position });
 
+/**
+ * The geolocation seam as the control's watch sees it: nothing recorded until a
+ * fix arrives, and that fix recorded the moment before the control hears it.
+ * Recorded up front instead, currentPosition would answer from the record
+ * without waiting (see lastSeen) and the `outofmaxbounds` path would go untested.
+ */
+function seam() {
+  let recorded = null;
+  return {
+    lastPosition: () => recorded,
+    record: (at, when = Date.now()) => { recorded = { at, when }; },
+  };
+}
+
 test('the fence answers at once, with the position the seam recorded', async () => {
-  const { endpoints, control } = harness({ lastPosition: () => ({ at: AT_HOME, when: Date.now() }) });
+  const gps = seam();
+  const { endpoints, control } = harness({ lastPosition: gps.lastPosition });
   const asked = endpoints.currentPosition();
+  gps.record(AT_HOME);
   control.fire('outofmaxbounds', outOfBoundsEvent(new GetterPosition(AT_HOME)));
   assert.deepEqual(await asked, AT_HOME);
   assert.equal(control.listening(), 0, 'listeners were left on the control');
 });
 
 test('a phone outside the fence is told how far away it is, not that it timed out', async () => {
-  const { endpoints, control, last } = harness({ lastPosition: () => ({ at: AT_HOME, when: Date.now() }) });
+  const gps = seam();
+  const { endpoints, control, last } = harness({ lastPosition: gps.lastPosition });
   const located = endpoints.locateStart();
+  gps.record(AT_HOME);
   control.fire('outofmaxbounds', outOfBoundsEvent(new GetterPosition(AT_HOME)));
   assert.equal(await located, false);
   assert.equal(last().isError, true);
@@ -111,6 +132,53 @@ test('with nothing recorded, the fence is its own sentence', async () => {
   assert.equal(await located, false);
   assert.equal(last().sentence, OUTSIDE_FENCE);
   assert.match(OUTSIDE_FENCE, /press and hold/i, 'the refusal names no way forward');
+});
+
+test('the second press outside the fence is answered too, not timed out', async (t) => {
+  // Mapbox does not end tracking on an out-of-bounds fix, so the watch is still
+  // "locating", startLocating is a no-op, and a phone standing still sends
+  // nothing more. Only the seam's record of the first fix can answer this one.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const gps = seam();
+  const { endpoints, control, last } = harness({ lastPosition: gps.lastPosition });
+
+  const first = endpoints.locateStart();
+  gps.record(AT_HOME, Date.now());
+  control.fire('outofmaxbounds', outOfBoundsEvent(new GetterPosition(AT_HOME)));
+  assert.equal(await first, false);
+
+  t.mock.timers.tick(5_000);
+  const second = endpoints.locateStart();
+  // Nothing fires: the watch has gone quiet. If this waited, the timer is what
+  // ends it — run it out so a wrong answer is a wrong sentence, not a hang.
+  t.mock.timers.tick(10_000);
+  assert.equal(await second, false);
+  assert.match(last().sentence, /too far/);
+  assert.doesNotMatch(last().sentence, /timed out/i);
+  assert.equal(control.listening(), 0, 'listeners were left on the control');
+});
+
+test('a recorded position found only when the wait runs out still answers', async (t) => {
+  // The timer's own fallback, for the record that turns up mid-wait without
+  // the control saying anything about it.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const gps = seam();
+  const { endpoints, last } = harness({ lastPosition: gps.lastPosition });
+  const located = endpoints.locateStart();
+  gps.record(AT_HOME, Date.now());
+  t.mock.timers.tick(9_000);
+  assert.equal(await located, false);
+  assert.match(last().sentence, /too far/);
+});
+
+test('a stale record is no answer, and the wait still times out', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const gps = seam();
+  gps.record(AT_HOME, Date.now() - 10 * 60_000);
+  const { endpoints } = harness({ lastPosition: gps.lastPosition });
+  const asked = endpoints.currentPosition();
+  t.mock.timers.tick(9_000);
+  await assert.rejects(asked, (error) => error.code === 3);
 });
 
 test('coords on the event itself are used when a Mapbox passes them through', async () => {
@@ -166,4 +234,24 @@ test('locateStart on its own drops a fix that arrives after a reset', async () =
   control.fire('geolocate', { coords: { longitude: ON_CAMPUS[0], latitude: ON_CAMPUS[1] } });
   assert.equal(await located, false);
   assert.equal(endpoints.start(), null);
+});
+
+test('a second destination picked while locating is the one routed', async () => {
+  // Directions on one card, then on another before the fix arrives. Both used
+  // to hold the same sequence number, so the first resumed, routed, bumped it,
+  // and the second — the place actually wanted — stood down without a word.
+  const { endpoints, control, routed, said } = harness();
+  const LIBRARY = [-121.3455, 38.6486];
+  const UNION = [-121.3475, 38.6490];
+  const first = endpoints.setDestination(LIBRARY, 'Library');
+  const second = endpoints.setDestination(UNION, 'Union');
+  control.fire('geolocate', { coords: { longitude: ON_CAMPUS[0], latitude: ON_CAMPUS[1] } });
+  await Promise.all([first, second]);
+
+  assert.deepEqual(routed.map(([, to]) => to), [UNION], 'the newest choice was not the one routed');
+  assert.deepEqual(endpoints.start().geometry.coordinates, ON_CAMPUS);
+  // The fake router finds no path, so that sentence is expected; a location
+  // failure from the superseded call is not.
+  const failures = said.filter((line) => line.isError).map((line) => line.sentence);
+  assert.deepEqual(failures, ['No path found between those two points.']);
 });
