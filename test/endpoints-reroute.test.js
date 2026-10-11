@@ -126,6 +126,86 @@ function harness(answer) {
   };
 }
 
+const EMPTY = { type: 'FeatureCollection', features: [] };
+
+const SAME_PLACE = 'Start and destination are the same place — pick a destination further off.';
+
+/** Routes everywhere, except from inside CTE to CTE. */
+const refuseInsideCte = (from, to) => (from === DESIGN_HUB && to === CTE
+  ? { refused: SAME_PLACE }
+  : walk(from, to));
+
+test('a refused re-route takes the old walk down', async () => {
+  const h = harness(refuseInsideCte);
+  h.endpoints.placeStart(LIBRARY, 'Library');
+  await h.endpoints.placeEnd(CTE, 'Career Technical Education (CTE)');
+  assert.equal(h.route.isWalkable, true);
+  assert.equal(h.buttons(), true);
+
+  // The start field: pick a place inside the destination.
+  h.endpoints.placeStart(DESIGN_HUB, 'Design Hub');
+  await h.endpoints.rerouteFromStart();
+
+  assert.equal(h.last().sentence, SAME_PLACE);
+  assert.equal(h.route.isSet, false, 'the walk from the old start is still set');
+  assert.equal(h.buttons(), false, 'Start still offers to walk it');
+  assert.deepEqual(h.sources.get('calculated-route').at(-1), EMPTY, 'the ribbon is still drawn');
+  assert.deepEqual(h.sources.get('route-legs').at(-1), EMPTY);
+});
+
+test('a refused re-route keeps the destination, so the next start routes to it', async () => {
+  const h = harness(refuseInsideCte);
+  h.endpoints.placeStart(LIBRARY, 'Library');
+  await h.endpoints.placeEnd(CTE, 'Career Technical Education (CTE)');
+  h.endpoints.placeStart(DESIGN_HUB, 'Design Hub');
+  await h.endpoints.rerouteFromStart();
+
+  // Still on the map and still in the field, which is what it says it is.
+  assert.equal(h.destinationPin().length, 1, 'the red pin went with the walk');
+  assert.equal(h.ui.endCoordText.value, 'Career Technical Education (CTE)');
+
+  h.asked.length = 0;
+  h.endpoints.placeStart(LIBRARY, 'Library');
+  await h.endpoints.rerouteFromStart();
+  assert.equal(h.asked.length, 1, 'a corrected start asked for nothing');
+  assert.deepEqual(h.asked[0].to, CTE);
+  assert.equal(h.route.isWalkable, true);
+  assert.equal(h.buttons(), true);
+  assert.equal(h.endpoints.end() !== null, true);
+});
+
+test('an unreachable server on a re-route leaves the same state as a refusal', async (t) => {
+  let up = true;
+  const h = harness((from, to) => {
+    if (!up) throw new Error('fetch failed');
+    return walk(from, to);
+  });
+  t.mock.method(console, 'error', () => {});
+  h.endpoints.placeStart(LIBRARY, 'Library');
+  await h.endpoints.placeEnd(CTE, 'CTE');
+  up = false;
+  h.endpoints.placeStart(DESIGN_HUB, 'Design Hub');
+  await h.endpoints.rerouteFromStart();
+
+  assert.equal(h.last().isError, true);
+  assert.equal(h.route.isSet, false);
+  assert.equal(h.buttons(), false);
+
+  up = true;
+  await h.endpoints.rerouteFromStart();
+  assert.equal(h.route.isWalkable, true, 'trying again had nothing to route to');
+  assert.deepEqual(h.asked.at(-1).to, CTE);
+});
+
+test('a destination routed after one was parked is not routed to again later', async () => {
+  // pendingEnd is cleared by any placeEnd, not only by the one that took it.
+  const h = harness(refuseInsideCte);
+  h.endpoints.placeStart(DESIGN_HUB, 'Design Hub');
+  await h.endpoints.placeEnd(CTE, 'CTE');                // refused, parked
+  await h.endpoints.placeEnd(LIBRARY, 'Library');        // routed
+  assert.equal(h.endpoints.takeParked(), null);
+});
+
 test('an answer that lands during a style swap still finishes the panel', async () => {
   let release;
   const h = harness((from, to) => new Promise((resolve) => {

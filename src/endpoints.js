@@ -101,8 +101,27 @@ export function createEndpoints({
    */
   let lastFix = null;
 
-  function resetMap() {
+  /**
+   * Take the walk off the screen and out of reach: the ribbon, its dotted ends,
+   * the route state behind them, and the two buttons that would start it.
+   *
+   * Its own function because it is not only resetMap's. A route that is
+   * refused or never answered has to leave the same nothing behind as Clear
+   * does, and it used to leave the previous walk instead — still drawn, still
+   * set, with Start and Simulate still offering to navigate a route from a
+   * start that was no longer the start. Four lines kept in two places is how
+   * one of the two came to have none of them.
+   */
+  function dropRoute() {
     nav.end();
+    route.clear();
+    map.getSource('calculated-route')?.setData(EMPTY);
+    map.getSource('route-legs')?.setData(EMPTY);
+    setNavButtonsEnabled(false);
+  }
+
+  function resetMap() {
+    dropRoute();
 
     if (startMarker) startMarker.remove();
     if (endMarker) endMarker.remove();
@@ -112,13 +131,7 @@ export function createEndpoints({
     startMarker = null;
     endMarker = null;
 
-    route.clear();
     requestSeq++;
-
-    if (map.getSource('calculated-route')) {
-      map.getSource('calculated-route').setData(EMPTY);
-    }
-    map.getSource('route-legs')?.setData(EMPTY);
 
     clearSelection();
 
@@ -130,7 +143,6 @@ export function createEndpoints({
     startCoordText.value = '';
     endCoordText.value = '';
     setRouteSummary(null);
-    setNavButtonsEnabled(false);
   }
 
   /** Re-route from the existing start to a newly chosen destination. */
@@ -372,6 +384,9 @@ export function createEndpoints({
     if (!routingEnabled()) return;
     panel.show();
     endPoint = point(coords);
+    // Being routed now, so no longer waiting for a start. See the refusal
+    // below, which is the one place that parks it again.
+    pendingEnd = null;
     endMarker?.remove();
     endMarker = plantPin(GOOGLE_RED, 'Destination', coords);
     endCoordText.value = label ?? coordLabel(coords);
@@ -424,9 +439,20 @@ export function createEndpoints({
     if (refusal) {
       setStatus(refusal, true);
       setRouteSummary(null);
+      // THE OLD WALK GOES, AND THE DESTINATION STAYS. This used to do the
+      // opposite. Retyping the start re-routes to the same destination, and
+      // when that came back refused — a start inside the building you are
+      // going to is "the same place" — the walk from the PREVIOUS start stayed
+      // drawn with Start enabled, while the destination it led to was
+      // dropped. The end field still named it, so nothing looked wrong, but
+      // the next start had nowhere to route to and did nothing at all.
+      //
+      // So the walk is taken down, as Clear would, and the destination is
+      // parked exactly as parkDestination leaves one: pin and label where they
+      // are, held in `pendingEnd` for the next start to pick up.
+      dropRoute();
       endPoint = null;
-      endMarker?.remove();
-      endMarker = null;
+      pendingEnd = { coords, name: label };
       return;
     }
 
