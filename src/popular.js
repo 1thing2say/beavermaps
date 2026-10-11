@@ -71,7 +71,7 @@ const KEEP = 40;
  * What it can do is reorder the things that landed in the same band, which is
  * the whole of the job.
  */
-const MAX_BONUS = 20;
+export const MAX_BONUS = 20;
 
 /** Where the bonus curve is half-spent, in decayed visits. */
 const BONUS_MIDPOINT = 3;

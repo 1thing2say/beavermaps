@@ -100,6 +100,7 @@ export function scoreTerm(entry, term) {
 export function rankPlaces(index, query, bonus = () => 0) {
   const terms = normalise(query).split(' ').filter(Boolean);
   if (!terms.length) return [];
+  const phrase = terms.join(' ');
 
   const scored = [];
   for (const entry of index) {
@@ -119,15 +120,25 @@ export function rankPlaces(index, query, bonus = () => 0) {
     //
     // Shorter names settle what is left, so "Library" beats "Lockers for
     // Library" among two places nobody has been to.
+    //
+    // AHEAD OF ALL OF IT, the place whose whole name is what was typed. The
+    // bands score one term at a time, so "Student Center" and "Student Support
+    // Center" both earn 80 + 60 and only the length tie-break kept them apart —
+    // one visit to the second was enough to put it above the name typed in
+    // full. Sorted as its own tier rather than given a bigger number, so no
+    // bonus and no pile of term scores can ever reach it.
     if (total) {
       scored.push({
         entry,
+        exact: (entry.keys ?? [entry.nameKey]).includes(phrase),
         score: total + bonus(entry.name, ...(entry.aliases ?? []))
           - entry.nameKey.length / 1000,
       });
     }
   }
-  return scored.sort((a, b) => b.score - a.score).map((s) => s.entry);
+  return scored
+    .sort((a, b) => Number(b.exact) - Number(a.exact) || b.score - a.score)
+    .map((s) => s.entry);
 }
 
 /**

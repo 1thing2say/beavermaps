@@ -17,7 +17,7 @@ import {
 } from '../src/search-rank.js';
 import { load } from './helpers.js';
 import { NAME_ALIASES, directoryFeature } from '../src/place-names.js';
-import { recordVisit, forgetVisits } from '../src/popular.js';
+import { MAX_BONUS, recordVisit, forgetVisits } from '../src/popular.js';
 
 const places = load('places');
 const index = buildPlaceIndex(places.features);
@@ -257,6 +257,19 @@ test('typing the title a building card prints finds that building first', () => 
     assert.equal(directoryFeature(directory, first.name)?.properties.name, name,
       `"${name}" found ${first.name} first`);
   }
+});
+
+test('a name typed in full beats its siblings however popular they are', () => {
+  // "Student Center" and "Student Support Center" both score 80 + 60 term by
+  // term; one visit to the second used to put it first.
+  const everyoneElse = (target) => (name) => (name === target ? 0 : MAX_BONUS);
+  for (const entry of joined) {
+    const [first] = rankPlaces(joined, entry.name, everyoneElse(entry.name));
+    assert.equal(first.name, entry.name, `"${entry.name}" lost to ${first.name}`);
+  }
+  assert.deepEqual(names(rankPlaces(index, 'Student Center',
+    (n) => (n === 'Student Support Center' ? MAX_BONUS : 0))).slice(0, 2),
+  ['Student Center', 'Student Support Center']);
 });
 
 /** A localStorage that behaves like the real one. */
