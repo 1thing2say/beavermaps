@@ -1299,6 +1299,13 @@ function startApp() {
     // sheet whole, and the two licence terms end up in one line instead of one
     // in each corner with a card between them.
     //
+    // ONE LINE, TWO OBJECTS. Mapbox's wordmark stays in that corner under both
+    // providers — their terms want it on any map their SDK draws, whoever's
+    // data is on it — and under Google this notice leads with Google's mark.
+    // Google's policy wants the two marks clearly apart, so the stylesheet
+    // gives the notice a glass pill of its own with map between it and the
+    // wordmark, rather than one strip holding both. See .mapboxgl-ctrl-attrib.
+    //
     // Spelled out rather than folded behind an "i". That button was never a
     // good citizen of this corner: Mapbox gives it a 24px container, and the
     // 44px touch area this app grew around it therefore reached 20px past its

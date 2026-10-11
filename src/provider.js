@@ -80,11 +80,11 @@ export function createProviderToggle({ surfaces, onChange }) {
   /** Every surface says what pressing it will DO, not what is on screen. */
   function paint() {
     // Published the way the theme and the skin are, and for a reason the other
-    // two do not have: under Google the Mapbox style is BLANK — no sources, no
-    // layers, nothing of theirs drawn — so the wordmark their control pins to
-    // the corner is crediting data that is not on the map, next to Google's own
-    // required copyright line for the data that is. The stylesheet hides it on
-    // this attribute. See the note beside that rule before changing either.
+    // two do not have: the credit line in the corner changes with it. Under
+    // Google the notice leads with Google's mark, set by the stylesheet on this
+    // attribute (see .mapboxgl-ctrl-attrib-inner there). Mapbox's wordmark is
+    // NOT hidden on it — it used to be, and their terms want it on any map
+    // their SDK draws, whoever's data is on it.
     document.documentElement.dataset.provider = provider;
 
     const target = provider === 'google' ? 'mapbox' : 'google';
