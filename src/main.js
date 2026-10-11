@@ -1819,7 +1819,12 @@ function startApp() {
       {
         onStart: (coords) => {
           clearSelection();
-          placeStart(coords, 'Dropped pin');
+          // Refused when the pin is too far from any path to walk from, and
+          // placeStart has said so. Going on regardless routed a waiting
+          // destination from no start at all — reported as the server being
+          // unreachable, with the destination dropped — or wrote "Starting
+          // from the dropped pin" over the refusal.
+          if (!placeStart(coords, 'Dropped pin')) return;
           // A destination chosen before a start has been waiting for this.
           const parked = endpoints.takeParked();
           if (parked) {
