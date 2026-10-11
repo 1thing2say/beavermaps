@@ -1081,6 +1081,17 @@ body.navigating .app-chrome {
     box-shadow: var(--g-shadow), var(--g-rim);
 }
 
+/* The layers popover is a popover, not a card. Apple's map-type control and
+   its popovers are the thin tier — blur(15px) over #fffc — which is what the
+   layers button that opens this already wears, so the button and the menu out
+   of it were two materials in one corner. Through the thin tokens, so the
+   @supports gate and the opaque fallback come with them. */
+[data-skin="apple"] .g-layers-menu {
+    background-color: var(--g-card-bg-thin);
+    -webkit-backdrop-filter: var(--g-card-filter-thin);
+    backdrop-filter: var(--g-card-filter-thin);
+}
+
 .g-icon-btn {
     display: inline-flex;
     align-items: center;
@@ -3286,8 +3297,12 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
 /* Mapbox's own zoom and locate buttons, so the corner stack is the same
    substance as the layers button that now sits on top of it. Written through
    .mapboxgl-control-container for the same 0-3-0 reason the margin reset above
-   needs: mapbox-gl.css is injected after this file and wins every tie. */
-[data-skin="apple"] .mapboxgl-control-container .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+   needs: mapbox-gl.css is injected after this file and wins every tie.
+
+   The scale bar with them. It is one of these controls — see the note on it
+   above — and was left on the opaque --g-surface the base rule gives the whole
+   stack, a solid slot in a column of glass chips. */
+[data-skin="apple"] .mapboxgl-control-container .mapboxgl-ctrl-bottom-right :is(.mapboxgl-ctrl-group, .mapboxgl-ctrl-scale) {
     background-color: var(--g-card-bg-thin);
     background-image: var(--g-sheen);
     -webkit-backdrop-filter: var(--g-card-filter-thin);
@@ -3338,9 +3353,16 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     display: none;
 }
 
+/* A stronger pane of the same glass, not a patch of opaque surface. The
+   resting disc is --g-hover over the card; --g-surface-2 replaced that with a
+   solid colour darker than the dark card and nearly the light one, so hovering
+   a close button made it fade. Fill and sheen as two properties rather than
+   the shorthand, and the sheen restated: .g-place's own hover, at the same
+   specificity, is a shorthand that would otherwise take it off. */
 @media (hover: hover) {
     [data-skin="apple"] .g-icon-btn:hover {
-        background: var(--g-surface-2);
+        background-color: var(--g-active);
+        background-image: var(--g-sheen);
     }
 }
 
