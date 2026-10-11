@@ -493,8 +493,14 @@ const stage = {
   deck: null,
   credits: new Set(),
   owner: null,
-  /** Set by whichever flyover holds the canvas, so traversals reach the right card. */
+  /**
+   * Set by whichever flyover holds the canvas, so traversals reach the right
+   * card. Called only when a traversal has the ROOF covered by a fine tile —
+   * see showsSubject — because it is what lets the pin drop.
+   */
   onReady: null,
+  /** ...a tile arrived, so the credit line may have more to say. */
+  onCredits: null,
   /** ...and the same for a tileset Google refused. See keyedFetch. */
   onRefused: null,
   /**
@@ -727,7 +733,14 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
       // The caption has to be repainted as tiles arrive, not written once: the
       // first traversal completes on a handful of tiles and the rest of the
       // sources turn up over the next few seconds.
-      stage.onReady?.();
+      //
+      // The caption and NOTHING ELSE. This used to call onReady, which is also
+      // what tells the pin the roof has arrived — and the first tiles to arrive
+      // on a cold load are the 64, 32 and 16 m ancestors, so the pin was
+      // falling onto ground that had not loaded, the very thing showsSubject
+      // exists to stop. Only the traversal, which can ask showsSubject, says
+      // the roof is there.
+      stage.onCredits?.();
     },
     onTileError: () => {},
     // The one moment the tileset exists and nothing has traversed it yet. Fires
@@ -979,6 +992,7 @@ export function createFlyover({
     if (stage.owner === token) {
       stage.owner = null;
       stage.onReady = null;
+      stage.onCredits = null;
       stage.onRefused = null;
       // Not left set. The layer's traversal keeps running for a frame or two
       // after the canvas is detached, and culling those against a box for a
@@ -1085,11 +1099,16 @@ export function createFlyover({
     if (stage.refused) { fail(stage.refused); return; }
     stage.onRefused = (message) => fail(message);
 
-    // Called both when a traversal selects tiles and when one finishes loading,
-    // so it does two jobs and has to be safe to call repeatedly.
+    // Called as tiles load and on every traversal, so it has to be safe to call
+    // repeatedly.
+    const paintCredit = () => {
+      credit.textContent = [...stage.credits].join(', ') || FALLBACK_CREDIT;
+    };
+    stage.onCredits = () => { if (!dead) paintCredit(); };
+    // Called only from a traversal that has the roof covered by a fine tile.
     stage.onReady = () => {
       if (dead) return;
-      credit.textContent = [...stage.credits].join(', ') || FALLBACK_CREDIT;
+      paintCredit();
       // HALF of the drop's condition. This one says a fine tile covering the
       // roof has ARRIVED; the other half, `drawn`, says deck.gl has built
       // geometry out of it, and is checked per frame because it becomes true
@@ -1256,7 +1275,7 @@ export function createFlyover({
         // A dev-only mark, the same kind of handle as `window.__map`. Whether
         // the pin waited for calm or timed out is the one thing about this that
         // cannot be read off the outside, and it is stripped from the build.
-        if (import.meta.env.DEV) {
+        if (import.meta.env?.DEV) {
           window.__flyoverDrop = { at: now, waited: Math.round(waited), calm: calm() };
         }
         if (roof) fall = measureDrop(bearing);
