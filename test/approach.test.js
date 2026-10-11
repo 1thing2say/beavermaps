@@ -155,6 +155,42 @@ test('gates are short, few, and each has one end on the campus network', () => {
   }
 });
 
+test('a street end lying along a campus edge is joined to both ends of it', () => {
+  // The gate stage joins a campus vertex to the street. Where the street's end
+  // lies along a campus edge that vertex ends, the connector runs back along
+  // the edge, and a walk from the edge's far end went past the street to the
+  // vertex and came back: a spike, and "U-turn", at both the west gate and the
+  // east one. The script joins such a street end to the far end as well.
+  const flatten = ([x, y]) => [x * metresBetween([0, y], [1, y]), y * metresBetween([0, 0], [0, 1])];
+  const campusEdges = [];
+  for (const f of campus) {
+    const cs = f.geometry.coordinates;
+    for (let n = 1; n < cs.length; n += 1) campusEdges.push([cs[n - 1], cs[n]]);
+  }
+  const campusVertices = new Set(campusEdges.flat().map(vertexKey));
+  const gates = approach.filter((f) => f.properties.source === 'gate').map((f) => f.geometry.coordinates);
+  const joined = new Set(gates.map(([a, b]) => [vertexKey(a), vertexKey(b)].sort().join('|')));
+  let along = 0;
+  for (const [a, b] of gates) {
+    const [mine, street] = campusVertices.has(vertexKey(a)) ? [a, b] : [b, a];
+    if (campusVertices.has(vertexKey(street))) continue;
+    for (const [u, v] of campusEdges) {
+      if (vertexKey(u) !== vertexKey(mine) && vertexKey(v) !== vertexKey(mine)) continue;
+      const other = vertexKey(u) === vertexKey(mine) ? v : u;
+      const [p, q, s] = [mine, other, street].map((c) => flatten([c[0] - mine[0], c[1]]));
+      const vx = q[0] - p[0], vy = q[1] - p[1], L = Math.hypot(vx, vy);
+      const t = ((s[0] - p[0]) * vx + (s[1] - p[1]) * vy) / (L * L);
+      const off = Math.abs((s[0] - p[0]) * vy - (s[1] - p[1]) * vx) / L;
+      if (off > 2 || t * L < 0.5 || (1 - t) * L < 0.5) continue;
+      along += 1;
+      assert.ok(joined.has([vertexKey(other), vertexKey(street)].sort().join('|')),
+        `the street end ${street} lies ${(t * L).toFixed(1)} m along a campus edge from ${mine} `
+        + `and is not joined to its other end ${other}`);
+    }
+  }
+  assert.ok(along >= 2, `test premise: only ${along} street ends lie along a campus edge`);
+});
+
 /**
  * Union-find over the merged graph, keyed exactly as server/index.js keys it.
  *

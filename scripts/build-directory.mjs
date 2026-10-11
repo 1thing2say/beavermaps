@@ -3,10 +3,10 @@
  *
  * The pieces already exist and have never been joined: src/buildings.json has
  * the footprints, src/labels.json has what the printed sheet calls them, and
- * src/places.json has my campus's 145 positioned destinations. 75 of those fall
- * inside a footprint — the Administration Building holds ten, the Student
- * Center and the Welcome and Support Center eight each — and until now there
- * was no way to ask a building what it contains.
+ * src/places.json has my campus's 145 positioned destinations. 89 of those fall
+ * inside a footprint — the Student Center and the Learning Resource Center
+ * hold fourteen each, the Welcome and Support Center thirteen — and until now
+ * there was no way to ask a building what it contains.
  *
  * One feature per *building*, not per footprint. my campus draws the Health Education
  * Complex as nine separate shapes and the Portable Village as seven, so
@@ -25,10 +25,12 @@
  *   node scripts/build-directory.mjs
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { groupByName, metresBetween, pointInRing, loadFootprints } from './building-names.mjs';
+import {
+  groupByName, metresBetween, pointInRing, loadFootprints, adoptPrintedNames, wallNearest,
+} from './building-names.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = (name) => path.join(root, 'src', name);
@@ -38,6 +40,7 @@ const footprints = loadFootprints(src('buildings.json'));
 const labels = JSON.parse(readFileSync(src('labels.json'), 'utf8')).features;
 const places = JSON.parse(readFileSync(src('places.json'), 'utf8')).features;
 const network = JSON.parse(readFileSync(src('paths.json'), 'utf8')).features;
+const doors = existsSync(src('doors.json')) ? JSON.parse(readFileSync(src('doors.json'), 'utf8')).features : [];
 
 /** Same reach build-labels.mjs uses: a plate is set beside its building. */
 const PLATE_REACH_M = 40;
@@ -50,6 +53,9 @@ for (const segment of network) {
     if (!seen.has(key)) { seen.add(key); vertices.push(coord); }
   }
 }
+/** The network as straight pieces, for wallNearest(). */
+const segments = network.flatMap((segment) => segment.geometry.coordinates.slice(1)
+  .map((b, k) => [segment.geometry.coordinates[k], b]));
 
 const inAnyMember = (coords, members) =>
   members.some((m) => pointInRing(coords, m.geometry.coordinates[0]));
@@ -103,55 +109,144 @@ function describe(group) {
   return { name: null, parts };
 }
 
-/** The routing node closest to the building's walls, which is where a door is. */
-function entranceFor(group) {
-  let best = null;
-  for (const member of group.members) {
-    for (const ring of member.geometry.coordinates) {
-      for (const corner of ring) {
-        for (const vertex of vertices) {
-          const d = metresBetween(corner, vertex);
-          if (!best || d < best.d) best = { d, vertex };
-        }
-      }
-    }
-  }
-  return best?.vertex ?? null;
+/**
+ * The doors build-walk-network.mjs recorded on each footprint, keyed by the
+ * footprint's outline. buildings.json and doors.json both carry the sheet's own
+ * polygon, so the outline is the join; six decimals, because the two files are
+ * written at different precisions.
+ */
+const ringKey = (ring) => JSON.stringify(ring.map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]));
+const doorsByRing = new Map();
+for (const f of doors) {
+  const at = new Map();
+  for (const stub of f.properties.stubs) for (const d of stub.doors) at.set(d.join(','), d);
+  doorsByRing.set(ringKey(f.geometry.coordinates[0]), [...at.values()]);
 }
 
 /**
- * Footprints the printed sheet names and my campus's touchable table does not.
+ * Where the card's Directions button sends you.
  *
- * build-buildings.mjs names a footprint from my campus's Touchable regions, which is
- * their own hand-authored answer to "what is this shape" and is right 71 times
- * out of 97. It is not the only answer. The Ranch House is drawn on the sheet,
- * printed with its name inside its own walls, and has no touchable region at
- * all — nobody at my campus ever made it a destination — so it arrived here as a
- * nameless 315 m2 polygon and dropped out of `groupByName` before it could
- * become a building. On the map that reads as a labelled building you can tap
- * straight through: no card, no directory row, no flyover.
+ * A DOOR WHERE THE SHEET DRAWS ONE. The walls stage peels every approach path
+ * the sheet runs into a building back to the wall, and the node it leaves there
+ * is the one place on the building's outline a drawn path actually arrives:
+ * the door. The card stands on its anchor, so the doors that count are those of
+ * the footprint the anchor is in, and of several the one nearest the anchor —
+ * the rule server/graph.js applies to a room inside a building, with the anchor
+ * as the room. A door on another shard of the building does not: the CTE's one
+ * drawn door is on its 1,600 m2 annexe, 90 m from the main building the card
+ * points at.
  *
- * This is the file where the two naming sources already meet, so the second one
- * is applied here rather than upstream — build-labels.mjs reads buildings.json,
- * and naming a footprint from labels.json in the script that writes it would
- * make the pipeline a loop.
+ * Otherwise where the network comes nearest the building's walls, which is
+ * where a door most likely is (wallNearest() in building-names.mjs, which
+ * build-walk-network.mjs has already put a node at). That used to be the only
+ * rule, and on a building with a drawn door it could pick a path running past
+ * the back wall: the Library's entrance sat 31 m round the building from the
+ * one path the sheet draws into it.
  *
- * A `building` label ONLY, never a plate, and that restriction is the whole
- * rule. A building label is set inside the shape it names; a plate is set
- * beside it with a leader line, which means a plate lands on whatever happens
- * to be under it — Environmental Resources' plate sits on a 76 m2 outbuilding
- * that is not Environmental Resources, and adopting it would put a second row
- * of that name in the directory. Measured over the sheet, the restricted rule
- * claims exactly one footprint.
+ * AND EVERY WAY IN, NOT ONLY THAT ONE (`doors`, entrance first). The entrance
+ * is where the card's pin goes; it is not the only way in, and a walk to the
+ * building should not be made to go round to it. server/graph.js takes any of
+ * a building's `doors` as the end of a walk to it (see `entrances` in
+ * createGraph), and the pin moves to the door the walk used. Two kinds go in:
+ *
+ *   - Every drawn door of the footprint the card stands on, nearest the anchor
+ *     first. The Parking Garage has five and the one nearest its anchor is on
+ *     the west wall: with that as the only end, walks from the north came in
+ *     71 m longer on average than when they ended at the north door, and Fine
+ *     & Applied Arts, with four, was 70 m worse the same way.
+ *   - Every point where the walls come nearest the network, after the drawn
+ *     doors. The sheet draws a path into a building where it happens to, not
+ *     into every door it has, and the walks this map used to give ended at
+ *     the wall-nearest point. Moving the Library's end to its one drawn door
+ *     made a walk from restroom #51 go from 92 to 171 m, though the old end
+ *     was still on the graph 2.3 m from a corner; Science & Engineering's,
+ *     from the Science Success Center, went from 59 to 170 m. Both ends are
+ *     offered now and the walk takes the nearer.
+ *
+ * Returns `nearWalls` too, each with its metres from the corner it is nearest:
+ * a point can be nearest the walls of two buildings, and the caller gives it
+ * to one (see below).
  */
-for (const footprint of footprints) {
-  if (footprint.properties.name) continue;
-  const printed = labels.find((l) => l.properties.kind === 'building'
-    && pointInRing(l.geometry.coordinates, footprint.geometry.coordinates[0]));
-  if (printed) footprint.properties.name = printed.properties.text;
+function entranceFor(group) {
+  const at = group.pole?.coordinates;
+  const home = at && group.members.find((m) => pointInRing(at, m.geometry.coordinates[0]));
+  const known = home ? doorsByRing.get(ringKey(home.geometry.coordinates[0])) ?? [] : [];
+  const drawn = [...known].sort((x, y) => metresBetween(at, x) - metresBetween(at, y)
+    || x[0] - y[0] || x[1] - y[1]);
+  const nearWalls = [];
+  for (const { at: point, d } of wallNearest(group, segments)) {
+    const node = nodeAt(point);
+    if (!node || nearWalls.some((w) => keyOf(w.node) === keyOf(node))) continue;
+    nearWalls.push({ node, d });
+  }
+  return { drawn, nearWalls };
 }
 
+/**
+ * The network's node at a point wallNearest() returned: the one
+ * build-walk-network.mjs spliced there, or the end of the edge it reused
+ * because the point was within a weld (WELD_M, 2 m) of it. Nearest vertex,
+ * then, no further than that. A point with none is a network built before
+ * entrances were spliced; it is counted, and falls back to the nearest vertex
+ * however far, so an old paths.json still gives every building an entrance.
+ */
+const SPLICED_WITHIN_M = 2.01;
+let unspliced = 0;
+function nodeAt(point) {
+  let best = null;
+  for (const vertex of vertices) {
+    const d = metresBetween(point, vertex);
+    if (!best || d < best.d) best = { d, vertex };
+  }
+  if (best && best.d > SPLICED_WITHIN_M) unspliced += 1;
+  return best?.vertex ?? null;
+}
+const keyOf = (c) => `${c[0]},${c[1]}`;
+
+// Footprints the printed sheet names and my campus's touchable table does not —
+// the Ranch House. See adoptPrintedNames() in building-names.mjs, which
+// build-walk-network.mjs applies too, so that the buildings it splices
+// entrances into are these.
+adoptPrintedNames(footprints, labels);
+
 const groups = [...groupByName(footprints).values()];
+
+// ONE BUILDING PER WAY IN. A point can be where the walls of two buildings
+// come nearest the network — the Gym and the Pool share a path along their
+// common side — and server/graph.js files every door under the building it
+// belongs to, so a node on two lists would make a walk to the Pool's entrance
+// a walk to the Gym, and a walk from one to the other "the same place". So
+// each goes to one building, in this order: the building whose drawn door it
+// is; then a building with no drawn door, for which the walls are all there is
+// to go by; then the building whose corner it is nearest. Nearest corner alone
+// gave the Gym the point by the Pool's west wall — 0.8 m from a Gym corner, 7.4
+// m from a Pool one, and a quarter of a metre from a door the Gym already has
+// drawn — and left the Pool only its east side, so a walk from Adaptive PE next
+// door went from 13 m to 49 m round to it.
+const ways = new Map(groups.map((group) => [group, entranceFor(group)]));
+const owner = new Map();
+const claim = (node, group, rank) => {
+  const held = owner.get(keyOf(node));
+  if (!held || rank < held.rank) owner.set(keyOf(node), { group, rank });
+};
+const UNDRAWN_FIRST = 1e6;
+for (const [group, { drawn, nearWalls }] of ways) {
+  for (const door of drawn) claim(door, group, -Infinity);
+  for (const { node, d } of nearWalls) claim(node, group, drawn.length ? d : d - UNDRAWN_FIRST);
+}
+let givenAway = 0;
+for (const [group, way] of ways) {
+  const listed = new Set(way.drawn.map(keyOf));
+  const extra = [];
+  for (const { node } of way.nearWalls) {
+    if (listed.has(keyOf(node))) continue;
+    if (owner.get(keyOf(node)).group !== group) { givenAway += 1; continue; }
+    listed.add(keyOf(node));
+    extra.push(node);
+  }
+  way.doors = [...way.drawn, ...extra];
+}
+
 const features = [];
 
 for (const group of groups) {
@@ -181,6 +276,8 @@ for (const group of groups) {
 
   const { name: printed, parts } = describe(group);
   const area = group.members.reduce((sum, m) => sum + m.properties.area_m2, 0);
+  const { doors: buildingDoors } = ways.get(group);
+  const entrance = buildingDoors[0] ?? null;
 
   features.push({
     type: 'Feature',
@@ -196,7 +293,11 @@ for (const group of groups) {
       height: group.host.properties.height,
       contents,
       ...(facilities.length ? { facilities } : {}),
-      entrance: entranceFor(group),
+      entrance,
+      // Every way in, entrance first: the drawn doors of the footprint the card
+      // stands on, then where the walls come nearest the network. A walk to
+      // the building may end at any of them. See entranceFor().
+      ...(buildingDoors.length ? { doors: buildingDoors } : {}),
       // Where the card points. The pole of inaccessibility rather than the tap,
       // so the card belongs to the building instead of to wherever a finger
       // landed — and so it lands in the same place every time.
@@ -218,6 +319,16 @@ console.log(`[build-directory] ${footprints.length} footprints -> ${features.len
 console.log(`[build-directory] ${withContents.length} have a directory, `
   + `${features.reduce((n, f) => n + f.properties.contents.length, 0)} entries in total`);
 console.log(`[build-directory] ${renamed.length} use the printed name over my campus's`);
+const atDrawn = [...ways.values()].filter((w) => w.drawn.length).length;
+console.log(`[build-directory] ${atDrawn} entrances at a door the walls stage recorded (src/doors.json), `
+  + `${features.filter((f) => f.properties.entrance).length - atDrawn} where the walls come nearest the network`);
+console.log(`[build-directory] ${features.reduce((n, f) => n + (f.properties.doors?.length ?? 0), 0)} ways in, `
+  + `${[...ways.values()].reduce((n, w) => n + w.doors.length - w.drawn.length, 0)} of them where the walls come nearest; `
+  + `${givenAway} left to another building that shares it`);
+if (unspliced) {
+  console.log(`[build-directory] WARNING: ${unspliced} wall-nearest point(s) with no node within a weld — `
+    + 'src/paths.json predates them; rerun scripts/build-walk-network.mjs');
+}
 console.log(`[build-directory] -> src/directory.json`);
 for (const f of features) {
   const { name, officialName, parts, footprints: n, area_m2: area, contents } = f.properties;

@@ -340,6 +340,24 @@ function keyedFetch(key) {
  * whole of this. Pitch is ignored deliberately: tilting the camera stretches
  * what is visible toward the horizon but leaves the scale at the centre of the
  * screen alone, and the centre is where the building is.
+ *
+ * EXCEPT THAT IT PUTS HALF OF `span` THERE, and that is known and kept. The
+ * 156543 is the textbook figure for a 256 px zoom-0 world; deck.gl's zoom, like
+ * Mapbox GL's, is defined over a 512 px one (`TILE_SIZE = 512` in
+ * @math.gl/web-mercator, which WebMercatorViewport projects with), so the true
+ * constant is 78271.52 and this lands one zoom level deeper than it says.
+ * Unprojecting the frame's edges confirms it: a 130 m span shows 65 m.
+ *
+ * Corrected, it was measured and photographed and put back. Every number the
+ * flyover is built on was tuned by eye at the zoom THIS produces — the pitch,
+ * the sky padding, the span floor and ceiling in src/flyover.js, the tile
+ * budgets above — and at the textbook zoom the same Parking Garage shot became
+ * a wide aerial with the building a third of the frame and the top half
+ * horizon. So the factor of two lives here, where it was always in effect,
+ * rather than in a constant that claims a different scale. The prose in
+ * src/flyover.js that reasons about metres per pixel from `span` (MIN_SPAN_M's
+ * "0.20 m on a pixel") is out by that same factor: the camera that flies is
+ * twice as close as the one it describes.
  */
 /**
  * The grid, as line segments on the ground in lon/lat.

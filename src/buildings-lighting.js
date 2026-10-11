@@ -18,6 +18,7 @@
 // The sun is src/sun-lights.js, which is arithmetic and has no map in it.
 
 import { sunLights, assist } from './sun-lights.js';
+import { anchorFor } from './layer-order.js';
 
 /**
  * The layer's own emissive strength, and the bench's starting point.
@@ -153,7 +154,7 @@ export function createBuildingsLighting({
         // src/lighting.js.
         'fill-extrusion-emissive-strength': BUILDING_EMISSIVE,
       },
-    }, 'route-casing');
+    }, anchorFor(map, 'campus-buildings'));
 
     // A layer that did not exist a moment ago has the palette's emissive
     // strength on it, not the bench's. Nothing else re-runs after this.

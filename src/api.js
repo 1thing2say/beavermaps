@@ -66,9 +66,9 @@ export function createApi({ request = (...args) => globalThis.fetch(...args) } =
    * questions. /api/network is what gets drawn, and that is the campus's
    * linework alone: the streets around the campus are already painted by
    * whichever provider is under us, and drawing ours over theirs is the doubled
-   * linework at the campus edge. This is what gets SNAPPED TO, and it has to
-   * include those streets or a click on the pavement outside lands on the far
-   * side of a car park.
+   * linework at the campus edge. This is what a start's reach is CHECKED
+   * AGAINST, and it has to include those streets or a fix on the pavement
+   * outside would be measured to the far side of a car park.
    */
   async function vertices() {
     const response = await request('/api/vertices');

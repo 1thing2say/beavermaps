@@ -7,7 +7,6 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 // thing it is there to remove.
 import campusBoundary from './campus-boundary.json';
 import { point, featureCollection } from '@turf/helpers';
-import { nearestPoint } from '@turf/nearest-point';
 import { distance } from '@turf/distance';
 import { FEET_PER_KM } from './maneuvers.js';
 import { routeSummary } from './directions.js';
@@ -25,7 +24,8 @@ import {
 import {
   withPoiIcons, withParkingMarks, withAmenityNames, 
 } from './poi.js';
-import { ringOf, centreOf, trimToCampus } from './campus-clip.js';
+import { ringOf, centreOf, trimToCampus, trimPointsAlong } from './campus-clip.js';
+import campusLamps from './lamps.json';
 import { createGeolocation } from './geolocation.js';
 import { createDebugMenu } from './debug.js';
 import { createLitPalette } from './lit-palette.js';
@@ -188,6 +188,11 @@ function startApp() {
   // these start empty.
   let customNetwork = null;
   let networkPoints = null;
+  // The lamps that are drawn, trimmed by the same rule as the network they
+  // light — see trimPointsAlong. Until the network arrives that is just the
+  // ones on the campus: the few beyond the fence stand on paths that may or
+  // may not survive the trim, and nothing is drawn under them yet either way.
+  let shownLamps = trimToCampus(campusLamps, CAMPUS_RING);
   let campusBuildings = null;
   // Ground cover, amenity symbols and the destination directory, all traced out
   // of my campus's own basemap. Every one is decoration: the map works without them.
@@ -535,8 +540,6 @@ function startApp() {
     map,
     litPalette,
     sheet: () => campusBasemap,
-    belowNetwork: () => belowNetwork(),
-    belowRoute: () => belowRoute(),
   });
   const addBasemapLayers = () => sheetLayers.add();
   const addClosedLayers = () => sheetLayers.addClosed();
@@ -565,7 +568,12 @@ function startApp() {
   });
   const inkFor = (property) => markers.inkFor(property);
   const addAmenityLayer = () => markers.addAmenity();
-  const addLampLayers = () => markers.addLamps();
+  // marker-layers.js seeds the source from the raw file; it is overwritten here
+  // with the trimmed set on every add, because a style load rebuilds it raw.
+  const addLampLayers = () => {
+    markers.addLamps();
+    map.getSource('campus-lamps')?.setData(shownLamps);
+  };
   const paintLamps = () => markers.paintLamps();
   const addCategoryLayer = () => markers.addCategory();
   const paintCategory = () => markers.paintCategory();
@@ -788,6 +796,9 @@ function startApp() {
     provider: () => currentProvider,
     boundary: campusBoundary,
     network: () => customNetwork,
+    // For the roofs: over imagery, the stretches of network under one are
+    // left out of the drawing. See markRoofed.
+    sheet: () => campusBasemap,
     route,
     from: () => endpoints.start()?.geometry.coordinates,
     to: () => endpoints.end()?.geometry.coordinates,
@@ -795,8 +806,6 @@ function startApp() {
   const paintLegs = () => routeLayers.paintLegs();
   const addCampusMask = () => routeLayers.addMask();
   const setConfig = (key, value) => routeLayers.setConfig(key, value);
-  const belowNetwork = () => routeLayers.belowNetwork();
-  const belowRoute = () => routeLayers.belowRoute();
 
   function addNetworkLayers() {
     const colors = litPalette();
@@ -827,19 +836,23 @@ function startApp() {
 
     addCampusMask();
     addBasemapLayers();
-    // Above the sheet it annotates, below the network added further down.
+    // Above the sheet's buildings it annotates. Every layer in this stretch
+    // takes its place from src/layer-order.js rather than from where it is
+    // called, so the order of these calls is no longer what orders the map —
+    // which is what lets the sheet land from the server at any point in it.
     addHighlightLayers();
 
     routeLayers.addNetworkAndRoute();
 
-    // After the route layers rather than after the sheet it belongs to, and
-    // only because of where its OUTLINE goes: belowRoute has to have a route
-    // layer to name, and none of them exist until a few lines above this. The
-    // wash still lands with the ground — the two halves carry their own
-    // anchors, so building them late costs nothing.
+    // After the route layers rather than after the sheet it belongs to. It
+    // used to have to be, because its outline anchored to a route layer by
+    // name; it takes its place from the stack now, so this position is merely
+    // harmless — the two halves land where src/layer-order.js puts them.
     addClosedLayers();
 
     // Last, so the symbols and labels sit above the route rather than under it.
+    // Not the lamps, which only happen to be called here: they are ground, and
+    // the stack puts them under the network wherever this list puts the call.
     addDirectoryLayers();
     addLampLayers();
     addAmenityLayer();
@@ -848,13 +861,16 @@ function startApp() {
 
     if (navigating()) addBuildingsLayer();
 
-    // LAST, and it has to be. `lightPreset` used to be set at the top of this
-    // function beside the other config keys, and moving it in here gave one
-    // function ownership of the property — but applyLighting can also stand the
-    // extrusions up, and addBuildingsLayer inserts below `route-casing`, which
-    // does not exist until addNetworkLayers has finished building. Called any
-    // earlier, a bench with the buildings switched on throws mid-rebuild and
-    // takes the campus mask and the labels down with it, on every style load.
+    // LAST. `lightPreset` used to be set at the top of this function beside the
+    // other config keys, and moving it in here gave one function ownership of
+    // the property — but applyLighting can also stand the extrusions up, and
+    // addBuildingsLayer used to insert below `route-casing` by name, which does
+    // not exist until addNetworkLayers has finished building. Called any
+    // earlier, a bench with the buildings switched on threw mid-rebuild and
+    // took the campus mask and the labels down with it, on every style load.
+    // The extrusions now take their place from CAMPUS_STACK (src/layer-order.js),
+    // which cannot throw that way, but this stays last so that everything they
+    // are placed among is already standing when they arrive.
     applyLighting();
   }
 
@@ -1383,9 +1399,14 @@ function startApp() {
       // Trimmed to the campus on the way in. my campus's sheet carries the streets
       // around it, both north arrows and the trees along the verge, and every
       // one of those lands on a ground that is already drawing them — see
-      // src/campus-clip.js.
+      // src/campus-clip.js. Its perimeter walkways are trimmed by the same rule
+      // as the network drawn over them, so the band and the ribbon break, or
+      // do not, in the same places.
       campusBasemap = trimToCampus(data, CAMPUS_RING);
       addBasemapLayers();
+      // The footprints the network is cut against for imagery have landed;
+      // a network that came first is re-cut now. A no-op before it.
+      routeLayers.paintNetwork();
       // The sheet arriving is what this was waiting for — the closed block is
       // one of its shapes, so on a cold load style.load has already been and
       // gone with nothing for addClosedLayers to draw.
@@ -1494,10 +1515,19 @@ function startApp() {
         // top of a road the basemap is already drawing. Cut rather than dropped,
         // so a driveway still reaches the gate instead of stopping at the
         // junction inside it — the route still runs the whole way, over their
-        // linework.
+        // linework. A perimeter walkway that strays over the line and comes
+        // back is NOT cut: the line is OpenStreetMap's, and the walkway is
+        // campus on both sides of it. See EXCURSION_M in src/campus-clip.js.
         customNetwork = trimToCampus(routable, CAMPUS_RING);
 
-        map.getSource('custom-network').setData(customNetwork);
+        // Through route-layers rather than straight onto the source, which
+        // marks the stretches under a roof for the imagery filter on the way.
+        routeLayers.paintNetwork();
+
+        // The lamps along it follow: dropped from the stubs that were cut away,
+        // restored on the stretches past the fence that were kept.
+        shownLamps = trimPointsAlong(campusLamps, customNetwork, CAMPUS_RING);
+        map.getSource('campus-lamps')?.setData(shownLamps);
       });
 
     // The spinner belongs to the whole errand, so it stops when the last of
@@ -1734,18 +1764,27 @@ function startApp() {
   }
 
   function dropPin(lngLat) {
-    const clicked = point([lngLat.lng, lngLat.lat]);
-    // Snapping the click locally keeps the marker instant; the server snaps
-    // again on its own side, and lands on the same vertex.
-    const snapped = nearestPoint(clicked, networkPoints).geometry.coordinates;
+    // THE PIN IS WHERE THE FINGER WAS, NOT THE NEAREST VERTEX. It used to be
+    // moved to the nearest vertex of /api/vertices before anything else saw
+    // it, and since the build collapsed straight runs into single long edges
+    // that vertex is a median 6 m and up to 68 m from where the server would
+    // have joined the network — a hold 6 m beside the middle of a 144 m path
+    // put the pin 51 m along it. A vertex also snaps to itself, so the server
+    // never got to ask whether the press was inside a building with doors.
+    // The press itself is what is sent now, as a GPS start is (see
+    // locateStart in src/endpoints.js): the server joins the network at the
+    // nearest point on it, or at the building's doors, and the walk's dotted
+    // leg runs from the line to the pin. Seven decimals, ~1 cm, which is what
+    // every coordinate the router holds is written at.
+    const at = [lngLat.lng, lngLat.lat].map((n) => Number(n.toFixed(7)));
 
-    plantPin(snapped, 'Dropped pin');
+    plantPin(at, 'Dropped pin');
 
     showPlaceCard(pinCard(
       // The coordinates are the subtitle because they are the only true thing
       // there is to say about a point somebody chose off the map. Apple prints
       // them on its dropped pin for the same reason.
-      { coords: snapped, kind: 'dropped', name: 'Dropped pin', sub: coordLabel(snapped) },
+      { coords: at, kind: 'dropped', name: 'Dropped pin', sub: coordLabel(at) },
       {
         onStart: (coords) => {
           clearSelection();
@@ -1765,13 +1804,14 @@ function startApp() {
     // particular spot on the ground, and zooming would pull that ground out
     // from under the finger that just chose it. The pin still gets lifted clear
     // of the sheet if the sheet lands on it.
-    ), null, { at: snapped, zoom: 0 });
+    ), null, { at, zoom: 0 });
   }
 
   const longPress = createLongPress({
     map,
-    // Not during a walk, and not before the network has landed — there is
-    // nothing to snap a dropped pin to until it has.
+    // Not during a walk, and not before the network has landed — until it
+    // has, a dropped pin's Start here has nothing to check its reach against
+    // (see placeStart in src/endpoints.js).
     enabled: () => !navigating() && Boolean(networkPoints),
     onHold: dropPin,
   });

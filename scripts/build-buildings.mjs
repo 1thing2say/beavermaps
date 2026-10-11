@@ -48,6 +48,7 @@ import {
   pointInRing,
   minSpanMetres,
   readShapes as readAllShapes,
+  readDrawing,
 } from './svg-geometry.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -81,15 +82,56 @@ const SMALL_BUILDING_M2 = 200;
 // --- read the SVG -----------------------------------------------------------
 
 /**
- * The shapes that are candidate footprints: the white ones, and the pool.
+ * The artwork's own building layer — index 10 in build-basemap.mjs's LAYERS
+ * table, the one it names `building` (and `pool`, `closed`, `bleachers` by
+ * fill).
+ *
+ * Fill colour alone was never enough to say "building" on this sheet, and the
+ * size rules below were tuned against the white shapes that are NOT
+ * footprints: glyphs, stall stripes, chips. They had nothing to say about a
+ * white shape that is large, square and simple but sits in a different layer.
+ * Layer 5 holds exactly one: a 576.5 m2 rectangle that build-basemap.mjs reads
+ * as `sport`, and that this script was reading as a building. The flat map drew
+ * it as a pitch, so nothing looked wrong until navigation stood the extrusions
+ * up and an unnamed 9 m block appeared beside the soccer stadium where the
+ * sheet has no building at all.
+ *
+ * Asking the layer panel settles it the way build-basemap already does. Of the
+ * 1,944 white and pool shapes, 102 live in layer 10, and every footprint this
+ * script kept before the change but that one is among them.
+ */
+const BUILDING_LAYER = 10;
+
+/**
+ * readShapes does not track the <g> it read a shape from, so the layer is
+ * looked up from readDrawing, which does, by the shape's first three vertices.
+ * Both readers apply the same transforms — the file has no <g> transforms —
+ * so those land on the same doubles; every candidate shape finds its element.
+ */
+const ringKey = (ring) => JSON.stringify(ring.slice(0, 3));
+
+function buildingLayerRings(svg) {
+  const keys = new Set();
+  for (const el of readDrawing(svg)) {
+    if (el.layer !== BUILDING_LAYER) continue;
+    for (const { pts } of el.subpaths) keys.add(ringKey(pts));
+  }
+  return keys;
+}
+
+/**
+ * The shapes that are candidate footprints: the white ones, and the pool, from
+ * the building layer.
  *
  * <polyline> never reaches here: readShapes excludes it by type, because it is
  * an open figure used only for stroked line work, and the file's one white
  * polyline is a zigzag path marking that SVG would still fill.
  */
 function readCandidates(svg) {
-  return readAllShapes(svg).filter(({ attrs }) => {
+  const inBuildingLayer = buildingLayerRings(svg);
+  return readAllShapes(svg).filter(({ attrs, ring }) => {
     if (attrs.fill !== BUILDING_FILL && attrs.fill !== POOL_FILL) return false;
+    if (!inBuildingLayer.has(ringKey(ring))) return false;
     // Rounded corners mean a UI chip, not a footprint: the "P" parking pins and
     // the BUS/SOS edge markers are white rects with rx/ry, and the markers are
     // large enough (381 m²) to clear the area test on their own. No building on

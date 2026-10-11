@@ -43,14 +43,45 @@
  *      street. Each join is a connector, each is printed with its length, and
  *      one is only accepted where the merged graph does not already connect its
  *      two ends — so a road running parallel to a campus path does not get
- *      stitched to it every twenty metres.
+ *      stitched to it every twenty metres. A street end that lands along a
+ *      campus edge, rather than at the vertex it was joined from, is joined
+ *      to the edge's other end as well, so no walk passes it and comes back.
  *   5. PRUNE to the component the campus is in, so nothing ships that a walker
  *      standing on my campus cannot actually reach.
  *
+ * TWO WAYS TO RUN IT, AND THE DEFAULT IS THE ONE THAT CANNOT CHANGE THE STREETS.
+ *
+ *   node scripts/build-approach-network.mjs            # re-gate the streets we have
+ *   node scripts/build-approach-network.mjs --fetch    # replace them from Overpass
+ *
+ * The two reasons to run this script are not the same size. The common one is
+ * that build-walk-network.mjs has rewritten src/paths.json: a campus vertex a
+ * gate ended on has moved, or gone, and the gate now ends on nothing. That
+ * wants stages 4 and 5 again against the new campus and nothing else. The rare
+ * one is wanting today's OpenStreetMap, which is a different change — a
+ * review of whatever the mappers have done since the last fetch.
+ *
+ * Fetching on every run made the first cost the second, silently. One rebuild
+ * to re-weld two gates brought in 4.8 km of unreviewed OSM edits with it, and a
+ * new parking aisle beside the Admin bus stop became the nearest thing to it:
+ * fifty walks from the stop grew to between 1.3 and 4.5 times their length, in
+ * a diff whose stated purpose was two connectors. So the default reads the
+ * streets out of the committed src/approach-paths.json — already fetched,
+ * clipped, welded and reviewed — undoes the splits the last run's gates made
+ * in them (see committedStreets()), and runs GATE and PRUNE again. Nothing goes
+ * out to the network, and a street segment can only change where a gate now
+ * lands on it, or where a campus vertex it was welded to has moved by under
+ * WELD_M. Run twice it writes the same bytes, which is what makes it safe to
+ * put after build-walk-network.mjs in any rebuild.
+ *
+ * `--fetch` is stages 1 to 5 as described above, from live Overpass. Its diff
+ * is the OSM drift since the last fetch and deserves reading as such.
+ * `--streets <file>` re-gates the streets of some other approach-paths.json
+ * instead of the committed one — `git show <rev>:src/approach-paths.json` into
+ * a file, to rebuild against an earlier fetch.
+ *
  * Attribution: OpenStreetMap contributors, ODbL — the same credit the boundary
  * already carries, and the one both basemaps render in the corner.
- *
- *   node scripts/build-approach-network.mjs
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -60,6 +91,12 @@ import { overpass } from './overpass.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = (name) => path.join(root, 'src', name);
+
+const FETCH = process.argv.includes('--fetch');
+const streetsAt = process.argv.indexOf('--streets');
+if (streetsAt > 0 && !process.argv[streetsAt + 1]) throw new Error('--streets needs a file');
+if (FETCH && streetsAt > 0) throw new Error('--fetch and --streets both say where the streets come from; pick one');
+const STREETS = streetsAt > 0 ? path.resolve(process.argv[streetsAt + 1]) : src('approach-paths.json');
 
 /**
  * How far out to go. Far enough to reach the bus stops on Auburn Blvd and the
@@ -87,9 +124,10 @@ const TOUCH_M = 2.0;
  *
  * Not a tuning knob so much as a statement about the data: my campus's driveways and
  * footways are drawn out to the public road, so where a real entrance exists the
- * gap is already small — 13 of their vertices land within 2 m of an OSM
- * centreline and 27 within 5. Past ~12 m a connector stops being the last few
- * metres of an entrance and starts being a path across somebody's verge.
+ * gap is already small — 14 of their vertices land within 2 m of an OSM
+ * centreline, 33 within 5 and 47 within 12. Past ~12 m a connector stops being
+ * the last few metres of an entrance and starts being a path across somebody's
+ * verge.
  */
 const GATE_M = 12;
 
@@ -213,8 +251,11 @@ way[highway][highway!~"^(${EXCLUDED})$"][foot!=no][access!~"^(private|no)$"]`
   + `(${APRON.join(',')});
 out geom;`;
 
-const { elements } = await overpass(QUERY);
-const ways = elements.filter((w) => Array.isArray(w.geometry) && w.geometry.length > 1);
+// Only with --fetch. Without it the streets come from committedStreets() below
+// and nothing in stages 1 to 3 runs: they ran when that file was fetched.
+const ways = FETCH
+  ? (await overpass(QUERY)).elements.filter((w) => Array.isArray(w.geometry) && w.geometry.length > 1)
+  : [];
 
 // --- 2. clip at the campus boundary ------------------------------------------
 //
@@ -261,6 +302,7 @@ function outsideParts(a, b) {
 
 const coord = [];        // node -> [x, y] in metres
 const fixed = [];        // node -> lon/lat to emit verbatim, when it has one
+const kept = [];         // node -> a committed street vertex's own lon/lat
 const buckets = new Map();
 
 /**
@@ -271,14 +313,22 @@ const buckets = new Map();
  * welds on coordinate equality, so a metre round trip that moves the last digit
  * would leave a gate connector ending one centimetre off the campus network and
  * joined to nothing.
+ *
+ * `street` pins it too, more weakly: a vertex of the committed streets goes
+ * back out at the digits it came in at, unless a campus vertex welds to it, and
+ * then the campus's digits win exactly as they do over a fresh OSM node. That
+ * is what keeps a street that has not moved byte-identical through a re-gate,
+ * while one that was welded to a campus vertex the walk network has since
+ * moved (by under WELD_M, or it would not weld) follows the campus there.
  */
-function nodeAt(p, keep = null) {
+function nodeAt(p, keep = null, street = null) {
   const gx = Math.round(p[0] / WELD_M), gy = Math.round(p[1] / WELD_M);
   for (let dx = -1; dx <= 1; dx += 1) {
     for (let dy = -1; dy <= 1; dy += 1) {
       for (const id of buckets.get(`${gx + dx},${gy + dy}`) ?? []) {
         if (dist(coord[id], p) <= WELD_M) {
           if (keep && !fixed[id]) fixed[id] = keep;
+          if (street && !kept[id]) kept[id] = street;
           return id;
         }
       }
@@ -287,6 +337,7 @@ function nodeAt(p, keep = null) {
   const id = coord.length;
   coord.push(p);
   fixed.push(keep);
+  kept.push(street);
   const key = `${gx},${gy}`;
   if (!buckets.has(key)) buckets.set(key, []);
   buckets.get(key).push(id);
@@ -322,6 +373,109 @@ for (const way of ways) {
     }
   }
   if (drew) kinds.set(way.tags.highway, (kinds.get(way.tags.highway) ?? 0) + 1);
+}
+
+/**
+ * The street half of an approach-paths.json, as it stood before its gates.
+ *
+ * Not simply its 'osm' features. The file is this script's OUTPUT, and stage 4
+ * edits the streets as well as adding to them: a connector whose foot lands
+ * mid-segment splits that segment there, so the street has a vertex to end on.
+ * Re-gated as they stand, those splits would stay behind as vertices nothing
+ * uses, and worse, they change what the next run does — the gate stage skips a
+ * candidate whose nearest segment "was since split", and a street broken at
+ * last time's foot is a different set of segments to be nearest to. Each run
+ * would build on the last one's leftovers, and the output would depend on how
+ * many times the script had been run.
+ *
+ * So each split is put back. The vertex at a gate's street end is one this
+ * stage made, rather than one OSM drew, when all of these hold:
+ *
+ *   - exactly two street segments meet there, and nothing else does;
+ *   - it lies on the straight line between their far ends (UNSPLIT_M) — a
+ *     split leaves the street exactly as straight as it was, to the rounding
+ *     of seven decimals;
+ *   - it is the foot of the perpendicular from the gate's campus end onto that
+ *     line, to the same tolerance, which is how stage 4 chose it; and
+ *   - it is at least WELD_M from both ends, or stage 4 would have reused the
+ *     end instead of splitting.
+ *
+ * An OSM vertex that happens to pass all four — dead straight, with a
+ * connector arriving at exactly right angles — would be merged away too, and
+ * the cost of that is one vertex in the middle of a straight line. A gate that
+ * ended on a real OSM vertex (the end of a way the campus clip cut, typically)
+ * fails the first test and leaves the street as it is.
+ *
+ * Every old gate is then dropped, split or not. They are what is being
+ * rebuilt.
+ *
+ * One kind of split cannot be told apart, and stays. A connector under WELD_M
+ * leaves no gate behind: its foot welds to the campus vertex itself, so the
+ * street is split AT the campus's coordinate and nothing in the file says it
+ * was. While that campus vertex is there the street welds to it again, which
+ * is the same join; if the walk network ever moves it more than WELD_M, the
+ * street keeps a bend of under half a metre where it used to be, and the gate
+ * stage finds the new vertex on its own.
+ */
+const UNSPLIT_M = 0.02;
+function committedStreets(file) {
+  const features = JSON.parse(readFileSync(file, 'utf8')).features;
+  const key = (c) => `${c[0]},${c[1]}`;
+  const streets = new Set();
+  const atVertex = new Map();             // vertex key -> street segments there
+  const meet = (seg, c) => {
+    if (!atVertex.has(key(c))) atVertex.set(key(c), new Set());
+    atVertex.get(key(c)).add(seg);
+  };
+  for (const f of features) {
+    if (f.properties.source !== 'osm') continue;
+    const seg = f.geometry.coordinates;
+    streets.add(seg);
+    seg.forEach((c) => meet(seg, c));
+  }
+
+  let unsplit = 0;
+  const gates = features.filter((f) => f.properties.source === 'gate');
+  for (const gate of gates) {
+    for (const [end, other] of [[0, 1], [1, 0]]) {
+      const v = gate.geometry.coordinates[end];
+      const there = [...(atVertex.get(key(v)) ?? [])];
+      if (there.length !== 2) continue;
+      // Stage 4 split a-b into [a, v] and [v, b]; read the far ends in that order.
+      const [first, second] = key(there[0][1]) === key(v) ? there : [there[1], there[0]];
+      if (key(first[1]) !== key(v) || key(second[0]) !== key(v)) continue;
+      const [a, b] = [flat(first[0]), flat(second[1])];
+      const x = flat(v), m = flat(gate.geometry.coordinates[other]);
+      const vx = b[0] - a[0], vy = b[1] - a[1];
+      const L = Math.hypot(vx, vy);
+      if (L === 0) continue;
+      const t = ((m[0] - a[0]) * vx + (m[1] - a[1]) * vy) / (L * L);
+      const foot = [a[0] + t * vx, a[1] + t * vy];
+      if (segDist(x, a, b) > UNSPLIT_M || dist(foot, x) > UNSPLIT_M) continue;
+      if (t * L < WELD_M || (1 - t) * L < WELD_M) continue;
+
+      const whole = [first[0], second[1]];
+      streets.delete(first);
+      streets.delete(second);
+      streets.add(whole);
+      atVertex.delete(key(v));
+      atVertex.get(key(first[0])).delete(first);
+      atVertex.get(key(first[0])).add(whole);
+      atVertex.get(key(second[1])).delete(second);
+      atVertex.get(key(second[1])).add(whole);
+      unsplit += 1;
+      break;
+    }
+  }
+  return { streets: [...streets], gates: gates.length, unsplit };
+}
+
+let committed = null;
+if (!FETCH) {
+  committed = committedStreets(STREETS);
+  for (const [a, b] of committed.streets) {
+    addEdge(nodeAt(flat(a), null, a), nodeAt(flat(b), null, b), 'osm');
+  }
 }
 
 // --- 4. gate ------------------------------------------------------------------
@@ -420,6 +574,33 @@ for (const c of candidates) {
   }
   addEdge(c.n, target, 'gate');
   gates.push({ metres: c.d, at: unflat(coord[c.n]) });
+
+  // A STREET END ON A CAMPUS PATH IS JOINED TO BOTH ENDS OF IT. The connector
+  // above runs from a campus vertex to the street; where the street's end
+  // lies on a campus edge that vertex ends, the connector runs back along
+  // the edge, and a walk arriving from the edge's far end went past the
+  // street, on to the vertex, and back — a spike in the line and "U-turn" in
+  // the directions. At the west gate OSM's street crosses the campus walk
+  // 0.7 m short of the walk's end and was joined at the end; at the east gate
+  // a dead-end street lies 4.5 m along a campus edge from one end and was
+  // joined to the other, 7.8 m away, so every walk from that side went 12 m
+  // past it and came back. The campus edge cannot be split here — paths.json
+  // is not this script's — so the street end is joined to the other end of the
+  // edge as well, along it, and a walk from either side turns off where the
+  // street is. "On" is TOUCH_M, the same ground drawn twice; at an end of the
+  // edge rather than along it, the connector above already is the join.
+  for (const [key, [u, v]] of edges) {
+    if (origin.get(key) !== 'arc' || (u !== c.n && v !== c.n)) continue;
+    const other = u === c.n ? v : u;
+    const along = coord[other], from = coord[c.n], p = coord[target];
+    const vx = along[0] - from[0], vy = along[1] - from[1];
+    const L = Math.hypot(vx, vy);
+    const t = ((p[0] - from[0]) * vx + (p[1] - from[1]) * vy) / (L * L);
+    if (segDist(p, from, along) > TOUCH_M || t * L < WELD_M || (1 - t) * L < WELD_M) continue;
+    if (edges.has(EK(other, target))) continue;
+    addEdge(other, target, 'gate');
+    gates.push({ metres: dist(coord[other], p), at: unflat(coord[other]), along: true });
+  }
 }
 
 // --- 5. prune -----------------------------------------------------------------
@@ -450,7 +631,7 @@ const stranded = [...new Set(
 // network remains one file that one script owns, and nothing here can quietly
 // edit it.
 
-const at = (n) => fixed[n] ?? unflat(coord[n]);
+const at = (n) => fixed[n] ?? kept[n] ?? unflat(coord[n]);
 const features = [];
 for (const [key, [u, v]] of edges) {
   const from = origin.get(key);
@@ -483,11 +664,19 @@ const metres = features.reduce((s, f) => {
 }, 0);
 const byKind = [...kinds].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ');
 
-console.log(`[approach] ${ways.length} OSM ways in a ${APRON_M} m apron (${byKind})`);
-console.log(`[approach] ${beyond} segments trimmed off beyond the apron, `
-  + `${clipped} dropped as wholly inside the campus`);
-const touches = gates.filter((g) => g.metres <= TOUCH_M);
-const reaches = gates.filter((g) => g.metres > TOUCH_M);
+if (FETCH) {
+  console.log(`[approach] ${ways.length} OSM ways in a ${APRON_M} m apron (${byKind})`);
+  console.log(`[approach] ${beyond} segments trimmed off beyond the apron, `
+    + `${clipped} dropped as wholly inside the campus`);
+} else {
+  console.log(`[approach] streets from ${path.relative(root, STREETS)}, not Overpass `
+    + '(--fetch to refresh them): '
+    + `${committed.streets.length} segments once its ${committed.gates} old gates are dropped and `
+    + `${committed.unsplit} of the splits they made are put back`);
+}
+const alongs = gates.filter((g) => g.along);
+const touches = gates.filter((g) => !g.along && g.metres <= TOUCH_M);
+const reaches = gates.filter((g) => !g.along && g.metres > TOUCH_M);
 console.log(`[approach] ${candidates.length} campus vertices within ${GATE_M} m of a street; `
   + `${redundant} skipped as already reachable within ${GATE_DETOUR_M} m`);
 console.log(`[approach] ${gates.length} connectors join my campus's network to the street, `
@@ -495,6 +684,10 @@ console.log(`[approach] ${gates.length} connectors join my campus's network to t
 console.log(`[approach]    ${touches.length} touch it within ${TOUCH_M} m — the same ground drawn twice`);
 console.log(`[approach]    ${reaches.length} reach further, and each is the only way in within ${GATE_DETOUR_M} m:`);
 for (const g of reaches.sort((a, b) => a.metres - b.metres)) {
+  console.log(`[approach]       ${g.metres.toFixed(1)} m at ${g.at[0]}, ${g.at[1]}`);
+}
+console.log(`[approach]    ${alongs.length} join a street end lying on a campus edge to that edge's other end as well:`);
+for (const g of alongs.sort((a, b) => a.metres - b.metres)) {
   console.log(`[approach]       ${g.metres.toFixed(1)} m at ${g.at[0]}, ${g.at[1]}`);
 }
 console.log(`[approach] ${stranded.length} node(s) unreachable from campus, dropped`);

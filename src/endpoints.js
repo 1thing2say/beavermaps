@@ -239,7 +239,7 @@ export function createEndpoints({
    * Three ways to fail, and all three are said out loud rather than swallowed:
    * the browser refuses or times out (see locationProblem), or the fix lands
    * outside the routing graph (see reachProblem). The last is the quiet one —
-   * the router snaps a start to the nearest vertex with no notion of "too far",
+   * the router snaps a start onto the network with no notion of "too far",
    * so opening this at home ten miles away would otherwise draw a confident
    * eight-minute walk between two places neither of which is where you are.
    *
@@ -267,12 +267,23 @@ export function createEndpoints({
       setBusy(false);
     }
 
+    // The nearest VERTEX is only the reach check here. It is never nearer
+    // than the nearest point on an edge, which is what the server measures,
+    // so this check is the stricter of the two — by nothing that matters,
+    // since the worst point in the graph's bounding box is about 215 m from a
+    // vertex (see REACH_M). What it is not is where the walk starts. It used
+    // to be: the fix was replaced by this vertex before it was sent, and since
+    // the build collapsed straight runs into single long edges that vertex can
+    // be fifty metres along the path you are standing beside, so the walk
+    // began by going there. The fix itself goes to the server, which joins the
+    // network at the nearest point on it and answers where (`snapped`); the
+    // dotted leg from the blue dot to the line is that last bit of ground.
     const node = nearestPoint(point(at), networkPoints()).geometry.coordinates;
     const problem = reachProblem(distance(point(at), point(node)) * 1000);
     if (problem) { setStatus(problem, true); return false; }
 
     panel.show();
-    startPoint = point(node);
+    startPoint = point(at);
     startIsMine = true;
     // No green pin, for the same reason the fixture plants none: the blue dot
     // is what says where you are, and a marker on top of it is the second pin.
@@ -328,6 +339,27 @@ export function createEndpoints({
       .addTo(map);
     startCoordText.value = label ?? coordLabel(coords);
     return true;
+  }
+
+  /**
+   * A BUILDING'S PIN GOES TO THE DOOR THE WALK USED. A building is asked for
+   * by its entrance, and the server may start or end the walk at another of
+   * its doors — whichever suits where you are coming from or going to (`door`
+   * in the answer; see `entrances` in server/graph.js). The pin moves there
+   * rather than staying at the door it was asked about with a dotted line
+   * across the building to it; the label still names the building. Moving the
+   * point too means a re-route asks for the building again by one of its
+   * doors, and is again free to pick.
+   */
+  function standAtDoors(door) {
+    if (door?.to) {
+      endPoint = point(door.to);
+      endMarker?.setLngLat(door.to);
+    }
+    if (door?.from && !startIsMine) {
+      startPoint = point(door.from);
+      startMarker?.setLngLat(door.from);
+    }
   }
 
   async function placeEnd(coords, label) {
@@ -402,6 +434,8 @@ export function createEndpoints({
     // ever read while a walk is running, and nav.start() zeroes it — so this
     // was resetting a counter nothing could have read.
     route.set(result);
+
+    standAtDoors(result.door);
 
     map.getSource('calculated-route').setData(route.feature());
     paintLegs();

@@ -14,9 +14,9 @@
     "RESCUES bring a whole stranded fragment into the largest component, and the",
     "endpoint test is meaningless for them \u2014 pull one and the fragment is pruned,",
     "so an endpoint stops existing and the measurement compares two snaps onto the",
-    "same surviving node. They are validated on SHIPPED METRES instead. The three",
-    "here carry 571 m, 409 m and 120 m of drawn path respectively: 1,100 m of my campus's",
-    "own linework returned to the routable network for 46 m of connector.",
+    "same surviving node. They are validated on SHIPPED METRES instead. The two",
+    "here carry 571 m and 409 m of drawn path respectively: 980 m of my campus's",
+    "own linework returned to the routable network for 25 m of connector.",
     "",
     "READ THIS BEFORE ADDING ONE. An earlier version of this file had 15 links, and",
     "eleven of them ran PARALLEL to a path my campus already draws. That was the wrong",
@@ -25,6 +25,14 @@
     "while leaving two splintered lines down one corridor on screen. The junction",
     "stage in build-walk-network.mjs fixes that cause, and seven of those links",
     "were then shown redundant and deleted.",
+    "",
+    "Two more went the same way later. The roundabout by Printing Services had a",
+    "link from its north arm to its north-east arm and a 20.6 m 'rescue' bringing",
+    "the west footway across the apron: both straight chords over the planted",
+    "island. The sheet DOES draw the circle, as a stroked ring rather than a line,",
+    "and the build skipped every polygon. Once it read the ring, every arm met it",
+    "on its own (the west footway and the north-east arm through junction",
+    "connectors of 5.0 m and 3.3 m) and both links were deleted.",
     "",
     "So: before writing a link, check whether the sheet already draws the path and",
     "the extraction is simply failing to connect it. Only if it genuinely draws",
@@ -148,28 +156,6 @@
     {
       "type": "Feature",
       "properties": {
-        "why": "The roundabout arm by Printing Services. The sheet draws crossings on the other approaches and leaves this one unjoined.",
-        "kind": "walkway",
-        "added": "2026-08-06",
-        "detourSavedFt": 434
-      },
-      "geometry": {
-        "type": "LineString",
-        "coordinates": [
-          [
-            -121.349066,
-            38.647806
-          ],
-          [
-            -121.348892,
-            38.647765
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
         "why": "Paved apron between the Student Center and CTE. The sheet stops a footway either side of it and draws nothing between.",
         "kind": "walkway",
         "added": "2026-08-06",
@@ -251,28 +237,6 @@
           [
             -121.344852,
             38.650307
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "why": "RESCUE: 100 m of footway by the roundabout, stranded 20.6 m from the network. The gap crosses the roundabout apron \u2014 paved in imagery, 0% vegetation \u2014 though the sheet classifies part of it as base plane rather than a drawn surface, so this is the least certain of the three rescues.",
-        "kind": "walkway",
-        "added": "2026-08-07",
-        "rescuesM": 100
-      },
-      "geometry": {
-        "type": "LineString",
-        "coordinates": [
-          [
-            -121.349268,
-            38.647709
-          ],
-          [
-            -121.349066,
-            38.647806
           ]
         ]
       }

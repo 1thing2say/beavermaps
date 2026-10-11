@@ -1,10 +1,12 @@
-// src/paths.json — the walkable network, and the only artifact routing depends
-// on. Everything else on the map is decoration; if this is wrong, the app is
-// wrong in the one way a user notices.
+// src/paths.json — the walkable network, and the artifact routing depends on,
+// with src/doors.json beside it saying where a room inside a building joins it.
+// Everything else on the map is decoration; if this is wrong, the app is wrong
+// in the one way a user notices.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { load, CAMPUS, metresBetween, vertexKey } from './helpers.js';
+import { load, CAMPUS, metresBetween, vertexKey, pointInRing } from './helpers.js';
+import { createGraph } from '../server/graph.js';
 
 const network = load('paths');
 const segments = network.features;
@@ -87,6 +89,77 @@ test('the walkable network is one connected component', () => {
   );
 });
 
+test('no edge doubles a shorter one leaving the same node the same way', () => {
+  // The fold stage in build-walk-network.mjs. A long edge and a short one from
+  // one node, within 20 degrees, with the short one's end on the long one,
+  // are one corridor drawn twice; a point snapped onto the long one walked
+  // past the short one's end and came back down it. The plaza link between
+  // Fine & Applied Arts and the Kaneko Gallery was the case.
+  const toward = new Map();
+  for (const f of segments) {
+    const cs = f.geometry.coordinates;
+    for (let n = 1; n < cs.length; n += 1) {
+      for (const [p, q] of [[cs[n - 1], cs[n]], [cs[n], cs[n - 1]]]) {
+        if (!toward.has(vertexKey(p))) toward.set(vertexKey(p), []);
+        toward.get(vertexKey(p)).push([p, q]);
+      }
+    }
+  }
+  const lonM = metresBetween([0, 38.65], [1, 38.65]), latM = metresBetween([0, 0], [0, 1]);
+  for (const out of toward.values()) {
+    for (const [p, near] of out) {
+      for (const [, far] of out) {
+        const a = [(near[0] - p[0]) * lonM, (near[1] - p[1]) * latM];
+        const b = [(far[0] - p[0]) * lonM, (far[1] - p[1]) * latM];
+        const la = Math.hypot(...a), lb = Math.hypot(...b);
+        if (la >= lb || la === 0) continue;
+        const along = (a[0] * b[0] + a[1] * b[1]) / lb;
+        const off = Math.abs(a[0] * b[1] - a[1] * b[0]) / lb;
+        const degrees = (Math.acos(Math.min(1, along / la)) * 180) / Math.PI;
+        assert.ok(!(degrees <= 20 && off <= 1 && along < lb),
+          `the ${lb.toFixed(1)} m edge from ${p} runs over the ${la.toFixed(1)} m one to ${near}`);
+      }
+    }
+  }
+});
+
+test('every hand-added link joins the network at both ends', () => {
+  // A link in src/path-links.json is written against the map as drawn, and the
+  // build's tee and junction stages move dead ends by up to 3 m afterwards. One
+  // link was left behind that way: its walkway end had been teed away from it,
+  // it attached at the other end only, and the build carried on with a loose
+  // end that doubled an LRC-to-STEM walk. Nothing else notices — the network
+  // stays one component, because the link still hangs off it by one end.
+  //
+  // So each end must sit on a vertex that something besides the link itself
+  // reaches: degree two or more. Measured from the link as written, so the
+  // vertex may be up to a tee plus a weld away (3 + 2 m).
+  const degree = new Map();
+  for (const s of segments) {
+    const cs = s.geometry.coordinates;
+    for (const c of [cs[0], cs.at(-1)]) degree.set(vertexKey(c), (degree.get(vertexKey(c)) ?? 0) + 1);
+  }
+  const vertices = [...new Set(segments.flatMap((s) => s.geometry.coordinates).map(vertexKey))]
+    .map((k) => ({ k, c: k.split(',').map(Number) }));
+  const links = load('path-links').features.filter((f) => f.geometry?.type === 'LineString');
+  assert.ok(links.length > 0, 'no hand links to check');
+  for (const link of links) {
+    for (const end of [link.geometry.coordinates[0], link.geometry.coordinates.at(-1)]) {
+      let best = null;
+      for (const v of vertices) {
+        const d = metresBetween(end, v.c);
+        if (!best || d < best.d) best = { ...v, d };
+      }
+      assert.ok(best.d <= 5, `link end ${end} is ${best.d.toFixed(1)} m from the network`);
+      assert.ok(
+        degree.get(best.k) >= 2,
+        `link end ${end} attaches to nothing: its vertex ${best.k} is a dead end — `
+        + '"' + (link.properties?.why ?? '').slice(0, 60) + '…"',
+      );
+    }
+  }
+});
+
 test('shared endpoints are byte-identical, not merely close', () => {
   // The server snaps at 1e-7 and builds its vertex set by string key, so two
   // nodes that are the same place but differ in the last decimal become two
@@ -120,6 +193,12 @@ test('search destinations resolve onto the network', () => {
   // distance of an existing node deliberately reuses it rather than splitting
   // an edge into a stub.
   //
+  // Except a destination inside a building that is closer to an approach path
+  // the walls stage peeled off under that roof than to anything left. The
+  // build does not splice those: they resolve to the door the path left, and
+  // the router (server/graph.js) does the same. For them, what has to hold is
+  // that the router's snap IS one of that building's doors.
+  //
   // This used to assert that a place with a single node sat exactly on it,
   // which held only while the graph WAS my campus's node table. The network is now
   // traced from the walkways the sheet draws and carries none of their ids;
@@ -150,7 +229,13 @@ test('search destinations resolve onto the network', () => {
   const positioned = load('places').features.filter((f) => f.geometry);
   assert.ok(positioned.length > 100, `only ${positioned.length} positioned places`);
 
-  let checked = 0;
+  const doors = load('doors');
+  const router = createGraph({ network, approach: load('approach-paths'), doors });
+  const doorsAround = (p) => doors.features
+    .filter((f) => pointInRing(p, f.geometry.coordinates[0]))
+    .flatMap((f) => f.properties.stubs.flatMap((stub) => stub.doors.map(vertexKey)));
+
+  let checked = 0, atDoor = 0;
   for (const place of positioned) {
     const { name, nodeIds } = place.properties;
     // my campus's own binding, kept in places.json even though the graph no longer
@@ -159,6 +244,13 @@ test('search destinations resolve onto the network', () => {
     if (place.geometry.type !== 'Point') continue;
 
     const p = place.geometry.coordinates;
+    const snapped = vertexKey(router.snap(p).coord);
+    if (doorsAround(p).includes(snapped)) {
+      assert.ok(vertices.some((v) => vertexKey(v) === snapped), `${name}'s door is not a vertex`);
+      atDoor += 1;
+      checked += 1;
+      continue;
+    }
     const toVertex = Math.min(...vertices.map((v) => metresBetween(p, v)));
     const toEdge = Math.min(...segments.map((s) =>
       toSegment(p, s.geometry.coordinates[0], s.geometry.coordinates[1])));
@@ -171,4 +263,45 @@ test('search destinations resolve onto the network', () => {
     checked += 1;
   }
   assert.ok(checked > 100, `only ${checked} destinations were checked`);
+  // Today 23: the 21 the build left unspliced for a door, and two whose nearest
+  // vertex happens to be one.
+  assert.ok(atDoor >= 15, `only ${atDoor} destinations resolve to a door`);
+});
+
+test('every door in doors.json is on its building\'s wall and on the network', () => {
+  // src/doors.json is written by the walls stage of build-walk-network.mjs:
+  // for each footprint, the pieces of drawn path it took off the graph under
+  // that roof, and the node each piece left the graph at. The router sends a
+  // room to one of those nodes, so a door that is not a vertex is a room the
+  // router cannot reach, and a door away from the wall is not a door.
+  const doors = load('doors').features;
+  assert.ok(doors.length >= 10, `only ${doors.length} footprints have a door`);
+  const vertices = new Set(segments.flatMap((s) => s.geometry.coordinates.map(vertexKey)));
+  for (const f of doors) {
+    const [ring] = f.geometry.coordinates;
+    assert.ok(f.properties.stubs.length > 0, `footprint ${f.properties.i} lists no stubs`);
+    for (const { doors: at, under } of f.properties.stubs) {
+      assert.ok(at.length > 0 && under.length > 0, `footprint ${f.properties.i} has an empty stub`);
+      for (const door of at) {
+        assert.ok(vertices.has(vertexKey(door)), `door ${door} of footprint ${f.properties.i} is not a vertex`);
+        // On the wall, give or take what the later stages moved it: 0.22 m today.
+        const mx = metresBetween(door, [door[0] + 1e-4, door[1]]) / 1e-4;
+        const my = metresBetween(door, [door[0], door[1] + 1e-4]) / 1e-4;
+        let toWall = Infinity;
+        for (let k = 1; k < ring.length; k += 1) {
+          const ax = (ring[k - 1][0] - door[0]) * mx, ay = (ring[k - 1][1] - door[1]) * my;
+          const vx = (ring[k][0] - ring[k - 1][0]) * mx, vy = (ring[k][1] - ring[k - 1][1]) * my;
+          const L = vx * vx + vy * vy;
+          const t = L === 0 ? 0 : Math.max(0, Math.min(1, -(ax * vx + ay * vy) / L));
+          toWall = Math.min(toWall, Math.hypot(ax + t * vx, ay + t * vy));
+        }
+        assert.ok(toWall < 1, `door ${door} is ${toWall.toFixed(1)} m from footprint ${f.properties.i}'s wall`);
+      }
+      // ...and what was taken away was under the roof, which is the whole reason it went.
+      for (const [a, b] of under) {
+        const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        assert.ok(pointInRing(mid, ring), `a stub of footprint ${f.properties.i} runs outside it at ${mid}`);
+      }
+    }
+  }
 });

@@ -35,13 +35,40 @@ const network = readJson('src/paths.json');
  *
  * Unioned rather than merged into paths.json on purpose: that file is my campus's
  * printed linework and one script owns it. This one is OpenStreetMap's, owned by
- * scripts/build-approach-network.mjs, and the join between them is fifteen
+ * scripts/build-approach-network.mjs, and the join between them is twenty-two
  * connectors that script prints on every build.
  */
 const approach = readJson('src/approach-paths.json');
 
+/**
+ * Where each building's drawn approach paths met its walls, so a room inside
+ * resolves to the door its path led to rather than to whichever face of the
+ * building a path happens to run past. Written by scripts/build-walk-network.mjs
+ * with paths.json, from the same walls stage; see doorFor() in graph.js.
+ */
+const doors = readJson('src/doors.json');
+
+/**
+ * The line the streets were clipped at. A point inside it whose nearest edge
+ * is a street on the other side is still offered the campus's own network;
+ * see candidates() in graph.js.
+ */
+const boundary = readJson('src/campus-boundary.json');
+
+/**
+ * Every building's doors, from the directory, so a walk to a building can end
+ * at whichever of its doors suits it, with the building's footprint, so
+ * anywhere inside it is the same place as the building; and every footprint on
+ * the sheet, so a way onto the network across open ground is never drawn
+ * through one. Both files are also served as overlays below, from the same reads.
+ */
+const directory = readJson('src/directory.json');
+const buildings = readJson('src/buildings.json');
+const entrances = directory.features.filter((f) => f.properties.doors)
+  .map((f) => ({ doors: f.properties.doors, footprint: f.geometry }));
+
 const buildStart = Date.now();
-const graph = createGraph({ network, approach });
+const graph = createGraph({ network, approach, doors, boundary, entrances, buildings });
 
 console.log(
   `[beavermaps] graph ready in ${Date.now() - buildStart}ms ` +
@@ -69,8 +96,9 @@ console.log(
  * needs a restart.
  */
 const OVERLAY_NAMES = ['buildings', 'basemap', 'amenities', 'places', 'labels', 'directory'];
+const READ = { directory, buildings };
 const OVERLAYS = Object.fromEntries(
-  OVERLAY_NAMES.map((name) => [name, readJson(`src/${name}.json`)]),
+  OVERLAY_NAMES.map((name) => [name, READ[name] ?? readJson(`src/${name}.json`)]),
 );
 
 // ---------------------------------------------------------------------------
@@ -202,6 +230,7 @@ function route(req, res) {
     distanceFeet: result.distanceFeet,
     maneuvers: result.maneuvers,
     snapped: result.snapped,
+    door: result.door,
   });
 }
 
@@ -221,9 +250,11 @@ app.get('/api/network', (req, res) => sendWire(req, res, WIRE.network));
 /**
  * Every vertex in the routing graph, campus and approach alike, as bare pairs.
  *
- * The client snaps a click to the nearest one so the marker lands on the graph
- * the instant you tap, rather than waiting a round trip to find out where the
- * route will really begin.
+ * The client measures a start — a GPS fix, or Start here on a dropped pin —
+ * against the nearest one, so a start too far from anything walkable is
+ * refused without a round trip. It no longer moves anything onto them: a
+ * vertex can be tens of metres along a path from where the router would join
+ * it (see dropPin in src/main.js), so the coordinate itself is what is sent.
  *
  * Pairs rather than a FeatureCollection because this is the one payload where
  * the framing costs more than the data: `{"type":"Feature","properties":{},…}`

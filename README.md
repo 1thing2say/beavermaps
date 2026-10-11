@@ -80,15 +80,20 @@ The same arrangement works for trails, indoor paths, or a video-game grid.
 
 ### The network (`src/paths.json`)
 
-A GeoJSON `FeatureCollection` of **803 `LineString` segments over 725 nodes**,
+A GeoJSON `FeatureCollection` of **1,262 `LineString` segments over 1,177 nodes**,
 13.6 km in total. It **is** the light-grey paths my campus's printed map draws —
 `scripts/build-walk-network.mjs` takes those polylines verbatim and makes the
 smallest set of edits that turn a drawing into a graph.
 
 That is the whole idea. Walkways on the sheet are stroked paths carrying a real
-ground width — 105 of them, 10.5 km, 3.3 to 13.2 m wide — and the driveways and
+ground width — 103 of them, 10.3 km, 3.3 to 13.2 m wide — and the driveways and
 crossings are drawn the same way, so those strokes *are* centrelines. Tracing
-them gives a network that lies on the drawn pavement by construction:
+them gives a network that lies on the drawn pavement by construction. One
+driveway is drawn differently — the turning circle by Printing Services is a
+stroked, *unfilled* polygon rather than a line — and it is read as a stroke
+too. The rule is exact: a walkway or driveway polygon, stroked in pavement grey,
+with no fill. A filled shape is a surface (a plaza, an apron), not a centreline,
+and on today's sheet the circle is the only polygon that qualifies.
 
 | where a segment sits | my campus's own graph | traced from the sheet |
 |---|---|---|
@@ -98,6 +103,9 @@ them gives a network that lies on the drawn pavement by construction:
 | through a building | 83 | **0** |
 | over lawn | 85 | **12 (1%)** |
 | over parking bays | 27 | **0** |
+
+The right-hand column is from an earlier build. Today 31 segments, 143 m, run
+under a building — each one a passage the *Walls* stage below decided to keep.
 
 #### Why not my campus's own routing graph
 
@@ -113,13 +121,14 @@ is visible to their users.
 `Batch.json` is still the source for `places.json` and its `nodeIds`; only the
 routing network stopped coming from it.
 
-#### The seven stages, and why each exists
+#### The eight stages, and why each exists
 
 1. **Node.** Illustration linework crosses rather than joins — intersections
    happen mid-segment with no shared vertex. Every crossing is cut into both
    lines, or a junction on screen is not a junction in the graph.
-2. **Weld.** Vertices within 2 m become one node; a draughtsman's "touching"
-   endpoints sit a metre or two apart.
+2. **Weld.** Vertices within 2 m become one node — the nearest, not whichever
+   the scan reaches first; a draughtsman's "touching" endpoints sit a metre or
+   two apart.
 3. **Collapse.** *This is the one that matters.* The sheet draws corridor twice
    all over — a footway shadowing a driveway, a walkway drawn over itself, and
    every bar of a zebra crossing as its own stroke, so one crossing becomes five
@@ -145,19 +154,125 @@ routing network stopped coming from it.
    average of footway and road. That is the preference *Dedupe* already applies
    by kind. Nodes are merged, never deleted, so no connection the drawing makes
    is lost.
-4. **Tee.** The gap the first three leave. *Node* cuts where two segments
-   **cross**, so a stroke that *ends* on another never produces a cut — it does
+
+   **A duplicate is always a *different* stroke.** The test — inside a corridor
+   width, running the same way — was applied to every edge not touching the
+   node, and on a curve drawn with vertices 2–3 m apart the node's *own* next
+   stretch passes it too. 391 of the 455 merges were strokes folding onto
+   themselves: bends shipped as chords up to 23 m off the drawing, and queued
+   merges applied after their nodes had already moved joined points 19 m apart.
+   Edges and nodes now carry the strokes they came from, a node never collapses
+   onto one of its own, and each merge is re-measured when it is applied. That
+   is **95** merges; network more than 1 m off the drawn strokes falls from
+   2.8 km to 1.0 km — 0.6 km with the *Tee* and *Junction* fixes below — and
+   side-by-side duplicates do not come back.
+4. **Walls.** The printed sheet paints every building after every walkway and
+   driveway beneath it (one late driveway is painted after the buildings, and
+   none stands on it), and the cartographer leans on it: approach paths are drawn a few metres past the
+   wall for the fill to cover, two strokes meet somewhere under a roof, a
+   walkway runs straight through a corner. None of it is visible in print, and
+   read verbatim all of it was network — **314 m inside 26 buildings**, 35 of
+   the 60 dead ends somewhere inside one, the deepest 13 m into the Parking
+   Garage. So every edge is cut where it crosses the wall of a building painted
+   over it (the zebra crossings are painted over the buildings, so they are
+   never touched), and what lies under the roof is one of two things. A
+   **stub** leads only inside: it is peeled back to the wall, and the wall node
+   stays, because that is where the door is. A **passage** comes out the other
+   side, and stays only where the graph needs it: *Junction*'s own test, the
+   way round more than six times the way through, or no way round at all.
+
+   What is peeled is not forgotten. A room inside the building used to snap
+   onto its stub, so a walk to it ended where the drawn path goes in; with the
+   stub gone, the nearest point on the network can be a path past another face
+   with no way in. So every piece taken off is written to `src/doors.json` with the node
+   it left the graph at, its **door** — 36 doors on 16 footprints. A destination
+   closer to one of those pieces than to anything left resolves to its door,
+   in the build (it is not spliced) and in the router, which applies the same
+   test to any coordinate inside a building and then offers that door first and
+   the building's other doors after it, so a room leaves by whichever suits the
+   walk. 21 destinations qualify, and 20
+   were already snapping to that door; the one that was not, the Library's
+   defibrillator, had drifted to a walkway past another side of the Library.
+   The directory puts a building's entrance at the door of the footprint its
+   card stands on, nearest the anchor, which moves nine entrances — the
+   Library's by 31 m, to the one path the sheet draws into it. A building with
+   no drawn door has its entrance where its walls come nearest the network,
+   and every building, drawn doors or not, also lists each corner about as
+   near (within a metre of the nearest) as a way in, which a walk to it may
+   end at and a room in it may leave by. Those points are on edges, so the
+   build splices a node at each, as it does for every destination: 86 of them,
+   46 new. The directory used to take the nearest *vertex* to a corner, and
+   when *Collapse* made a straight run of vertices one edge, the Learning
+   Resource Center's entrance jumped 53 m to the next corner whose vertex had
+   survived. Two rooms in one building can still be nearest different doors,
+   and then the walk between them goes out of one and round to the other: the
+   network has no indoors to offer instead.
+
+   Not every loose end under a roof is a stroke drawn past its wall. Sometimes
+   the building is drawn over a junction, and peeling the stub takes the
+   junction with it. So before anything is peeled, each loose end is asked the
+   passage question first: is there a path within 6 m of it, beyond the far
+   wall, whose way round from the stub's door is more than six times the way
+   through? Two are, and neither is close. Every other loose end has nothing in
+   reach that is not already a few steps from its own door (a way round at most
+   0.6× the way through):
+   - **Walkway 1287 at the east end of a Health Education portable**, 4.3 m from
+     walkway 1284 under the portable's south wall. Peeled, a 9 m walk from the
+     portable's north wall to the path south of it was **166 m** round the
+     complex. Joined, it is **13 m**.
+   - **Walkways 1295 and 1296 meeting under the Science Success Center**, 3.8 m
+     apart. Peeled, the 12 m of 1295 that is visible between the Center and STEM
+     was stranded. Joined, it is back on the network.
+
+   They are joined the way *Junction* would join them: a weld within 2 m,
+   otherwise a connector, with the line it meets left where it is drawn. That
+   is two connectors and **8 m** of path the sheet does not draw, counted and
+   printed like *Junction*'s. It also costs 16 m more under roofs than peeling
+   both.
+
+   It runs twice: before *Tee* and *Junction*, so *Tee*, which has no detour
+   test and stops at no wall, never moves a stub end onto a line; and again
+   after them, when a passage can be judged against the whole graph. Network
+   under a roof goes **314 m → 143 m**, the deepest 13.1 m → 3.6 m, and no dead
+   end is more than 25 cm inside a wall where 35 were; every destination still
+   splices, or resolves to a door, and routes. The one passage cut is 39 m through the corner of the
+   Evangelisti Culinary Arts Center, with another walkway drawn just outside it
+   — a way round 1.9× as long, against 8× for the least-needed one kept. What
+   stays:
+   - 64 m of the 9.9 m driveway along the Gym. Its centreline is 0.86 m inside
+     the wall and most of its width is visible outside.
+   - 44 m of walkway 1287 threading five Health Education portables. Now that
+     its south end is joined, the way round is 9 to 32 times the way through
+     each roof.
+   - 10 m where 1295 and 1296 meet under the Science Success Center, the only
+     way to 1295.
+   - Two path corners clipped by a building, 9 m and 5 m.
+   - 11 m in six places, each under 0.9 m deep.
+5. **Tee.** The gap *Node*, *Weld* and *Collapse* leave. *Node* cuts where two
+   segments **cross**, so a stroke that *ends* on another never produces a cut — it does
    not cross it. *Weld* joins vertex to vertex, and there is no vertex halfway
    along a line. *Collapse* does project a node onto a segment, but only one
    running the same way, because it exists to merge duplicate corridors — which
    excludes the perpendicular T-junction exactly. So a footway drawn up to a
    walkway and stopping half a metre short was a junction on paper and nothing
    at all in the graph, and the map showed paths ending mid-car-park with a
-   round cap. 32 dead ends are teed onto the stroke they stop short of, at a
+   round cap. 46 dead ends are teed onto the stroke they stop short of, at a
    3 m one-path-width tolerance.
-5. **Junction.** Two lines that pass within a few metres and never join. It is a
+
+   **The dead end moves; the line it meets does not.** Teeing used to merge the
+   two at their midpoint, so every side path that stopped short dragged the
+   through-path half the gap towards itself — and the kink bent the edges either
+   side of it off their stroke too. It is the dead end that stopped short, so it
+   is the dead end that is wrong. One more rule keeps it honest: distance to a
+   segment clamps to its ends, so a dead end whose last drawn segment is shorter
+   than 3 m always "passes within 3 m" of the edges at its own neighbour. Where
+   that neighbour is a junction, the stub is an overshoot drawn past the path it
+   meets and is trimmed into it; where it is just the next vertex back along
+   the stroke, there is nothing to repair, and four strokes used to lose their
+   drawn ends that way.
+6. **Junction.** Two lines that pass within a few metres and never join. It is a
    junction on paper and nothing at all in the graph, and none of the four
-   stages above can see it: it is not a crossing, so *Node* cuts nothing; it
+   joining stages above can see it: it is not a crossing, so *Node* cuts nothing; it
    shares no vertex, so *Weld* has nothing to join; neither end is loose, so
    *Tee* skips it; it is not parallel, so *Collapse* excludes it. That shape
    turned an 11 m walk into 140 ft.
@@ -166,17 +281,30 @@ routing network stopped coming from it.
    **already makes you walk six times further around** than the ground distance.
    Paths that legitimately pass close without meeting — a ramp beside its stair,
    a way over a culvert — are left alone, because for them the walk-around is
-   already short. 12 are welded. It adds a node; it never adds a metre.
-6. **Link.** The one stage that is *not* the drawing. `src/path-links.json`
+   already short. 12 are joined (the count used to include a pair queued
+   from both ends and joined once; it no longer does).
+
+   **Neither drawn line is moved more than a weld.** This too used to be a
+   midpoint merge, and at up to 6 m apart that moved both lines by up to 3 m —
+   the whole stadium-side cluster sat about 2 m beside its own grey band for
+   290 m. Moving only the node is no better; it just puts the whole kink into
+   the node's own path. Neither line is wrong: they are two drawn paths that
+   were never snapped together. So a gap within 2 m (the weld distance, "the
+   same point") is snapped onto the line, and a wider one gets a short straight
+   **connector** and nothing moves. That is path the sheet does not draw, so it
+   is counted and printed beside the links: **9 connectors, 36 m**. Together
+   with the *Tee* change, network more than 1 m off the drawn strokes falls
+   from 1.0 km to 0.6 km and outside every drawn band from 238 m to 89 m.
+7. **Link.** The one stage that is *not* the drawing. `src/path-links.json`
    holds connectors added by hand where the sheet omits something plainly
    visible on the ground, each with a `why` naming what is there and what the
    sheet drew instead. It is a separate file, applied as its own stage, and its
-   count and metres print on every build — currently **11 links, 191 m out of
-   13.6 km (1.4%)**, so the invented share is never in doubt.
+   count and metres print on every build — currently **9 links, 151 m out of
+   13.6 km (1.1%)**, so the invented share is never in doubt.
 
-   Three of the eleven are **rescues**: connectors that bring a whole stranded
-   fragment into the largest component. They carry **571 m, 409 m and 120 m** of
-   my campus's own drawn linework — 1,100 m returned to the routable network for 46 m
+   Two of the nine are **rescues**: connectors that bring a whole stranded
+   fragment into the largest component. They carry **571 m and 409 m** of
+   my campus's own drawn linework — 980 m returned to the routable network for 25 m
    of connector. The largest is the entire perimeter footway around the south car
    park, which was stranded because the sheet never joins it to campus; it comes
    within **9.7 m** of the network at the head of the accessible bays, across
@@ -215,7 +343,17 @@ routing network stopped coming from it.
    zebra crossing over the road and stops at the kerb, but the crossing lands on
    a concrete pad that ramps down to the south footway. Without it, an 11 m walk
    across the road routed 804 ft round three sides of a rectangle.
-7. **Splice.** The router only accepts vertices, so every positioned
+
+   After the links, one fold. A long edge and a shorter one leaving the same
+   node within 20° of it, the short one ending within a metre of the long one,
+   are one corridor drawn twice, and the long edge is rerouted through the short
+   one's end, which does not move. The one case is the link across the plaza
+   between Fine & Applied Arts and the Kaneko Gallery, which ran over the drawn
+   stroke turning south out of the plaza: snapped onto the link, a walk south
+   went 10 m along it and came back down the stroke — "U-turn" 48 ft in. Five
+   folds leave 12 m of link between the drawn pieces at either end and take
+   17 m of doubled line out of the network.
+8. **Splice.** The router only accepts vertices, so every positioned
    destination gets a node at its closest point on the network — otherwise a
    path can run right past a building while its nearest *vertex* is fifty
    metres away, and the destination quietly resolves somewhere else.
@@ -232,11 +370,20 @@ turns, too: measured at 5 and 8 m the largest component starts *losing* nodes,
 and by 8 m total drawn length falls, because dead ends begin merging onto paths
 they merely pass near.
 
+*Junction*'s connectors are generated, so they need the same scrutiny, and they
+are not bridging either. They join exactly the pairs that stage always joined —
+two drawn lines within 6 m that the graph sends six times further round — and
+only change *how*: by adding a few metres instead of bending both drawn lines
+to meet. They are capped at 6 m each and their count and metres print on every
+build.
+
 #### The biggest thing still wrong
 
-**479 m of drawn path still never reaches the routable graph** — 26 strokes,
-measured by sampling each drawn walkway, driveway and crossing and asking
-whether anything in `paths.json` runs within 3 m of it. It was **1,694 m over 34
+**522 m of drawn path still never reaches the routable graph** — 27 strokes,
+measured by sampling each drawn walkway, driveway and crossing (not the zebra
+hatching across the road) and asking whether anything in `paths.json` runs
+within 3 m of it. 209 m of that is under a roof, where *Walls* takes it off on
+purpose; the other 313 m is in the open. It was **1,694 m over 34
 strokes**, including a 357 m driveway, a 204 m driveway and a 150 m walkway, all
 100% absent.
 
@@ -249,13 +396,16 @@ over 4 m is kept rather than dropped whole, and the count prints.
 
 The actual loss was **stranded fragments** — 1,324 m in 14 pieces that never
 join the largest component. Three of them account for 1,055 m and sit 9.7 m,
-15.7 m and 20.6 m from the network; those are now rescued through
-`path-links.json`. The seven that remain need **75 to 117 m** of invented path to
-reach, which is the automatic bridging step this pipeline refuses to have. The
-largest stroke still missing is 72 m.
+15.7 m and 20.6 m from the network. The first two are rescued through
+`path-links.json`; the third, the footway by the roundabout, was too until the
+build learned to read the sheet's turning circle — it now reaches the drawn ring
+through a 5 m junction connector, and its 20.6 m link is gone. What remains is
+ten short pieces, **170 m** in all, 8 to 29 m each and 12 to 94 m from the
+network: reaching them is invented path, which is the automatic bridging step
+this pipeline refuses to have. The largest stroke still missing whole is 49 m.
 
 The cost is still paid honestly: whatever the drawing leaves genuinely
-disconnected stays disconnected — 16 fragments over 86 nodes, down from 31 over
+disconnected stays disconnected — 10 fragments over 24 nodes, down from 31 over
 143 — and only the largest component ships.
 
 #### One projection, applied to everything
@@ -279,7 +429,7 @@ retrace the source; never nudge a single layer.
 my campus's sheet stops at the fence and so did the router: click a start point on the
 pavement outside and the nearest graph vertex was somewhere inside the campus,
 so the walk began in the wrong place. `scripts/build-approach-network.mjs` adds
-the streets you arrive by — **6,342 segments, 125 km** in an 800 m apron.
+the streets you arrive by — **6,350 segments, 125 km** in an 800 m apron.
 
 **It is not Google's paths, and it cannot be.** The Map Tiles API serves
 *pictures* of roads; there is no graph in a raster tile and nothing in the
@@ -296,7 +446,24 @@ ground is already drawing these streets, and putting ours on top of theirs is
 exactly the doubled linework the campus edge used to show. The only thing you
 see from it is the route ribbon lying along it.
 
-Five stages, each printed on every build:
+Five stages, each printed on every build. **By default only the last two run.**
+`node scripts/build-approach-network.mjs` reads the streets out of the committed
+`src/approach-paths.json`, puts back the splits its last gates made in them, and
+gates and prunes again against the current `src/paths.json` — no network, the
+same bytes every time, and safe to run after every `build-walk-network.mjs`.
+`--fetch` runs all five from live Overpass, and its diff is OSM's edits since the
+last fetch, to be read as such. The default exists because fetching on every run
+once turned a re-weld of two gates into 4.8 km of unreviewed OSM changes, one of
+them a parking aisle that pulled the Admin bus stop off the campus and made fifty
+walks from it up to 4.5 times longer. `--streets <file>` re-gates the streets of
+another copy of the file — `git show <rev>:src/approach-paths.json` — and is how
+the committed file was rebuilt from the last reviewed fetch when the campus
+network changed under it:
+
+```sh
+git show <rev>:src/approach-paths.json > /tmp/streets.json
+node scripts/build-approach-network.mjs --streets /tmp/streets.json
+```
 
 1. **Fetch** every OSM way in the apron a person on foot may legally use —
    selected by exclusion, because listing what to *keep* silently drops a footway
@@ -310,9 +477,17 @@ Five stages, each printed on every build:
    exactly, so this guards rounding rather than inventing junctions — and ways
    that merely *cross* are left crossing, because in OSM that means a bridge.
 4. **Gate** — join the two networks where my campus's linework already reaches the
-   street. **15 connectors, 38 m in total.** Ten of them are under 2 m and are
-   the same ground drawn twice; the other five are listed individually with their
-   length, and each is the only way in within 250 m.
+   street. **22 connectors, 56 m in total.** Thirteen of them are under 2 m and are
+   the same ground drawn twice; four are listed individually with their length,
+   and each is the only way in within 250 m. The last five are where a street's
+   end lies *along* a campus edge rather than at its end: the connector ran back
+   along the edge to the vertex it was drawn from, so a walk from the edge's
+   other end went past the street and came back — a spike in the line and
+   "U-turn" in the directions, at both the west gate and the east one. The
+   campus edge cannot be split from here, so the street end is joined to its
+   other end too. A connector whose foot lands mid-segment splits the street
+   there, and those splits are the only change a default rebuild can make to a
+   street.
 5. **Prune** to the component the campus is in, seeded from the campus rather
    than from the largest piece — what has to ship is what a walker standing on
    my campus can actually reach.
@@ -333,7 +508,83 @@ The server unions the two collections into one `PathFinder` —
 merge, and the gate connectors end on my campus's vertices at exactly the seven
 decimals those vertices are written at. `/api/network` still serves my campus's paths
 alone, for drawing; `/api/vertices` serves every vertex in the merged graph, for
-snapping.
+the browser's own snapping.
+
+The server does not snap to a vertex. The build collapses a stroke traced as a
+run of near-collinear points into the single straight edge it is, so some edges
+are now over a hundred metres long with nothing in the middle, and a point beside
+the middle of one used to begin its walk at whichever end was nearer — fifty
+metres up the path and back. A coordinate now joins the network at the **nearest
+point on the nearest edge** (or at the edge's end, within the 2 m weld the build
+splices with), and the search starts from both ends of that edge with the part
+of it walked to each counted. A point well off the network — a room in the middle
+of a building — is also offered any edge about as far as the nearest (within a
+quarter again, at most 5 m further), with the extra metres counted against it,
+so it leaves by the side that faces where it is going rather than by whichever
+was a metre nearer. A point on **open ground**, 4 m or more from any path, is
+offered more: the nearest way on in each of eight directions, out to five times
+the nearest and no more than 40 m further, unless its straight leg would cross
+a building. The car parks are the case — their aisles are clipped away, and a
+permit machine 10 m from the walk down one side of the north lot is 46 m from
+the walk at the other, the way to everything west of it: the Science Success
+Center went from 272 m back to 98 m. Inside a building with drawn doors, a room
+is offered **every door** of it, nearest first, and every other way into its
+building within 40 m further than the nearest door that its straight leg reaches
+without crossing another one, each leg through the building counted, and leaves
+by the one that suits where it is going. Without that bound the telephones in
+the Parking Garage, 7.7 m from a door, began a walk with a 132 m dotted line
+across the deck. On the campus, a walk that comes out a **detour** — more than
+twice the straight line, legs and all — is searched again with every way on
+within 60 m further than the nearest, from open ground and out of a room, and
+the shorter answer stands: a point on a lawn 7.2 m from a path that leads the
+long way round walked 336 m to a point 123 m off, and crosses the grass to the
+path that does not in 157 m. Widening the reach for every walk would have
+changed 7,118 of 37,220 test walks, nearly tripled the dotted legs over 60 m, and
+saved 1.3% of the walking. And a point whose nearest edge is a **street** is offered the
+campus's nearest edge as well: always, when the point is inside the campus
+boundary (the north car parks, whose aisles the clip removes, are nearer the road
+outside than any campus path), and within 25 m when it stands between the street
+and the campus (the Admin bus stop, 4.7 m from the street's centreline and 16.7 m
+from the campus walk). The streets join the campus only at gates, hundreds of
+metres apart by design, so without this a walk from the kerb went up the street
+to the next gate and back. Across the road, with the street between you and the
+campus, the walk still leaves along the street.
+
+A **building** is asked for by its entrance, and the entrance is one of its
+ways in. `src/directory.json` lists every drawn door of the footprint a card
+stands on, then every point where the building's walls come nearest the
+network, and the router takes any of them as the end of a walk to the building
+(or the start of one from it), answering which it used as `door`; the browser
+moves the pin there. With the entrance as the only end, walks to the Parking
+Garage (five doors) came in 71 m longer on average than the old nearest-vertex
+router's, and walks to Fine & Applied Arts (four) 70 m; the box office beside
+Fine & Applied Arts' south-west door was 238 m from it. With the drawn doors as
+the only ends, the old router's end — the node nearest a wall — was lost
+wherever the sheet draws a path into another side: a walk from restroom #51 to
+the Library went from 92 m to 171 m, and one from the Science Success Center
+to Science & Engineering from 59 m to 170 m. Anywhere
+inside a building's footprint and the building itself are the **same place**,
+and are refused as one, like two taps on one vertex: there is always a pairing of
+doors that walks somewhere — out of one and round to the next — and it is not a
+walk anybody standing in the building wants. It used to be only a room that
+resolved to the building's doors, and 65 of the 87 places inside a building were
+walked to it, the Library to the Library in 10 m.
+
+The search is our own Dijkstra over the graph the library builds, from every
+way on at once, and again from each alone only when the joint search had to
+pass over a pairing: one that walks less than the 2 m weld, or whose way on and
+way off are the same place, so that all it could draw is a spur out and back —
+two points on a lawn whose cheapest ways across the grass met at one spot on a
+path came back as an 8 m walk along it and back again. And where the walk that
+is left costs more than twice that passed-over pairing, the two ends are the
+same place as far as the paths go, and are refused as one: two restrooms in the
+Student Center 2.7 m apart were a 124 m walk out of one door and in at another,
+and the Student Technology Center, whose way across the grass lands on the STEM
+Center's entrance, was walked 60 m round to it. About 0.4 ms between two
+places, 0.6 ms for an arbitrary point on the campus and 0.9 ms from the streets
+around it; about 2 ms at the 99th percentile, and 2.3 to 3.5 ms for the slowest
+route of a thousand. The second search a detour earns adds a few percent to that
+on average and about a quarter at the 99th percentile.
 
 ### The routing flow (`src/main.js`)
 
@@ -343,16 +594,25 @@ snapping.
   one source, a white core inside a wider grey casing — so the routing grid and
   the pavement my campus drew underneath it read as one thing rather than an overlay,
   and clipped at the boundary so it never lands on a road the basemap is already
-  drawing. `/api/vertices` is every vertex in the *merged* graph, campus and
-  approach streets alike, as bare coordinate pairs; that is what clicks snap to.
-- **On click**, `turf.nearestPoint` snaps the click to the closest vertex — which
-  is why a start point on the pavement outside now stays outside instead of
-  being dragged onto the campus. The first click becomes the start marker, the
-  second the end marker — both drawn as Google's pin (`googlePin` in
-  `src/map-images.js`), green for the origin and red for the destination,
-  anchored at the tip rather than the centre.
-- **Routing** posts both ends to `/api/route`, where one `PathFinder` over the
-  merged graph answers with the path, the distance and the turn-by-turn. The
+  drawing (a perimeter walkway that strays over the line and comes back is kept
+  whole — see *Where our map stops*). `/api/vertices` is every vertex in the
+  *merged* graph, campus and approach streets alike, as bare coordinate pairs;
+  that is what a start is checked against for reach before any request.
+- **On press-and-hold**, a pin drops where the finger was. It used to be moved
+  to the nearest vertex first, and since the build collapsed straight runs into
+  single long edges that vertex is a median 6 m and up to 68 m from where the
+  server joins the network — and a vertex snaps to itself, so a pin dropped in a
+  room never reached its building's doors. The press itself is sent, and the
+  dotted leg runs from the line to the pin. Start and destination are drawn as
+  Google's pin (`googlePin` in `src/map-images.js`), green for the origin and red
+  for the destination, anchored at the tip rather than the centre.
+- **Routing** posts both ends to `/api/route`, where the router joins each to the
+  network at the nearest point on it (above) and answers with the path, the
+  distance and the turn-by-turn; the line begins and ends at those points, which
+  it reports as `snapped`. A start from your location is sent as the fix itself,
+  not the vertex the browser checked its reach against. Where an end is a
+  building, `door` says which of its doors the walk used, and the pin moves
+  there. The
   geometry feeds a `calculated-route` source (Google's navigation blue,
   `#4285f4`, over a darker blue casing). Three non-answers, and they are
   distinguished: **404** means both ends are on the graph and nothing joins
@@ -528,7 +788,26 @@ what the seam at the campus edge was made of:
 `trimToCampus` handles both shapes. A **LineString is cut** at the boundary and
 its inside parts kept — dropping it would be wrong, because a driveway that runs
 out to the street has to stop at the gate, not vanish from the last junction
-inside it. **Anything else is dropped only when it lies wholly outside**;
+inside it. Only a line that runs *out* is cut, though: the boundary is
+OpenStreetMap's tracing of the property line, not my campus's, and in the
+south-east corner and along the east edge the sheet's own perimeter walkway
+strays up to 15 m across it and comes back. Cut exactly at the ring, that was a
+123 m hole between two dead-end stubs and an east walkway in four pieces, with
+lamps glowing over lawn where no path was drawn. So a stretch outside that
+returns to the campus, stays within `EXCURSION_M` (20 m) of the ring, and runs
+further along the ring than it goes out from it, is kept; a dead-end tail
+running out to the street is still cut at the fence. The last condition is for
+the College Oak Dr gate, where a walkway and a hand link cross the fence 0.4 m
+apart and meet 3 m outside on their way to the street: out and back by count,
+but a V onto the provider's sidewalk, not a stray. The
+rule works on the whole network rather than line by line, because `paths.json`
+stores one edge per feature and the south-east stray is three of them, the middle
+one wholly outside. A **crossing** stroke is a painted mark rather than a line
+that goes somewhere, so it is kept or dropped whole by which side its middle is
+on — sliced at the ring, the ones at the gates were 0.3–8 m slivers. The
+**lamps** are trimmed against the network that survives (`trimPointsAlong`), so
+they leave with a cut stub and stay on a kept stray.
+**Anything else is dropped only when it lies wholly outside**;
 clipping a polygon to a fifty-vertex ring is a much larger problem, and what it
 would buy is a metre of overhang on the elements that straddle the line. Wholly
 rather than mostly for a second reason too: the crossings at my campus's entrances are
@@ -685,7 +964,8 @@ it in slate. Three consequences worth naming:
 
 #### The last few metres
 
-A route runs between **graph vertices**, and neither end of a journey is one.
+A route runs between the points where the walk **joins and leaves the network**,
+and neither end of a journey is one.
 my campus binds its destinations to their own node ids, which sit a metre or two off
 ours because this network is traced from the printed sheet rather than taken
 from their graph; an amenity is wherever its pictogram is, which for half of
@@ -1023,7 +1303,7 @@ Three kinds of shape can light up, searched in this order:
 1. **Named buildings**, from `directory.json`. my campus draws the Health Education
    Complex as nine footprints; outlining one ninth of it because that is the
    shard the defibrillator landed in would be worse than outlining nothing.
-2. **The 38 footprints the directory did not claim** — the ones with no name to
+2. **The 24 footprints the directory did not claim** — the ones with no name to
    group by. Worth including for exactly what it buys: one of the six
    defibrillators, two bike shelters and four motorcycle bays are inside an
    unnamed building, and without these each would report as standing outdoors.
@@ -1059,11 +1339,23 @@ reads as two different strengths of answer.
 
 Two things that had to be got right, and were not at first:
 
-- The outline layers sit **above the printed sheet and below the road ribbon**.
-  The sheet arrives from the server, so on a cold load the highlight layers are
-  already standing when it lands; anchoring both to the network alone put the
-  later arrival on top and my campus's opaque building fills painted out every outline
-  the legend drew.
+- The outline layers sit **above the printed sheet's buildings and below the
+  route**. The sheet arrives from the server, so on a cold load the highlight
+  layers are already standing when it lands; anchoring both to the network
+  alone put the later arrival on top and my campus's opaque building fills
+  painted out every outline the legend drew. Every campus layer now takes its
+  place from one bottom-to-top list, `CAMPUS_STACK` in `src/layer-order.js` —
+  the sheet's ground, its canopy, the lamps and the path ribbon, the sheet's
+  buildings, the outlines, the route, with the extruded buildings of a walk
+  threaded between the dotted legs and the route line — so the order holds
+  whichever of them lands first. The ribbon sits *under* the buildings: the printed map runs
+  some of its walkways beneath roofs and lets the buildings paint them out, and
+  the network traced from those walkways used to be drawn over the top,
+  walking through walls. Over imagery there is no sheet and so no buildings
+  to sit under, and there the stretches under a sheet footprint — the passages
+  the walk network keeps indoors — are left out of the drawing instead
+  (`markRoofed` in `src/route-layers.js`). Only the drawing: the graph keeps
+  them, and a route through one is drawn over the roof on every ground.
 - The sheet **moved into the floating column**. It used to float beside it, 280
   px of card sitting over the middle of the campus, which was harmless while it
   was only a key and became the whole problem once its rows started outlining
@@ -1205,7 +1497,8 @@ beavermaps/
 │   ├── buildings-lighting.js # Footprints standing up, and the light on them
 │   ├── marker-layers.js    # Amenity pins, lamps, and a category's own pins
 │   ├── label-layers.js     # The printed names, and the layer buildings are tapped on
-│   ├── route-layers.js     # The ribbon, the linework, and what goes under what
+│   ├── route-layers.js     # The ribbon, the linework, and the mask
+│   ├── layer-order.js      # What goes under what: the whole campus stack, as a list
 │   ├── sun-lights.js       # The sun over the campus, as Mapbox states a light
 │   ├── lit-palette.js      # The palette moved to the time of day, and its timer
 │   ├── ground.js           # Who draws the ground, and what to say when they refuse
@@ -1236,6 +1529,7 @@ beavermaps/
 │   ├── setup-problem.js    # What to say when the app cannot start at all
 │   ├── paths.json          # The walkable network (GeoJSON LineStrings)
 │   ├── approach-paths.json # The streets around campus — routed over, never drawn
+│   ├── doors.json          # Where each building's drawn approach paths met its walls
 │   ├── campus-clip.js      # Where our map stops and the basemap's takes over
 │   ├── buildings.json      # Footprints, extruded during navigation
 │   ├── landcover.json      # Lawn, trees, paving, parking, track, pool (superseded)
@@ -1272,18 +1566,24 @@ close to empty. The extraction lives in `scripts/`:
 | script | output |
 |---|---|
 | `build-basemap.mjs` | `basemap.json` — the whole printed sheet, 2,284 features |
-| `build-walk-network.mjs` | `paths.json` — 725 nodes, 803 segments; the drawn paths, deduplicated, teed, welded, linked |
-| `build-approach-network.mjs` | `approach-paths.json` — 6,342 segments of OSM street in an 800 m apron, joined to my campus's network by 15 gates |
-| `build-buildings.mjs` | `buildings.json` — 96 footprints, 58 of them named |
+| `build-walk-network.mjs` | `paths.json` — 1,177 nodes, 1,262 segments; the drawn paths, deduplicated, cut at building walls, teed, welded, linked, with a node at every destination and wherever a building's walls come nearest. Also `doors.json` — the 36 doors those walls left on 16 footprints |
+| `build-approach-network.mjs` | `approach-paths.json` — 6,350 segments of OSM street in an 800 m apron, joined to my campus's network by 22 gate connectors; re-gates the committed streets by default, `--fetch` for live Overpass |
+| `build-buildings.mjs` | `buildings.json` — 96 footprints, 71 of them named |
 | `build-labels.mjs` | `labels.json` — 49 labels: the PDF's text, plus building names |
 | `build-amenities.mjs` | `amenities.json` — 84 amenity points in 12 classes |
 | `build-places.mjs` | `places.json` — my campus's 120 destinations, positioned |
-| `build-directory.mjs` | `directory.json` — 30 buildings and what is inside them |
+| `build-directory.mjs` | `directory.json` — 33 buildings and what is inside them, and where each one's Directions go in |
 | `build-landcover.mjs` | `landcover.json` — 593 ground polygons, superseded (not served) |
 | `build-boundary.mjs` | `campus-boundary.json` — the OSM campus polygon |
 | `projection.mjs` | the SVG→WGS84 transform every other script uses |
 | `svg-geometry.mjs` | shared SVG path/transform parsing |
 | `building-names.mjs` | grouping, tidying and label anchoring, shared |
+
+Where one reads another's output the order matters: `build-buildings` →
+`build-labels` → `build-walk-network` (which names the buildings from both, to
+put a node where each one's walls come nearest the network) → `build-directory`
+→ `build-lamps` (`node scripts/build-lamps.mjs > src/lamps.json`, from the
+network) → `build-approach-network` (which gates the streets onto it).
 
 `build-basemap.mjs` is the one that reads the drawing whole. The scripts above it
 each take one class of thing off the same sheet, and between them they keep 24%
@@ -1305,21 +1605,22 @@ a centroid is not: my campus has L-shaped buildings whose centroid falls on the 
 outside. That radius also measures how much room the building has for type, and
 sets the label's size and wrap width.
 
-Thirty-eight footprints stay unlabelled because no source names them — they are
+Twenty-four footprints stay unlabelled because no source names them — they are
 grandstands, annexes and service buildings. Naming them from the nearest entry in
 `places.json` was tried and rejected: it labels an 839 m² building
 *"Defibrillator"* and gives six separate portables the same name.
 
 Tapping a building opens its card instead of dropping a pin. `directory.json`
 joins the three files that were never joined — footprints, printed labels, and
-my campus's 145 positioned destinations, 75 of which fall inside a footprint — so the
+my campus's 145 positioned destinations, 89 of which fall inside a footprint — so the
 Welcome and Support Center can say it holds the Transfer Center, TRIO, DSPS and
 five more. Amenities are counted separately from destinations: listing them
 together made the Gym's directory read *"Defibrillator, Drink Vending Machine,
 Drink Vending Machine"*, three entries and nowhere to go. The card's **Go here**
-routes to the network node nearest the building's walls rather than to wherever
-the tap landed, and `build-directory.mjs` reads only committed artifacts, so
-unlike its siblings it runs from a bare clone.
+routes to the building's entrance rather than to wherever the tap landed — a
+drawn door, or where the walls come nearest the network — and may end at any of
+its other ways in (see *Walls* above), and `build-directory.mjs` reads only
+committed artifacts, so unlike its siblings it runs from a bare clone.
 
 `buildings.json` is still separate: it carries heights, and the 3D extrusion
 during navigation needs them. `landcover.json` is kept as a file — it is the
@@ -1365,7 +1666,7 @@ The suite runs against the committed artifacts rather than the generators, so it
 works from a bare clone. It is aimed at the failures that do not announce
 themselves:
 
-- **the router refuses what it cannot answer.** `nearestPoint` has no notion of
+- **the router refuses what it cannot answer.** Snapping has no notion of
   "too far", so a request from Paris used to come back `200` with a real 7,520 ft
   walk starting in Sacramento. `REACH_M` was written down and enforced in the
   browser only, which is to say enforced for our own front-end and nothing else
@@ -1395,8 +1696,10 @@ themselves:
 - **the letterform mask**, checked where it acts — on the layers that carry text
   — rather than by counting small shapes, because the sheet is full of
   legitimately small things.
-- **every building's entrance is a real graph node** and its card anchor lies
-  inside its own walls — the two things a pole of inaccessibility exists for.
+- **every building's entrance is a real graph node**, at a door where the
+  footprint its card stands on has one; its ways in include where its walls
+  come nearest the network; and its card anchor lies inside its own walls —
+  the two things a pole of inaccessibility exists for.
 - **the pin animation's two size sources**, which are read once as a Mapbox
   expression and once in JS and have to agree at every zoom — they disagree
   quietly, as a pin that jumps the instant it is tapped and then animates

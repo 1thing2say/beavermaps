@@ -103,7 +103,8 @@ export function createRoute() {
     /**
      * The last few metres at each end, which are not on the network.
      *
-     * A route runs between GRAPH VERTICES, and neither end of a journey is one.
+     * A route runs between the points where the walk JOINS AND LEAVES THE
+     * NETWORK, and neither end of a journey is one.
      * my campus binds its destinations to their own node ids, which sit a metre
      * or two off ours because this network is traced from the printed sheet
      * rather than taken from their graph; an amenity is wherever its pictogram
