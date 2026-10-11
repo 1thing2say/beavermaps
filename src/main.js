@@ -1348,8 +1348,14 @@ function startApp() {
       // has to finish inside one tick. At a second apiece every fix would
       // interrupt the last and the dot would slide along a route the camera
       // never catches up with.
-      nav.moved([e.coords.longitude, e.coords.latitude],
-        { duration: nav.isSimulating() ? SIM_TICK_MS : 1000 });
+      //
+      // The fix's own accuracy goes with it: navigation will not let a fix
+      // vaguer than the gap between two walkways move you along the route.
+      // See `track` in src/navigation.js.
+      nav.moved([e.coords.longitude, e.coords.latitude], {
+        duration: nav.isSimulating() ? SIM_TICK_MS : 1000,
+        accuracy: e.coords.accuracy,
+      });
     });
 
     // What `locating` is kept in step with — see startLocating for why guessing
