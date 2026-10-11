@@ -186,6 +186,37 @@ test('a coordinate of the wrong shape is a 400, never a 500', async () => {
   }
 });
 
+test('a body that is not JSON is a 400 that says so, not the parser\'s own words', async () => {
+  // body-parser's message is the JSON parser's — "Unexpected end of JSON
+  // input", or a token and a position — and it reached the response verbatim.
+  const base = await start();
+  for (const body of ['{"from": [-121.3, 38.6], "to":', 'not json', '{"from": }', '{']) {
+    const res = await postRoute(base, body);
+    assert.equal(res.status, 400, `${JSON.stringify(body)} gave ${res.status}`);
+    assert.match(res.headers['content-type'], /application\/json/);
+    assert.deepEqual(JSON.parse(res.body), { error: 'request body is not valid JSON' });
+  }
+});
+
+test('a body over the limit says so in a fixed sentence too', async () => {
+  const base = await start();
+  const res = await postRoute(base, JSON.stringify({ from: A, to: B, pad: 'x'.repeat(8_000) }));
+  assert.equal(res.status, 413);
+  assert.deepEqual(JSON.parse(res.body), { error: 'request body is too large' });
+});
+
+test('the rate limit\'s message is written for the visitor who will read it', async () => {
+  // src/api.js shows a 429's `error` to the visitor word for word.
+  const base = await start({ takeRoute: createRateLimit({ max: 1 }) });
+  await postRoute(base, { from: A, to: B });
+  const res = await postRoute(base, { from: A, to: B });
+  assert.equal(res.status, 429);
+  const { error } = JSON.parse(res.body);
+  assert.match(error, /^[A-Z]/, 'starts like a sentence');
+  assert.match(error, /try again/i, 'says what to do');
+  assert.doesNotMatch(error, /\b(route request|429|rate|quota|api)\b/i, `jargon in "${error}"`);
+});
+
 test('the query string is held to the same rules', async () => {
   const base = await start();
   for (const from of [',', 'a,b', '1,2,3', '', '-121.3&from=38.6&from=1']) {

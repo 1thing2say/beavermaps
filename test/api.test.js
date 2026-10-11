@@ -100,7 +100,7 @@ test('429 is a refusal in the server\'s words, not an outage', async () => {
   // It used to throw with the rest, and the caller turned every throw into
   // "routing server unreachable" — so our own rate limit told people the
   // server was down. The server is up; it is asking them to wait.
-  const said = 'too many route requests — try again shortly';
+  const said = 'Too many directions requests — try again in a moment.';
   const { request } = fakeFetch(jsonResponse(429, { error: said }));
   assert.deepEqual(await createApi({ request }).route([0, 0], [1, 1]), { refused: said });
 });

@@ -10,6 +10,7 @@
 // graph and a scratch dist/ in a few milliseconds.
 
 import path from 'node:path';
+import { STATUS_CODES } from 'node:http';
 import express from 'express';
 import { createRateLimit, clientKey } from './limit.js';
 import { sendWire, compressedStatic } from './wire.js';
@@ -138,7 +139,9 @@ export function createApp({
     res.set('RateLimit-Remaining', String(quota.remaining));
     if (!quota.allowed) {
       res.set('Retry-After', String(quota.retryAfterSeconds));
-      return res.status(429).json({ error: 'too many route requests — try again shortly' });
+      // Shown to the visitor word for word (src/api.js), so it is written for
+      // them: no "route requests", no status code, and what to do about it.
+      return res.status(429).json({ error: 'Too many directions requests — try again in a moment.' });
     }
 
     const source = req.method === 'POST' ? req.body : req.query;
@@ -237,19 +240,36 @@ export function createApp({
    * in practice, and `err.status` is already 400 by the time body-parser is done
    * with it.
    *
+   * A body-parser error's own message is not passed on. For a malformed body
+   * it is the JSON parser's — "Unexpected end of JSON input", "Unexpected token
+   * } in JSON at position 12" — which describes the parser rather than the
+   * request, and changes wording with the Node version. body-parser marks its
+   * errors with a `type`, and each of those gets a fixed sentence instead;
+   * one not listed here gets the status's own name.
+   *
    * Four parameters, because that arity is how Express recognises an error
    * handler. `next` is unused and cannot be dropped.
    */
   app.use((err, _req, res, _next) => {
     const status = Number.isInteger(err?.status) ? err.status : 500;
     if (status >= 500) console.error(err);
-    res.status(status).json({
-      error: status >= 500 ? 'internal error' : (err.message ?? 'bad request'),
-    });
+    let error = 'internal error';
+    if (status < 500 && typeof err.type === 'string') {
+      error = BODY_ERRORS[err.type] ?? STATUS_CODES[status]?.toLowerCase() ?? 'bad request';
+    } else if (status < 500) {
+      error = err.message ?? 'bad request';
+    }
+    res.status(status).json({ error });
   });
 
   return app;
 }
+
+/** What the error handler says for body-parser's errors, by their `type`. */
+const BODY_ERRORS = {
+  'entity.parse.failed': 'request body is not valid JSON',
+  'entity.too.large': 'request body is too large',
+};
 
 /** A year, and a promise never to ask again. Only a content-hashed name earns it. */
 const IMMUTABLE = 'public, max-age=31536000, immutable';
