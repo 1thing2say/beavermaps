@@ -230,11 +230,14 @@ export function createBuildingsLighting({
     // The campus is emissive and cannot be relit; it has to be repainted. See
     // `paintedFor`. Read here rather than at the point of use because the lights
     // below need the same answer.
+    //
+    // Recorded only once the repaint has actually happened. Written first, a
+    // repaint that found no style to draw on still marked the preset done, and
+    // the daylight timer — which calls back here with the same preset until the
+    // sun crosses the next threshold — saw nothing left to do, so the city went
+    // to dusk while the campus stayed painted for day until the preset after.
     const wanted = active && active.preset !== 'auto' ? active.preset : clockPreset();
-    if (wanted !== paintedFor) {
-      paintedFor = wanted;
-      repaintCampus();
-    }
+    if (wanted !== paintedFor && repaintCampus() !== false) paintedFor = wanted;
 
     // NOT A RETURN, and it used to be one — `if (colors.lightPreset === null)
     // return;` stood here, and it is the whole reason "Stand the buildings up"

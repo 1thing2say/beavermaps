@@ -31,6 +31,7 @@ import { CAMPUS_BOUNDS } from './campus-bounds.js';
  * @param {Function} deps.appliedStyleKey()     what is currently on the map
  * @param {Function} deps.setAppliedStyleKey
  * @param {Function} deps.setStyleBuilt
+ * @param {Function} deps.isStyleBuilt()   whether there is a style to restyle
  * @param {Function} deps.litPalette
  * @param {Function} deps.setStatus
  * @param {Function} deps.setNotice  for a refusal the app recovered from
@@ -49,6 +50,7 @@ export function createGround({
   appliedStyleKey,
   setAppliedStyleKey,
   setStyleBuilt,
+  isStyleBuilt,
   litPalette,
   setStatus,
   setNotice,
@@ -91,8 +93,9 @@ export function createGround({
 
   // Mapbox Standard hides its layers behind a style package, so when something
   // looks wrong the only way to ask what the map actually built is from the
-  // console. Dev builds only — Vite strips this branch from production.
-  if (import.meta.env.DEV) {
+  // console. Dev builds only — Vite strips this branch from production. The
+  // optional chain is for node --test, which has no `import.meta.env` at all.
+  if (import.meta.env?.DEV) {
     window.map = map;
     // Mapbox reports bad layer specs through this event rather than by throwing,
     // and the message is the only thing that says *which* property it rejected.
@@ -194,6 +197,25 @@ export function createGround({
     }
   }
 
+  /**
+   * Whether a rebuild is running right now.
+   *
+   * A rebuild ends in applyLighting, and applyLighting repaints the campus for
+   * a new light preset by calling back into `sync` — so without this the first
+   * style.load built every layer twice, and so did every preset change that
+   * landed inside a sync. The rebuild already running reads the same palette
+   * the nested one would, so the nested one has nothing to add.
+   */
+  let rebuilding = false;
+  function rebuildOnce() {
+    rebuilding = true;
+    try {
+      rebuild();
+    } finally {
+      rebuilding = false;
+    }
+  }
+
   // Fires on first load *and* after every setStyle, which is exactly when the
   // custom layers need rebuilding.
   map.on('style.load', () => {
@@ -207,7 +229,7 @@ export function createGround({
     // them wholesale — and satellite's are not the map style's.
     captureStyleLights(structuredClone(map.getLights() ?? null));
     setStyleBuilt(true);
-    rebuild();
+    rebuildOnce();
     addGoogleGround();
   });
 
@@ -216,8 +238,13 @@ export function createGround({
    * different one. All three toggles route through here: on satellite the theme
    * no longer changes the Mapbox map, so this becomes a no-op and only the page
    * chrome restyles.
+   *
+   * Answers whether the map now shows the current look — false only when there
+   * was no style yet to restyle, so a caller keeping track of what it last
+   * painted (applyLighting's `paintedFor`) knows to ask again.
    */
   function syncBasemapStyle() {
+    if (rebuilding) return true;
     const nextKey = styleKey(provider(), basemap(), theme(), skin());
 
     if (nextKey !== appliedStyleKey()) {
@@ -231,13 +258,21 @@ export function createGround({
       // drop custom layers without firing style.load, leaving a bare basemap.
       // style.load re-adds our layers and re-requests the ground.
       map.setStyle(litPalette().style, { diff: false });
-      return;
+      return true;
     }
 
     // Both toggles call this once on startup to publish their initial state,
     // and that can land before the first style has loaded. There is nothing to
     // restyle yet and every builder below would throw; style.load runs them.
-    if (!map.isStyleLoaded()) return;
+    //
+    // NOT map.isStyleLoaded(), for the reason given at addGoogleGround: that
+    // reports the style IDLE, and it is false whenever a tile, an image or a
+    // pending setData is in flight — any pan, any zoom, every GPS fix during a
+    // walk. Under Mapbox light and dark share one style key, so this is the only
+    // path a theme change or a daylight repaint has, and gating it on idleness
+    // dropped them silently: the chrome turned dark over a map still painted
+    // light, or Standard's city went to night beside a campus painted for day.
+    if (!isStyleBuilt()) return false;
 
     // Same style, different look: light and dark are one Standard style under
     // two light presets. Re-running the builders applies the new palette to
@@ -249,8 +284,9 @@ export function createGround({
     // the hover had written, and a `hoveredPin` still naming the pin underneath
     // would make the next mousemove over it a no-op.
     clearHover();
-    rebuild();
+    rebuildOnce();
     if (map.getLayer('campus-buildings')) standBuildings();
+    return true;
   }
   return { addGoogle: addGoogleGround, sync: syncBasemapStyle };
 }

@@ -935,6 +935,7 @@ function startApp() {
     appliedStyleKey: () => appliedStyleKey,
     setAppliedStyleKey: (key) => { appliedStyleKey = key; },
     setStyleBuilt: (on) => { styleBuilt = on; },
+    isStyleBuilt: () => styleBuilt,
     litPalette,
     setStatus: (sentence, isError) => setStatus(sentence, isError),
     setNotice: (sentence) => setNotice(sentence),
