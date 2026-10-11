@@ -327,6 +327,23 @@ test('two nearby rooms are walked between, not declared the same place', () => {
   assert.ok(total < 60, `${total.toFixed(0)} m between two rooms 27 m apart`);
 });
 
+test('a walk whose every nearest pairing is passed over does not search the whole graph', () => {
+  // Two rooms 13 m apart in Fine and Applied Arts, each offered the same six
+  // doors. The joint search reaches every door first by a pairing of one door
+  // with itself, passes each over, and so never has a best walk to bound it:
+  // it settled all 7,094 vertices, streets and all, before the search from
+  // each door alone found the walk in 130. Any client could ask for such a
+  // pair and make a request fifty times dearer. A search now stops once it
+  // has settled every way off, since nothing further out pairs with one.
+  const A = [-121.3497585, 38.6523809];
+  const B = [-121.34964205396176, 38.652304032325745];
+  const result = graph.route(A, B);
+  assert.ok(result.ok, `refused: ${result.error}`);
+  // The walk the unbounded search found; stopping early changes no answer.
+  assert.equal(result.distanceFeet, 67);
+  assert.ok(graph.settled < 1000, `settled ${graph.settled} vertices for two rooms 13 m apart`);
+});
+
 test('a point on the network is never moved off it to a path beside it', () => {
   // The alternatives are for points well off the network, where which side is
   // nearest is a matter of a metre. A building's entrance is a node; walking

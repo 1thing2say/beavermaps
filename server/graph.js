@@ -740,6 +740,9 @@ export function createGraph({
     return { doors: [best.near, ...[...rest.values()].sort((x, y) => away(x) - away(y))], bounded };
   }
 
+  // Vertices settled by the current route()'s searches; see `settled` below.
+  let settled = 0;
+
   /**
    * The cheapest walk from any of `starts` to any of `ends` that costs less
    * than `limit` km, or `found: false` if there is none; and either way
@@ -861,6 +864,13 @@ export function createGraph({
       const prev = new Map();
       const origin = new Map();
       const queue = createHeap();
+      // Ways off not yet settled. Pairings happen only at them, so once the
+      // last is settled nothing further out can change `best` or `across`.
+      // Without it a search whose every pairing is passed over — two rooms of
+      // one building, offered the same doors — has no best to bound it, and
+      // settled all 7,000 vertices of the graph, streets and all, before the
+      // per-way-on searches found the walk in 130.
+      let unsettled = exits.size;
       for (const i of from) {
         const leg = offNetwork(starts[i]);
         if (leg >= bound()) continue;
@@ -875,6 +885,8 @@ export function createGraph({
         const [c, key] = queue.pop();
         if (c > cost.get(key)) continue;
         if (c >= bound()) break;
+        settled += 1;
+        if (exits.has(key)) unsettled -= 1;
         const i = origin.get(key);
         for (const { j, km } of exits.get(key) ?? []) {
           const walked = c - offNetwork(starts[i]) + km;
@@ -889,6 +901,7 @@ export function createGraph({
           for (let k = key; k !== undefined; k = prev.get(k)) keys.push(k);
           best = { total, km: walked, i, j, keys: keys.reverse() };
         }
+        if (unsettled === 0) break;
         for (const [next, w] of Object.entries(adjacency[key])) {
           if (w === Infinity) continue;
           const nc = c + w;
@@ -974,6 +987,7 @@ export function createGraph({
    * src/route-state.js).
    */
   function route(from, to) {
+    settled = 0;
     const starts = candidates(from);
     const ends = candidates(to);
 
@@ -1114,6 +1128,9 @@ export function createGraph({
     // What the path finder actually built, read off its graph rather than
     // assumed: the number that showed the precision option was being ignored.
     vertexCount: Object.keys(adjacency).length,
+    // How many vertices the last route() settled, over all its searches: how
+    // far a walk's search spread, for the test that keeps it local.
+    get settled() { return settled; },
   };
 }
 
