@@ -16,6 +16,8 @@ import {
   MAX_RESULTS, normalise, buildPlaceIndex, scoreTerm, rankPlaces, search, popularEntries,
 } from '../src/search-rank.js';
 import { load } from './helpers.js';
+import { NAME_ALIASES, directoryFeature } from '../src/place-names.js';
+import { recordVisit, forgetVisits } from '../src/popular.js';
 
 const places = load('places');
 const index = buildPlaceIndex(places.features);
@@ -193,4 +195,102 @@ test('a row with no position is left out of the index entirely', () => {
   }
   // ...and it does not throw on the raw file, which is how this was found.
   assert.doesNotThrow(() => buildPlaceIndex(places.features));
+});
+
+// ---------------------------------------------------------------------------
+// The directory's names. The index is built from places.json and the cards,
+// the cold start and the map labels all speak directory.json, and twenty of
+// its thirty-three buildings are spelt differently in the two.
+
+const directory = load('directory');
+const joined = buildPlaceIndex(places.features, directory);
+
+/** The two directory buildings with no row of their own in the places file. */
+const NO_PLACE_ROW = ['Ranch House', 'Kinesiology & Athletics (Physical Education)'];
+
+test('every directory building is reached by some place in the index', () => {
+  // What decides whether picking a search result opens the building card or
+  // the thin pin card. Twenty of these used to fall through to the pin.
+  const reached = new Set(index
+    .map((entry) => directoryFeature(directory, entry.name)?.properties.name)
+    .filter(Boolean));
+  const missed = directory.features
+    .map((f) => f.properties.name)
+    .filter((name) => !reached.has(name) && !NO_PLACE_ROW.includes(name));
+  assert.deepEqual(missed, []);
+  // The ones named in the finding, spelt the way the places file spells them.
+  for (const [place, row] of [
+    ['Gym - MAIN and PRACT', 'Gym'],
+    ['Bookstore - College Store', 'Bookstore'],
+    ['Police - College', 'College Police'],
+    ['Administration Building', 'Admin Bldg.'],
+    ['Technical Education West - TEW', 'Technical Education West (TEW)'],
+    ['CTE - Career Technical Education', 'Career Technical Education (CTE)'],
+    ['Learning Resource Center - LRC', 'Learning Resource Center (LRC)'],
+  ]) {
+    assert.equal(directoryFeature(directory, place)?.properties.name, row, `${place} opened no card`);
+  }
+  // ...and a car park that shares a building's first words is not that building.
+  assert.equal(directoryFeature(directory, 'Ranch House Parking Lot (Staff Only)'), null);
+});
+
+test('every places-file alias joins a real place to a real directory row', () => {
+  // A hand-made map rots when either file it points into is edited.
+  const rows = new Set(directory.features.map((f) => f.properties.name));
+  const officials = new Set(directory.features.map((f) => f.properties.officialName));
+  const placeNames = new Set(index.map((e) => e.name));
+  for (const [from, to] of NAME_ALIASES) {
+    assert.ok(placeNames.has(from), `no place is called "${from}"`);
+    assert.ok(rows.has(to), `"${from}" is aliased to "${to}", which is not a directory row`);
+    assert.ok(!rows.has(from) && !officials.has(from), `"${from}" needs no alias`);
+  }
+});
+
+test('typing the title a building card prints finds that building first', () => {
+  // The card says "Admin Bldg."; the map says "Science & Engineering". Both
+  // used to find nothing at all.
+  for (const f of directory.features) {
+    const { name } = f.properties;
+    if (NO_PLACE_ROW.includes(name)) continue;
+    const [first] = rankPlaces(joined, name);
+    assert.ok(first, `"${name}" found nothing`);
+    assert.equal(directoryFeature(directory, first.name)?.properties.name, name,
+      `"${name}" found ${first.name} first`);
+  }
+});
+
+/** A localStorage that behaves like the real one. */
+function stubStorage() {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, String(value)),
+    removeItem: (key) => store.delete(key),
+  };
+}
+
+test('a fresh browser gets a full shelf, the most prominent building included', () => {
+  stubStorage();
+  forgetVisits();
+  const shelf = popularEntries({ index: joined, directory, limit: 6 });
+  assert.equal(shelf.length, 6, `the cold start offered ${shelf.length} rows of 6`);
+  assert.ok(names(shelf).includes('Learning Resource Center - LRC'),
+    'the LRC, joint most prominent, is missing');
+  assert.ok(names(shelf).includes('Administration Building'));
+  assert.equal(new Set(shelf).size, shelf.length);
+});
+
+test('remembered names the index does not hold do not cost the shelf its rows', () => {
+  // Rooms and courses are not remembered any more, but a browser that
+  // remembered some before, or a place since renamed, must not shrink the list.
+  stubStorage();
+  forgetVisits();
+  recordVisit('Room 320');
+  recordVisit('ACCT 101 — Fundamentals of College Accounting');
+  recordVisit('Room 401');
+  recordVisit('Library');
+  const shelf = popularEntries({ index: joined, directory, limit: 6 });
+  assert.equal(shelf.length, 6);
+  assert.equal(shelf[0].name, 'Library', 'the visit no longer leads');
+  forgetVisits();
 });

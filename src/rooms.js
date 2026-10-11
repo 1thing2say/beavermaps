@@ -107,6 +107,10 @@ function entry(index, buildingName, { name, description }) {
     // but spread over four fields.
     spread: b.spread ?? null,
     place: b.mapName ?? b.campus ?? b.name,
+    // Marks a row the place index has never heard of, so picking it is not
+    // remembered as a visit: a name like "Room 320" can never come back as a
+    // suggestion, and remembering it only cost the shelf a slot.
+    room: true,
   };
 }
 

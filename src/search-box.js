@@ -67,6 +67,10 @@ export function createSearchBox({
    */
   let popularBonus = popularity();
   function refreshPopularity() {
+    // The index takes the directory's names as aliases, so if the directory
+    // has landed since it was built, build it again. Either file can arrive
+    // first.
+    if (searchIndexDirectory !== directory() && places()) buildSearchIndex();
     popularBonus = popularity({ directory: directory() });
     renderShortcuts();
   }
@@ -120,11 +124,13 @@ export function createSearchBox({
     );
   }
   let searchIndex = [];
+  let searchIndexDirectory = null;
   let searchHits = [];
   let activeHit = -1;
 
   function buildSearchIndex() {
-    searchIndex = buildPlaceIndex(places().features);
+    searchIndexDirectory = directory();
+    searchIndex = buildPlaceIndex(places().features, searchIndexDirectory);
     // The field is disabled in the markup and opened here, so nobody types into
     // a box that has nothing to search yet.
     searchInput.disabled = false;
@@ -292,9 +298,12 @@ export function createSearchBox({
     const coords = nearestInstance(entry);
     // Remembered here rather than in `openPlace`, which is also how a tap on
     // the map arrives: this is the one path that means somebody LOOKED
-    // something up, which is the thing "most searched" is a claim about.
-    recordVisit(entry.name);
-    refreshPopularity();
+    // something up, which is the thing "most searched" is a claim about. Not
+    // a room or a course row, which is not a place the index can offer back.
+    if (!entry.room) {
+      recordVisit(entry.name);
+      refreshPopularity();
+    }
     searchInput.value = entry.name;
     searchClear.classList.remove('hidden');
     closeResults();
