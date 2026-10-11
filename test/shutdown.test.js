@@ -94,10 +94,12 @@ test('the grace period fits inside the kill_timeout fly.toml actually leaves', (
 
 test('fly.toml stops machines with the signal the server listens for', () => {
   // closeOnSignal listens for SIGTERM and SIGINT, and nothing else. Fly's
-  // default kill_signal is SIGINT, which would be caught too; but one of the
-  // others it accepts — SIGQUIT, SIGUSR1 — would kill the process outright and
-  // the grace period would never start. Written out, it is the signal the
-  // server's comments and the real-SIGTERM test below are about.
+  // default kill_signal is SIGINT, which would be caught too; but the others it
+  // accepts would not start the grace period at all. SIGQUIT kills a Node
+  // process outright, and SIGUSR1 does not stop it — Node takes it as the
+  // signal to open its debugger, and the process carries on serving until
+  // Fly's SIGKILL. Written out, it is the signal the server's comments and the
+  // real-SIGTERM test below are about.
   const toml = readFileSync(path.join(root, 'fly.toml'), 'utf8');
   // Top level: before the first [table], or Fly reads it as part of that table.
   const top = toml.split(/^\s*\[/m)[0];
