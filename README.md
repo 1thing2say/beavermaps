@@ -299,10 +299,14 @@ routing network stopped coming from it.
    holds connectors added by hand where the sheet omits something plainly
    visible on the ground, each with a `why` naming what is there and what the
    sheet drew instead. It is a separate file, applied as its own stage, and its
-   count and metres print on every build — currently **9 links, 151 m out of
-   13.6 km (1.1%)**, so the invented share is never in doubt.
+   count and metres print on every build — currently **12 links, 224 m out of
+   13.7 km (1.6%)**, so the invented share is never in doubt.
 
-   Two of the nine are **rescues**: connectors that bring a whole stranded
+   Three of them cross the filled paving of the plaza between the Student
+   Center, the CTE and the CDC, joining walkway strokes the sheet draws out of
+   that fill and the build cannot read as linework: 73 m of connector for 60 m
+   of drawn path and the CTE's and CDC's plaza-side doors. Two others are
+   **rescues**: connectors that bring a whole stranded
    fragment into the largest component. They carry **571 m and 409 m** of
    my campus's own drawn linework — 980 m returned to the routable network for 25 m
    of connector. The largest is the entire perimeter footway around the south car
