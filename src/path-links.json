@@ -18,6 +18,15 @@
     "here carry 571 m and 409 m of drawn path respectively: 980 m of my campus's",
     "own linework returned to the routable network for 25 m of connector.",
     "",
+    "Three later ones are rescues of a different shape: walkway strokes the sheet",
+    "draws out of a FILLED paving polygon (the plaza between the Student Center,",
+    "the CTE and the CDC) into the buildings round it. The build reads strokes,",
+    "not fills, so the plaza itself is nothing to it and the strokes were pruned",
+    "as fragments. They carry only 60 m of drawn path for 73 m of connector, all",
+    "of it on the filled paving; what they return is the CTE's plaza-side doors",
+    "and the CDC's north door. A stage that joins any stroke ending in a filled",
+    "walkway polygon would replace them, and needs its own ablation first.",
+    "",
     "READ THIS BEFORE ADDING ONE. An earlier version of this file had 15 links, and",
     "eleven of them ran PARALLEL to a path my campus already draws. That was the wrong",
     "diagnosis: the gap was never a missing path, it was a DRAWN path that failed",
@@ -237,6 +246,72 @@
           [
             -121.344852,
             38.650307
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "RESCUE, with the next two: the paved plaza between the Student Center, the CTE and the Child Development Center. The sheet fills it as one walkway polygon (i=1257, #e2e3e4) and draws three walkway strokes out of it into the buildings round it, but a filled polygon is not linework, so nothing joined the strokes to the network and the component pass dropped all three. Dropped, they left the CTE no way in from the plaza and the CDC none from the north, and a walk from the Student Center to the CTE went 412 m round the CDC. This one runs across the plaza from the end of walkway 1438, which leads 13 m north into the CTE, to the plaza's west footway; every metre of it lies on the filled paving and none under a roof.",
+        "kind": "walkway",
+        "added": "2026-10-11",
+        "rescuesM": 13
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.345784,
+            38.651374
+          ],
+          [
+            -121.3460777,
+            38.6513777
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "Along the plaza's south strip (see the link above), joining the plaza end of walkway 1440, 17.5 m into the CTE's south wall, to the plaza end of walkway 1439, which runs 29 m south to the Child Development Center's north wall. Both ends are drawn strokes the sheet stops on its filled paving; the line between them is on that paving throughout.",
+        "kind": "walkway",
+        "added": "2026-10-11",
+        "rescuesM": 18
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.345649,
+            38.650794
+          ],
+          [
+            -121.345446,
+            38.650821
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "why": "From the plaza end of walkway 1439 east across the filled paving (see the two links above) to the footway past the CDC's service yard. With the link before it, this brings walkways 1439 and 1440 into the network: the CTE gains its south door and the CDC its north one, and the walk from the Student Center to the CTE goes from 98 m to 64 m.",
+        "kind": "walkway",
+        "added": "2026-10-11",
+        "rescuesM": 29
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -121.345446,
+            38.650821
+          ],
+          [
+            -121.3450999,
+            38.6508168
           ]
         ]
       }

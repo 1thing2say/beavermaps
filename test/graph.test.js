@@ -160,6 +160,29 @@ test('every hand-added link joins the network at both ends', () => {
   }
 });
 
+test('the walkways drawn out of the CTE plaza are on the network', () => {
+  // The plaza between the Student Center, the CTE and the CDC is one filled
+  // walkway polygon on the sheet, and filled paving is not linework: the three
+  // walkway strokes the sheet draws out of it into the buildings joined
+  // nothing, and the component pass dropped them. The CTE lost its plaza-side
+  // doors and a walk to it from the Student Center went 412 m round the CDC.
+  // Hand links across the paving bring them in; each stroke must survive.
+  const strokes = new Map(load('basemap').features.map((f) => [f.properties.i, f]));
+  const near = (p) => Math.min(...segments.map((s) => {
+    const [a, b] = [s.geometry.coordinates[0], s.geometry.coordinates.at(-1)];
+    let d = Infinity;
+    for (let k = 0; k <= 20; k += 1) d = Math.min(d, metresBetween(p, [a[0] + (k / 20) * (b[0] - a[0]), a[1] + (k / 20) * (b[1] - a[1])]));
+    return d;
+  }));
+  for (const i of [1438, 1439, 1440]) {
+    const line = strokes.get(i);
+    assert.equal(line?.geometry.type, 'LineString', `sheet stroke ${i} is not a line`);
+    const [a, b] = [line.geometry.coordinates[0], line.geometry.coordinates.at(-1)];
+    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    assert.ok(near(mid) < 1, `walkway ${i} is ${near(mid).toFixed(1)} m from the network`);
+  }
+});
+
 test('shared endpoints are byte-identical, not merely close', () => {
   // The server snaps at 1e-7 and builds its vertex set by string key, so two
   // nodes that are the same place but differ in the last decimal become two

@@ -511,6 +511,7 @@ test('a walk to a building may end at a door on any of its footprints', () => {
   for (const [from, to, under] of [
     ['Science Success Center', 'Science & Engineering', 40],
     ['Science & Engineering', 'Science Success Center', 40],
+    // 98 m with the annexe's door; 64 m now the plaza's walkways are joined.
     ['Student Center', 'Career Technical Education (CTE)', 120],
   ]) {
     const result = graph.route(entrance(from), entrance(to));
@@ -518,6 +519,17 @@ test('a walk to a building may end at a door on any of its footprints', () => {
     const m = result.distanceFeet * 0.3048;
     assert.ok(m < under, `${m.toFixed(0)} m from ${from} to ${to}`);
   }
+});
+
+test('the CTE is reached across its plaza, not round the CDC', () => {
+  // The walkways the sheet draws from the plaza into the CTE and the CDC were
+  // dropped as fragments (see path-links.json), and from the middle of the
+  // plaza, 68 m from the CTE's door, the walk went 405 m south round the CDC.
+  const cte = load('directory').features.find((f) => f.properties.name === 'Career Technical Education (CTE)');
+  const PLAZA = [-121.3458679, 38.6512015];
+  const result = graph.route(PLAZA, cte.properties.entrance);
+  assert.ok(result.ok, `refused: ${result.error}`);
+  assert.ok(result.distanceFeet * 0.3048 < 60, `${(result.distanceFeet * 0.3048).toFixed(0)} m from the plaza to the CTE`);
 });
 
 test('a room at the fork of two walkways leaves by the arm that leads where it is going', () => {
