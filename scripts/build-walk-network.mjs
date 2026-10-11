@@ -10,14 +10,22 @@
  * added by hand where the sheet omits a link that plainly exists on the ground.
  * It is a separate file, applied as its own stage, and its count and metres are
  * printed on every build, so the share of this network that is not my campus's drawing
- * is never in doubt. Today it is 12 links and 224 m out of 13.7 km — 1.6%. The
+ * is never in doubt. Today it is 13 links and 270 m out of 13.8 km — 2.0%. The
  * junction stage below adds the only other undrawn metres, a handful of
  * connectors a few metres long, and so do the walls with two more where a
- * building is drawn over a junction; their counts and metres print too.
+ * building is drawn over a junction, and the vee stage with a chord across
+ * the paving wherever two paths merge at a shallow angle; their counts and
+ * metres print too. The
+ * last stage, PLAZAS, writes the lines across the sheet's paved plazas, and
+ * those go to a file of their own, src/plaza-paths.json, which is routed
+ * over and never drawn. It prints their count and metres, plaza by plaza.
  *
  * WHERE THE DATA COMES FROM. On the sheet a walkway is a stroked path carrying
  * a real ground width, so the stroke IS the centreline: 103 walkways, 25
- * driveways, all in #e2e3e4, plus 30 crossings. One of the driveways is the
+ * driveways and 6 driveway-entrance mouths the sheet files as crossings, all
+ * in #e2e3e4. It draws no crosswalk; the other 24 "crossings" are lane arrows
+ * painted down the driveways, in a darker grey, and are not taken (see the
+ * stroke loop below). One of the driveways is the
  * turning circle by Printing Services, drawn as a stroked ring rather than a line
  * and read as one (see strokeLines()). src/basemap.json already holds them
  * element for element with their widths and the cartographer's own layer,
@@ -69,6 +77,9 @@
  *      short. A loose end under a roof that was drawn to meet a path beyond
  *      the far wall is joined to it first, by the junction stage's own test,
  *      rather than peeled. Run again after JUNCTION, against the whole graph.
+ *      Before any of it, a stroke running ALONG a wall painted over half its
+ *      band is stood off to the middle of the half that shows (stage 0), and
+ *      a junction drawn just inside a wall is moved out onto the paving.
  *   4. TEE. A stroke that ENDS on another is a junction NODE cannot see — it
  *      does not cross, it stops — and WELD has no vertex there to join to.
  *      Dead ends within TEE_M of another stroke are teed onto it. The dead
@@ -80,8 +91,12 @@
  *      already makes you walk JUNCTION_RATIO times further around, so paths
  *      that legitimately pass close without meeting are left alone. Neither
  *      line is moved more than a weld: a wider gap gets a short connector,
- *      at most JUNCTION_M long, and those are counted and printed alongside
- *      the links.
+ *      at most JUNCTION_M long and on the paving (or carrying a path on from
+ *      the end it stops short at), and those are counted and printed
+ *      alongside the links. Then the VEE: where two paths merge at a
+ *      shallow angle, a chord across the wedge of paving their bands make,
+ *      so a walk from one onto the other does not run on to the point and
+ *      back.
  *   6. LINK. Apply src/path-links.json, the hand-added connectors above.
  *   7. SPLICE. The router only accepts vertices, so every positioned
  *      destination gets a node at its closest point on the network. Without it
@@ -92,6 +107,15 @@
  *      left, recorded in src/doors.json for the router to do the same. Every
  *      building also gets a node wherever its walls come nearest the
  *      network, which build-directory.mjs lists among its ways in.
+ *   8. PLAZAS. A walkway the sheet paints as a filled surface rather than a
+ *      stroke is open paving, and is crossed by a visibility graph between
+ *      where the network meets it, round the buildings, planters and trees
+ *      that stand on it. A crossing is kept only where it saves real walking
+ *      over the drawn way round, and only where the crossings already kept do
+ *      not nearly do the same. What is kept is noded like the strokes and
+ *      written to src/plaza-paths.json, for the router only. A piece of the
+ *      drawing that reaches the rest only across a plaza ships with it, so
+ *      paths.json and doors.json are written after this stage.
  *
  * There is still deliberately NO automatic bridging step. An earlier version
  * closed gaps between fragments with 42 generated connectors; they are gone,
@@ -103,7 +127,7 @@
  * failing to join. JUNCTION fixes that cause, and six of the fifteen were then
  * shown redundant by ablation. The cost of the rest is honest
  * too — whatever the drawing leaves disconnected stays disconnected, and only
- * the largest component ships.
+ * the largest component ships, with any piece a plaza joins to it (PLAZAS).
  *
  *   node scripts/build-walk-network.mjs
  */
@@ -111,7 +135,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { adoptPrintedNames, groupByName, loadFootprints, wallNearest } from './building-names.mjs';
+import { adoptPrintedNames, groupByName, loadFootprints, memberNearest, wallNearest } from './building-names.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = (name) => path.join(root, 'src', name);
@@ -152,13 +176,18 @@ const TOL_CAP = 5.0;
  * makes and the extraction missed. See the junction stage.
  *
  * Swept against imagery rather than picked. At 4 m the repair is real but
- * partial; 6 m adds four more welds and every one of them lands on continuous
- * pavement. Past that it breaks down fast: at 8-10 m the extra welds cut across
- * a lawn, clip the planted island inside the roundabout, and wander over the
- * Portable Village roofs. The detour guard below is necessary but not
- * sufficient — two paths either side of a lawn genuinely are far apart through
- * the graph, so the ratio test happily approves a shortcut across the grass.
- * That is what bounds this at 6.
+ * partial; 6 m adds four more welds. Past that it breaks down fast: at 8-10 m
+ * the extra welds cut across a lawn, clip the planted island inside the
+ * roundabout, and wander over the Portable Village roofs. The detour guard
+ * below is necessary but not sufficient — two paths either side of a lawn
+ * genuinely are far apart through the graph, so the ratio test happily
+ * approves a shortcut across the grass. That is what bounds this at 6, and
+ * it is why a connector must also lie on paving (JUNCTION_OFF_M). Not every
+ * one at 6 m did: two by the south car park, at -121.347844,38.645713 and
+ * -121.348265,38.645826, crossed 2.3 and 2.1 m off the paving. The first
+ * steps from the middle of a walkway over the verge to the footway beside
+ * it, and is refused. The second carries a walkway on from its end cap to
+ * the footway it stops short of, and is joined (JUNCTION_CAP_OFF_M).
  */
 const JUNCTION_M = 6.0;
 const JUNCTION_RATIO = 6;
@@ -220,7 +249,7 @@ const KIND_RANK = { walkway: 0, crossing: 1, driveway: 2 };
  * not centrelines, and riding their outline would invent a path round the edge
  * of every plaza. Buildings, car parks, courts and the rest are other kinds
  * and never get this far, whatever their stroke. Crossing polygons are the
- * zebra bars themselves, filled and unstroked. On today's sheet the rule
+ * heads of the lane arrows, filled and unstroked. On today's sheet the rule
  * admits exactly one feature, the circle.
  *
  * Each ring of a qualifying polygon is its own stroke, because a stroked
@@ -247,9 +276,17 @@ const strokes = [];
 for (const f of basemap) {
   const { kind, stroke, width } = f.properties;
   if (!(kind in KIND_RANK)) continue;
-  // Crossings are drawn darker than the rest and are kept regardless: they are
-  // short, and they are how a footway gets to the other side of a road.
-  if (kind !== 'crossing' && stroke !== PAVEMENT) continue;
+  // Pavement grey or nothing, crossings included. What the sheet files as
+  // `crossing` is not a crosswalk: it draws none. Six of its strokes are the
+  // mouths of driveway entrances, in pavement grey at the driveways' 6.6 m,
+  // and are pavement like any other. The other 24 are the 11 m shafts of the
+  // lane arrows painted at the entrances, two to a driveway or mouth, in a
+  // darker grey 0.82 m wide, with their heads as fills beside them. Those were
+  // kept "regardless" while they were taken for crossings, and 78 m of the
+  // network ran down the carriageway on them: thirteen of the twenty street
+  // gates ended on a shaft, and at College Oak Dr the network ran 8 m out
+  // into the road on one.
+  if (stroke !== PAVEMENT) continue;
   for (const line of strokeLines(f)) {
     // A ring repeats its first vertex last; the weld stage turns that into a
     // loop, which is what the drawing is.
@@ -272,9 +309,10 @@ for (const f of basemap) {
 // a few metres past the wall and left for the building fill to cover; a walkway
 // that predates a building still runs straight through it under the roof. None
 // of that is path anyone can see on the sheet, and the walls stage below keeps
-// it out of the graph. Crossings are the exception that proves the rule: they
-// are painted last of all (2324 and up), over everything, so they are never
-// hidden — the comparison is on painter's order, not on kind. The one driveway
+// it out of the graph. The six driveway mouths filed as crossings are the
+// exception that proves the rule: they are painted last of all (2324 and up),
+// over everything, so they are never hidden — the comparison is on painter's
+// order, not on kind. The one driveway
 // that breaks the "all but" is the same story: a 70 m stretch in the north-east
 // of campus, i=3116 in layer 20, painted long after every building. No
 // footprint lies anywhere along it today, so nothing hides it; if one ever
@@ -313,6 +351,213 @@ const inFootprint = (p, F) => p[0] >= F.box[0] && p[0] <= F.box[2] && p[1] >= F.
 const boxMeets = (F, a, b) => Math.max(a[0], b[0]) >= F.box[0] && Math.min(a[0], b[0]) <= F.box[2]
   && Math.max(a[1], b[1]) >= F.box[1] && Math.min(a[1], b[1]) <= F.box[3];
 const inAnyFootprint = (p) => FOOTPRINTS.some((F) => inFootprint(p, F));
+
+// --- the pavement the print shows -----------------------------------------------
+//
+// Where the sheet paints pavement grey: the band of every stroke taken above,
+// its centreline widened by half its drawn width, and every surface FILLED in
+// that grey (the plazas, see stage 5 for which and why). The stages that move
+// a node or add a line ask it whether the result is still on paving; the plaza
+// stage walks its crossings over it.
+
+const PLAZA_KINDS = new Set(['walkway', 'parking', 'driveway']);
+const PLAZA_MIN_M2 = 100;
+const closedLine = (cs) => cs.length > 3 && cs[0][0] === cs.at(-1)[0] && cs[0][1] === cs.at(-1)[1];
+/** The areas a geometry covers. A closed LineString is a polygon drawn as one. */
+const surfacesOf = (g) => (g.type === 'Polygon' ? [g.coordinates]
+  : g.type === 'MultiPolygon' ? g.coordinates
+    : g.type === 'LineString' && closedLine(g.coordinates) ? [[g.coordinates]] : []);
+const ringArea = (r) => {
+  let a = 0;
+  for (let k = 1; k < r.length; k += 1) a += r[k - 1][0] * r[k][1] - r[k][0] * r[k - 1][1];
+  return a / 2;
+};
+const boxOf = (ring) => {
+  const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+};
+const inPoly = (p, poly) => inRing(p, poly.rings[0]) && !poly.rings.slice(1).some((r) => inRing(p, r));
+const plazas = basemap
+  .filter((f) => PLAZA_KINDS.has(f.properties.kind) && f.properties.fill === PAVEMENT)
+  .flatMap((f) => surfacesOf(f.geometry).map((rings) => ({ i: f.properties.i, rings: rings.map((r) => r.map(flat)) })))
+  .filter((P) => Math.abs(ringArea(P.rings[0])) >= PLAZA_MIN_M2)
+  .map((P) => ({ ...P, box: boxOf(P.rings[0]) }));
+
+// A coarse grid over the stroke bands (and, in stage 5, the obstacles), so a
+// sample asks only the handful of things in its own cell rather than every
+// stroke on the sheet.
+const CELL = 10;
+const cellKey = (x, y) => `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`;
+const gridOf = (items, boxFn) => {
+  const grid = new Map();
+  for (const item of items) {
+    const [x0, y0, x1, y1] = boxFn(item);
+    for (let gx = Math.floor(x0 / CELL); gx <= Math.floor(x1 / CELL); gx += 1) {
+      for (let gy = Math.floor(y0 / CELL); gy <= Math.floor(y1 / CELL); gy += 1) {
+        const k = `${gx},${gy}`;
+        if (!grid.has(k)) grid.set(k, []);
+        grid.get(k).push(item);
+      }
+    }
+  }
+  return grid;
+};
+const bandSegs = strokes.flatMap((s) => s.pts.slice(1).map((b, k) => ({ a: s.pts[k], b, half: s.width / 2 })));
+const bandGrid = gridOf(bandSegs, ({ a, b, half }) => [
+  Math.min(a[0], b[0]) - half, Math.min(a[1], b[1]) - half, Math.max(a[0], b[0]) + half, Math.max(a[1], b[1]) + half,
+]);
+/** Whether a point lies on paving the print shows: a stroke's band or a filled plaza. */
+const paved = (p) => plazas.some((P) => p[0] >= P.box[0] && p[0] <= P.box[2] && p[1] >= P.box[1] && p[1] <= P.box[3] && inPoly(p, P))
+  || (bandGrid.get(cellKey(p[0], p[1])) ?? []).some(({ a, b, half }) => segDist(p, a, b) <= half);
+
+/** On paving with room to spare: WELL_INSIDE_M inside a band, or on a plaza. */
+const WELL_INSIDE_M = 0.5;
+const pavedWell = (p) => plazas.some((P) => p[0] >= P.box[0] && p[0] <= P.box[2] && p[1] >= P.box[1] && p[1] <= P.box[3] && inPoly(p, P))
+  || (bandGrid.get(cellKey(p[0], p[1])) ?? []).some(({ a, b, half }) => segDist(p, a, b) <= half - WELL_INSIDE_M);
+
+/** Metres of the straight line a-b off every band and plaza, sampled every BAND_STEP_M. */
+const BAND_STEP_M = 0.25;
+function unpaved(a, b) {
+  const L = dist(a, b);
+  const n = Math.max(1, Math.ceil(L / BAND_STEP_M));
+  let off = 0;
+  for (let k = 0; k <= n; k += 1) if (!paved([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n])) off += 1;
+  return (off / (n + 1)) * L;
+}
+
+// --- 0. stand a half-roofed run off the wall ----------------------------------
+//
+// Part of WALLS (3c below), done here, on the strokes themselves, because the
+// line it moves is the line every later stage builds on. A building painted
+// over the side of a wide path hides only that side: the driveway along the
+// Gym's north wall (sheet 1102, 9.9 m wide) has its centreline 0 to 0.86 m
+// inside the wall for 64 m, and nearly all of its band plainly visible
+// outside it. Read verbatim, the centreline is under the roof, the walls stage
+// rightly cannot peel a way that goes somewhere, and it kept the run as a
+// "passage": 64 m of route ribbon drawn half over a roof, and the Pool's and
+// Adaptive PE's doors, peeled back to it, inside the Gym, 2.4 m from it.
+//
+// So where a stroke runs ALONG a wall painted over it — within STANDOFF_ANGLE
+// of the wall beside it — and its centreline is inside by less than its
+// half-width minus STANDOFF_VISIBLE_M, the vertex moves square off the wall
+// to the middle of the part of the band that shows: (depth + half-width) / 2
+// outside. That is the line someone walking it actually takes, on the paving
+// the print shows. A path that runs INTO a building (an approach stub) meets
+// the wall at an angle and is left for the walls stage to peel; one drawn
+// through a building is too deep to qualify. Each moved run is printed.
+const STANDOFF_ANGLE = 30;
+const STANDOFF_VISIBLE_M = 1.0;
+/** Nearest point of a footprint's outline to p, with the bearing of the wall it is on. */
+function wallFoot(p, F) {
+  let best = null;
+  for (const ring of F.rings) {
+    for (let k = 1; k < ring.length; k += 1) {
+      const a = ring[k - 1], b = ring[k];
+      const vx = b[0] - a[0], vy = b[1] - a[1], L = vx * vx + vy * vy;
+      const t = L === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / L));
+      const q = [a[0] + t * vx, a[1] + t * vy];
+      const d = dist(p, q);
+      if (!best || d < best.d) best = { d, q, ang: Math.atan2(vy, vx), n: [-vy / Math.sqrt(L || 1), vx / Math.sqrt(L || 1)] };
+    }
+  }
+  return best;
+}
+/** How far either side of a stood-off run the move is eased in, how finely a stroke is read for it, and the longest break in a run that is bridged. */
+const STANDOFF_EASE_M = 3.0;
+const STANDOFF_STEP_M = 1.0;
+const STANDOFF_GAP_M = 8.0;
+/** Where p would stand off the wall of a footprint painted over stroke s, as an offset, or null. */
+function standoffAt(p, own, s) {
+  const half = s.width / 2;
+  for (const F of FOOTPRINTS) {
+    if (F.i <= s.i) continue;
+    if (p[0] < F.box[0] - 0.05 || p[0] > F.box[2] + 0.05 || p[1] < F.box[1] - 0.05 || p[1] > F.box[3] + 0.05) continue;
+    const inside = inFootprint(p, F);
+    const w = wallFoot(p, F);
+    if (!inside && w.d > 0.05) continue;                // outside, and not on the wall
+    const depth = inside ? w.d : 0;
+    if (half - depth < STANDOFF_VISIBLE_M || bearingGap(own, w.ang) > STANDOFF_ANGLE) continue;
+    // Out of the footprint: the wall's normal, on whichever side is outside.
+    const sg = inFootprint([w.q[0] + 0.1 * w.n[0], w.q[1] + 0.1 * w.n[1]], F) ? -1 : 1;
+    const by = (depth + half) / 2;
+    return { F: F.i, depth, by, o: [sg * by * w.n[0], sg * by * w.n[1]] };
+  }
+  return null;
+}
+/** Douglas-Peucker over pts, never dropping one marked `keep`. */
+function simplify(pts, tol) {
+  const keep = pts.map((q) => q.keep);
+  keep[0] = keep[pts.length - 1] = true;
+  const walk = (a, b) => {
+    let far = -1, fd = tol;
+    for (let k = a + 1; k < b; k += 1) {
+      const d = segDist(pts[k].p, pts[a].p, pts[b].p);
+      if (d > fd) { fd = d; far = k; }
+    }
+    if (far < 0) return;
+    keep[far] = true;
+    walk(a, far);
+    walk(far, b);
+  };
+  let a = 0;
+  for (let k = 1; k < pts.length; k += 1) if (keep[k]) { walk(a, k); a = k; }
+  return pts.filter((_, k) => keep[k]).map((q) => q.p);
+}
+const standoffs = [];
+for (const s of strokes) {
+  // The stroke read every STANDOFF_STEP_M, its own vertices among the samples.
+  const samples = [];
+  let at = 0;
+  for (let k = 0; k < s.pts.length; k += 1) {
+    const p = s.pts[k];
+    if (k > 0) {
+      const a = s.pts[k - 1], L = dist(a, p);
+      const n = Math.floor(L / STANDOFF_STEP_M);
+      for (let j = 1; j <= n; j += 1) {
+        const t = (j * STANDOFF_STEP_M) / L;
+        if (t < 1 - 1e-9) samples.push({ p: [a[0] + t * (p[0] - a[0]), a[1] + t * (p[1] - a[1])], s: at + t * L, own: Math.atan2(p[1] - a[1], p[0] - a[0]) });
+      }
+      at += L;
+    }
+    const prev = s.pts[Math.max(0, k - 1)], next = s.pts[Math.min(s.pts.length - 1, k + 1)];
+    samples.push({ p, s: at, keep: true, own: Math.atan2(next[1] - prev[1], next[0] - prev[0]) });
+  }
+  for (const q of samples) q.off = standoffAt(q.p, q.own, s);
+  const runs = samples.filter((q) => q.off);
+  if (!runs.length) continue;
+  // Eased in and out, so the line leaves its drawn centreline over a few
+  // metres instead of stepping sideways at the corner of the wall.
+  // A short break in a run — a pilaster or a notch in the wall, where the
+  // wall beside the line turns for a metre or two — is bridged rather than
+  // eased, or the line would dip back towards the wall at every one of them.
+  const out = samples.map((q) => {
+    if (q.off) return { p: [q.p[0] + q.off.o[0], q.p[1] + q.off.o[1]], keep: q.keep };
+    const before = runs.filter((r) => r.s < q.s).at(-1), after = runs.find((r) => r.s > q.s);
+    let o = null;
+    if (before && after && after.s - before.s <= STANDOFF_GAP_M) {
+      const f = (q.s - before.s) / (after.s - before.s);
+      o = [before.off.o[0] + f * (after.off.o[0] - before.off.o[0]), before.off.o[1] + f * (after.off.o[1] - before.off.o[1])];
+    } else {
+      const near = [before, after].filter(Boolean).reduce((x, y) => (Math.abs(y.s - q.s) < Math.abs(x.s - q.s) ? y : x));
+      const f = 1 - Math.abs(near.s - q.s) / STANDOFF_EASE_M;
+      if (f > 0) o = [f * near.off.o[0], f * near.off.o[1]];
+    }
+    if (!o) return { p: q.p, keep: q.keep };
+    const moved = [q.p[0] + o[0], q.p[1] + o[1]];
+    return { p: inAnyFootprint(moved) ? q.p : moved, keep: q.keep };
+  });
+  s.pts = simplify(out, 0.1);
+  s.len = s.pts.slice(1).reduce((t, p, k) => t + dist(s.pts[k], p), 0);
+  const byF = new Map();
+  for (const r of runs) {
+    const m = byF.get(r.off.F) ?? { i: s.i, kind: s.kind, F: r.off.F, metres: 0, depth: 0, by: 0 };
+    m.metres += STANDOFF_STEP_M;
+    m.depth = Math.max(m.depth, r.off.depth);
+    m.by = Math.max(m.by, r.off.by);
+    byF.set(r.off.F, m);
+  }
+  standoffs.push(...byF.values());
+}
 
 // --- 1. dedupe ---------------------------------------------------------------
 
@@ -538,11 +783,13 @@ noded.forEach((pts, k) => {
 
 // --- 3b. collapse duplicate corridors ---------------------------------------
 //
-// The sheet draws ~857 m of corridor twice: a footway shadowing a driveway, a
-// walkway drawn over itself, and — the loudest of the three — every bar of a
-// zebra crossing as its own stroke, so one crossing becomes five parallel
-// routes. Riding a centreline down each of those is what put three lines
-// down one path on screen.
+// As first read, the sheet drew ~857 m of corridor twice: a footway shadowing
+// a driveway, a walkway drawn over itself, and — the loudest of the three — the
+// lane arrows at the entrances, a pair of shafts 3 m apart down each driveway
+// or mouth, so one carriageway became three parallel routes. They were taken
+// for zebra crossings then; they are no longer taken at all (see the stroke
+// loop), and the other two are what is left here. Riding a centreline down each of
+// those is what put three lines down one path on screen.
 //
 // Every one of these pairs sits closer than 3.3 m, and the paths themselves are
 // 3.3 m wide, so nothing that close is a separate way — two lines inside one
@@ -574,9 +821,9 @@ noded.forEach((pts, k) => {
 const alias = coord.map((_, i) => i);
 const find = (x) => { while (alias[x] !== x) { alias[x] = alias[alias[x]]; x = alias[x]; } return x; };
 
-function merge(a, b, wa = 1, wb = 1) {
+/** Where merge() would put the survivor of a and b, without merging them. */
+function mergedAt(a, b, wa = 1, wb = 1) {
   const [x, y] = [find(a), find(b)];
-  if (x === y) return;
   // Where the survivor lands. The midpoint is right for a walkway drawn over
   // itself — same width, and the true centreline does run between the two
   // strokes. It is wrong for a 3.3 m footway beside a 6.6 m carriageway: the
@@ -600,9 +847,52 @@ function merge(a, b, wa = 1, wb = 1) {
     const outside = [0, 1].filter((s) => !inAnyFootprint(at(s)));
     if (outside.length) t = outside.reduce((best, s) => (Math.abs(s - t) < Math.abs(best - t) ? s : best));
   }
-  coord[x] = at(t);
+  return at(t);
+}
+
+function merge(a, b, wa = 1, wb = 1) {
+  const [x, y] = [find(a), find(b)];
+  if (x === y) return;
+  coord[x] = mergedAt(x, y, wa, wb);
   alias[y] = x;
   for (const s of strokesAt(y)) strokesAt(x).add(s);
+}
+
+/**
+ * Whether moving the nodes `ids` (merged into one) to `to` would drag an edge
+ * on them off the paving: more than STRAY_M of it outside every drawn band and
+ * plaza (see paved()), where there was not that much before. `extra` lists
+ * edges about to exist that are not in `edges` yet, as [their other end, where
+ * this end is now].
+ *
+ * The collapse stage moves a node onto a second drawing of its corridor, and a
+ * node joined to a different path — by a tee, or a junction — sits on that
+ * path too. Its own stroke runs the same way as the corridor it is offered, so
+ * the move is approved, and the other path's edges swing off their pavement
+ * with it. That is what the second pass, after the junction stage, did where
+ * driveway 1086 is teed onto walkway 1321 at the west entrance: it dragged the
+ * tee 5 m sideways onto walkway 1263, and the edge of 1321 into it then cut
+ * 5 m across a lawn and a tree planter where the drawn diagonal beside it is
+ * paved all the way. Asked of every band rather than the edge's own, because
+ * a footway collapsing onto its driveway legitimately leaves the driveway's
+ * edges on the footway's band, beside their own.
+ */
+const STRAY_M = 1.0;
+function strays(ids, to, extra = []) {
+  const set = new Set(ids.map(find));
+  const list = [...extra];
+  for (const [u, v] of edges.values()) {
+    const a = find(u), b = find(v);
+    if (set.has(a) === set.has(b)) continue;
+    list.push(set.has(a) ? [b, coord[a]] : [a, coord[b]]);
+  }
+  for (const [o, from] of list) {
+    const after = unpaved(to, coord[o]);
+    if (after > STRAY_M && after > unpaved(from, coord[o]) + 0.01) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Rewrite the edge set through the current aliases, dropping self-loops. */
@@ -640,6 +930,7 @@ function project(p, a, b) {
 }
 
 let collapsed = 0;
+const strayed = new Set();
 
 /**
  * One run of the collapse to fixpoint.
@@ -678,9 +969,9 @@ for (let pass = 0; pass < 8; pass += 1) {
       // of a chord, a chain of them walked a node round the bend, and curves
       // came out as straight lines cutting across lawn, up to 23 m from where
       // the sheet draws them. A second drawing of a corridor is by definition
-      // a different stroke — a zebra bar, a walkway drawn twice, a footway
-      // beside its driveway — so excluding the node's own strokes loses none
-      // of the duplicates this stage exists for.
+      // a different stroke — a walkway drawn twice, a footway beside its
+      // driveway — so excluding the node's own strokes loses none of the
+      // duplicates this stage exists for.
       if (shareStroke(edgeS.get(key) ?? [], strokesAt(n))) continue;
       const a = coord[u], b = coord[v];
       const theirs = Math.atan2(b[1] - a[1], b[0] - a[0]);
@@ -718,8 +1009,24 @@ for (let pass = 0; pass < 8; pass += 1) {
     const nw = act.nw ?? 1;
     if (live.d > corridorTol(nw, ew)) continue;
     const span = dist(coord[u], coord[v]);
-    if (live.t * span < WELD_M) { merge(n, u, nw, ew); applied += 1; continue; }
-    if ((1 - live.t) * span < WELD_M) { merge(n, v, nw, ew); applied += 1; continue; }
+    const end = live.t * span < WELD_M ? u : (1 - live.t) * span < WELD_M ? v : null;
+    if (end !== null) {
+      if (strays([n, end], mergedAt(n, end, nw, ew))) { strayed.add(act.n); continue; }
+      merge(n, end, nw, ew);
+      applied += 1;
+      continue;
+    }
+    // Cut at the foot and merge there: judged as the merge it will be, with
+    // the two halves of the cut edge among the edges that move.
+    {
+      const w = coord.length;
+      coord.push(live.foot);
+      alias.push(w);
+      const to = mergedAt(n, w, nw, ew);
+      coord.pop();
+      alias.pop();
+      if (strays([n], to, [[u, live.foot], [v, live.foot]])) { strayed.add(act.n); continue; }
+    }
     const w = coord.length;
     coord.push(live.foot);
     alias.push(w);
@@ -767,7 +1074,32 @@ function anchor(fixed, loose) {
  * reason: earlier joins in the same pass move nodes and re-alias others. The
  * cut sits ON the drawn segment, so cutting it moves nothing.
  */
-function landOnLine(act, tol) {
+function landOnLine(act, tol, reach = Infinity) {
+  const at = landingOf(act, tol, reach);
+  if (!at) return null;
+  if (at.end !== null) return { n: at.n, at: at.end, d: at.d };
+  const { u, v, n } = at;
+  const w = coord.length;
+  const ew = edgeW.get(act.key) ?? 1, es = edgeS.get(act.key);
+  coord.push(at.p);
+  alias.push(w);
+  edges.delete(act.key);
+  addEdge(u, w, ew, es);
+  addEdge(w, v, ew, es);
+  return { n, at: w, d: at.d };
+}
+
+/**
+ * Where landOnLine() would join `n` to the action's edge, without joining it:
+ * `end` is the end it would weld to, or null for a cut at `p`. An end is taken
+ * only within a weld of the foot along the line and within `reach` of the
+ * node itself; past that the cut is made at the foot, so a connector is never
+ * longer than the stage that asked for it allows — unless the foot is within
+ * LAND_MIN_M of the end, where a cut would leave two nodes a hand's width
+ * apart and the end is taken after all.
+ */
+const LAND_MIN_M = 0.5;
+function landingOf(act, tol, reach = Infinity) {
   if (!edges.has(act.key)) return null;               // already restructured
   const n = find(act.n), u = find(act.u), v = find(act.v);
   if (n === u || n === v || u === v) return null;
@@ -776,16 +1108,10 @@ function landOnLine(act, tol) {
   const span = dist(coord[u], coord[v]);
   // Landing near either end is a weld, not a cut — splitting there would leave
   // a sub-centimetre edge the router has to carry forever.
-  if (live.t * span < WELD_M) return { n, at: u, d: live.d };
-  if ((1 - live.t) * span < WELD_M) return { n, at: v, d: live.d };
-  const w = coord.length;
-  const ew = edgeW.get(act.key) ?? 1, es = edgeS.get(act.key);
-  coord.push(live.foot);
-  alias.push(w);
-  edges.delete(act.key);
-  addEdge(u, w, ew, es);
-  addEdge(w, v, ew, es);
-  return { n, at: w, d: live.d };
+  for (const [end, along] of [[u, live.t * span], [v, (1 - live.t) * span]]) {
+    if (along < WELD_M && (dist(coord[n], coord[end]) <= reach || along < LAND_MIN_M)) return { n, u, v, end, p: coord[end], d: live.d };
+  }
+  return { n, u, v, end: null, p: live.foot, d: live.d };
 }
 
 // --- 3c. cut at the walls ------------------------------------------------------
@@ -803,7 +1129,7 @@ function landOnLine(act, tol) {
 //
 // So every edge is cut where it crosses the wall of a footprint painted over
 // it — later in the sheet than every stroke drawn down the edge, which is why
-// the zebra crossings, painted last of all, are never touched — and what lies
+// the driveway mouths, painted last of all, are never touched — and what lies
 // under the roof is one of two things:
 //
 //   - A STUB, leading nowhere but into the building. It is peeled back a loose
@@ -827,8 +1153,7 @@ function landOnLine(act, tol) {
 // TEE has no detour test and no roof to stop at, and moves any loose end it
 // can reach onto the line. And again after them, when the graph is whole and a
 // passage can be judged against every other way round. Today the two orders
-// come out within one tee of each other — 143 m under roofs either way —
-// because the two stub ends the junction stage used to join through a wall,
+// come out within one tee of each other, because the two stub ends the junction stage used to join through a wall,
 // in a Health Education portable and in the Science Success Center, are now
 // joined here first, by the same test, and nothing else under a roof is in
 // reach of anything but its own stroke.
@@ -836,7 +1161,10 @@ function landOnLine(act, tol) {
 // Measured on this sheet: network under a roof 314 -> 143 m, segments more
 // than a metre deep 38 -> 14, the deepest 13.1 -> 3.6 m, and no dead end
 // further than 0.25 m inside a wall where there were 35; 283 m cut away in 41
-// pieces. Every destination still splices or resolves to a door, and the
+// pieces. Standing half-roofed runs off their wall (stage 0) and moving out
+// the one junction drawn just inside a wall (standOffCorners()) then took it
+// to 67 m in 17 segments, 12 of them more than a metre deep, with 275 m cut
+// away. Every destination still splices or resolves to a door, and the
 // router still reaches all of them; a room that used to snap to a stub now
 // goes to the door at its end, and twelve directory entrances are such a door.
 //
@@ -870,16 +1198,14 @@ function landOnLine(act, tol) {
 // shows at all is cut, rejoined outside the wall or listed in path-links.json
 // whatever the ratio says (see BARE_M). What stays:
 //
-//   - 64 m: the 9.9 m driveway alongside the Gym, its centreline 0.86 m inside
-//     the wall — most of its drawn width is outside it and plainly visible.
 //   - 10 m: the joint of 1295 and 1296 under the Science Success Center, with
 //     no way round; it is the only way to the visible 1295. Listed.
 //   - 9 m: a corner of the stadium-side walkway under a small unnamed building,
-//     530 m round. Listed.
+//     3.7 m in: too deep to move out onto paving, and 530 m round. Listed.
 //   - 6 m: walkway 1287's south end beside portable 2003, its band showing
 //     past the portable's east wall.
-//   - 11 m in six places, none deeper than 0.9 m: wide paths whose edge a wall
-//     outline clips.
+//   - 6 m in four places: paths whose edge a wall outline clips on the way
+//     past, crossing the wall rather than running along it.
 //
 // And what no longer does. Walkway 1287 threaded four Health Education
 // portables (1987, 1988, 1989, 1998), 36 m under their roofs and 29 m of it
@@ -887,7 +1213,9 @@ function landOnLine(act, tol) {
 // round, 150-160 m, and the 40 m of 1287 and 1288 left between the portables,
 // which the sheet reaches only through them, goes with the fragments. The
 // bend of a walkway tucked into the Student Center's notch is rejoined by the
-// 3.3 m outside it.
+// 3.3 m outside it. And 64 m of the 9.9 m driveway alongside the Gym, whose
+// centreline ran up to 0.86 m inside the wall with most of its band in plain
+// view, is now stood off to the middle of what shows.
 
 /** The footprints painted over an edge: later in the sheet than every stroke drawn down it. */
 function hidersOf(key) {
@@ -900,9 +1228,12 @@ function hidersOf(key) {
  * Segment a-b as pieces wholly inside or wholly outside the given footprints,
  * as [t0, t1, hidden] runs along it. Breaks closer than a centimetre to each
  * other or to an end are dropped: the shipped coordinates round to about that,
- * and a piece shorter would collapse to nothing on the way out.
+ * and a piece shorter would collapse to nothing on the way out. With `sliver`,
+ * a hidden piece shorter than that with open ground either side of it — the
+ * line grazing a corner of the outline — counts as open too (see
+ * cutAtWalls()).
  */
-function piecesUnder(a, b, over) {
+function piecesUnder(a, b, over, sliver = 0) {
   const L = dist(a, b);
   const ts = [];
   for (const F of over) {
@@ -927,7 +1258,16 @@ function piecesUnder(a, b, over) {
     if (last && last[2] === hidden) last[1] = breaks[k];
     else runs.push([breaks[k - 1], breaks[k], hidden]);
   }
-  return runs;
+  if (!sliver) return runs;
+  const open = runs.map(([t0, t1, hidden], k) => [t0, t1,
+    hidden && !(k > 0 && k < runs.length - 1 && (t1 - t0) * L < sliver)]);
+  const merged = [];
+  for (const r of open) {
+    const last = merged[merged.length - 1];
+    if (last && last[2] === r[2]) last[1] = r[1];
+    else merged.push([...r]);
+  }
+  return merged;
 }
 
 /** Whether a straight line from a to b would run more than a few centimetres under any footprint. */
@@ -937,14 +1277,23 @@ function underRoof(a, b) {
   return over.length > 0 && piecesUnder(a, b, over).some(([t0, t1, hidden]) => hidden && (t1 - t0) * L > 0.05);
 }
 
-/** Cut every edge where it crosses the wall of a footprint painted over it. */
+/**
+ * Cut every edge where it crosses the wall of a footprint painted over it —
+ * but not into slivers. A line that grazes a corner of an outline crosses two
+ * walls a few centimetres apart, and cut at both it left two nodes 8 cm apart
+ * and an 8 cm "passage" under the roof, which the router's vertex precision
+ * then has to keep apart. A hidden piece under SLIVER_M with open ground at
+ * both ends is not cut out. One that ends under the roof still is, however
+ * short: that is an approach path stopping at its door.
+ */
+const SLIVER_M = 0.25;
 function cutAtWalls() {
   for (const [key, [u, v]] of [...edges]) {
     const a = coord[u], b = coord[v];
     if (dist(a, b) === 0) continue;
     const over = hidersOf(key).filter((F) => boxMeets(F, a, b));
     if (!over.length) continue;
-    const runs = piecesUnder(a, b, over);
+    const runs = piecesUnder(a, b, over, SLIVER_M);
     if (runs.length < 2) continue;
     const ew = edgeW.get(key) ?? 1, es = edgeS.get(key);
     edges.delete(key);
@@ -1222,10 +1571,92 @@ function joinHiddenEnds() {
  * Remove what the print hides under buildings; with `judge`, also decide the
  * passages that run right through one.
  */
+/**
+ * A junction drawn just inside a wall: a node under a roof, every edge on it
+ * hidden and leaving through the same face of the wall, or the two faces
+ * either side of one corner, within CORNER_M of it. The building was painted
+ * over the bend of a path that goes round it, a couple of metres in, and the
+ * walls stage could only keep that bend as a "passage" under the roof. It is
+ * moved out instead: a metre outside the face, square to it, or a metre out
+ * along the corner's bisector, and the wall nodes the cut left are taken out
+ * so the edges run straight to it — when it lands on paving, under no roof,
+ * and no edge to it runs more than STRAY_M off the paving. Each move is
+ * counted and printed. A node deeper in, or one whose edges leave by faces
+ * far apart, is a path drawn through the building and is left to the
+ * passage test.
+ */
+const CORNER_M = 4.0;
+/** How far clear of the wall a moved junction stands. */
+const CORNER_CLEAR_M = 0.5;
+const cornerMoves = [];
+function standOffCorners() {
+  rebuild();
+  const adj = new Map();
+  for (const [u, v] of edges.values()) {
+    if (!adj.has(u)) adj.set(u, new Set());
+    if (!adj.has(v)) adj.set(v, new Set());
+    adj.get(u).add(v);
+    adj.get(v).add(u);
+  }
+  for (const n of [...adj.keys()].sort((x, y) => x - y)) {
+    const around = [...adj.get(n)];
+    if (around.length < 2) continue;
+    const F = FOOTPRINTS.find((G) => inFootprint(coord[n], G));
+    if (!F || !around.every((m) => hidersOf(EK(n, m)).includes(F))) continue;
+    // Every neighbour a wall node of F, and the node itself near the wall.
+    if (around.some((m) => wallFoot(coord[m], F).d > 0.05) || wallFoot(coord[n], F).d > CORNER_M) continue;
+    // Where: the point on paving outside, within CORNER_M, that makes the walk
+    // through the junction shortest — the bend of the paths as the print
+    // shows it, just clear of the wall. Its edges run straight to whatever
+    // each wall node leads on to, the wall node gone, where that stays on
+    // paving; where it does not, to the wall nodes themselves.
+    const o = coord[n];
+    const place = (targets) => {
+      let q = null, best = Infinity;
+      for (let dx = -CORNER_M; dx <= CORNER_M; dx += 0.25) {
+        for (let dy = -CORNER_M; dy <= CORNER_M; dy += 0.25) {
+          const c = [o[0] + dx, o[1] + dy];
+          if (Math.hypot(dx, dy) > CORNER_M || inAnyFootprint(c) || wallFoot(c, F).d < CORNER_CLEAR_M || !pavedWell(c)) continue;
+          const walk = targets.reduce((t, p) => t + dist(c, p), 0);
+          if (walk >= best) continue;
+          if (targets.some((p) => underRoof(c, p) || unpaved(c, p) > STRAY_M)) continue;
+          best = walk;
+          q = c;
+        }
+      }
+      return q;
+    };
+    const ends = around.map((m) => {
+      const beyond = [...adj.get(m)].filter((x) => x !== n);
+      return { m, o: beyond.length === 1 ? beyond[0] : null };
+    });
+    let q = place(ends.map((e) => coord[e.o ?? e.m]));
+    if (q) {
+      for (const { m, o: on } of ends) {
+        if (on === null) continue;
+        const k = EK(m, on), w = edgeW.get(k) ?? 1, s = edgeS.get(k) ?? new Set();
+        const kn = EK(n, m), sn = edgeS.get(kn) ?? new Set();
+        edges.delete(k);
+        edges.delete(kn);
+        addEdge(n, on, w, [...s, ...sn]);
+      }
+    } else {
+      q = place(around.map((m) => coord[m]));
+      if (!q) continue;
+    }
+    const from = unflat(coord[n]);
+    coord[n] = q;
+    cornerMoves.push({ F: F.i, from, to: unflat(q) });
+    rebuild();
+    return standOffCorners();
+  }
+}
+
 function clipAtWalls(judge) {
   rebuild();
   cutAtWalls();
   joinHiddenEnds();
+  standOffCorners();
   const deg = new Map();
   for (const [u, v] of edges.values()) {
     deg.set(u, (deg.get(u) ?? 0) + 1);
@@ -1507,6 +1938,18 @@ rebuild();
 // ground distance. Where the two are already effectively joined, nothing is
 // done.
 //
+// "To get across" means to the point the join would land on, and every line
+// within JUNCTION_M is asked, nearest first. This used to take the nearest
+// line only and measure the way round to its nearer END, and both halves hid
+// junctions. A dead end whose last drawn segment is shorter than JUNCTION_M
+// finds its own neighbour's edges nearest, which are rightly refused, and
+// never got to the line beyond; and the two tines of a fork are a few steps
+// apart at their apex however far it is from one to the other along them.
+// Driveway 1081 stopping 5.2 m short of driveway 1087 at the west entrance
+// was both: 52 m round by the graph, and missed. Asked properly, the stage
+// makes eight more joins than it did, every connector on pavement, and 440
+// walks between two places get shorter, by 720 m in all.
+//
 // HOW the two are joined matters as much as whether. This used to merge the
 // node and the line at their midpoint, which moved BOTH drawn lines by half the
 // gap — up to 3 m at JUNCTION_M — and the node here is usually mid-path, so
@@ -1558,35 +2001,101 @@ function junctionDistances(from, cap) {
 }
 const dist2 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
+/**
+ * The most of a junction connector that may lie off the paving the print
+ * shows; and the most where the connector carries a path on from its END CAP.
+ *
+ * A path drawn up to another and stopping short ends in a round cap, and the
+ * lawn between the cap and the other path's band is drawing slop, not a verge:
+ * nobody lays a walkway to stop two metres short of the next. Where the node
+ * is a dead end and the connector runs on within CAP_ANGLE of the line of its
+ * last drawn segment, it may cross JUNCTION_CAP_OFF_M. A connector from the
+ * middle of a path, or turning off it, is across a verge between two paths
+ * and keeps to JUNCTION_OFF_M. The walkway west of the south car park was
+ * the case: its cap stops 5.4 m from the footway it points at, 2.1 m of that
+ * off the paving, and refused, the walkway joined the rest only at its far
+ * end. Of 2,000 random walks on the campus, 11 went round, up to 497 m
+ * further; no walk between two places used it either way.
+ */
+const JUNCTION_OFF_M = 1.0;
+const JUNCTION_CAP_OFF_M = 2.5;
+const CAP_ANGLE = 30;
+/** Whether `n` is a dead end and `to` lies on along its last drawn segment. */
+const capOn = (n, adjOf, to) => {
+  const [m, ...more] = adjOf.get(n) ?? [];
+  if (m === undefined || more.length) return false;
+  const p = coord[n], q = coord[m];
+  const h1 = Math.atan2(p[1] - q[1], p[0] - q[0]), h2 = Math.atan2(to[1] - p[1], to[0] - p[0]);
+  let gap = Math.abs(h1 - h2);
+  if (gap > Math.PI) gap = 2 * Math.PI - gap;
+  return gap <= (CAP_ANGLE * Math.PI) / 180;
+};
 let welded = 0, connectors = 0, connectorMetres = 0;
+const offPaving = new Map();
 for (let pass = 0; pass < 8; pass += 1) {
   rebuild();
   const nodes = new Set();
   for (const [u, v] of edges.values()) { nodes.add(u); nodes.add(v); }
 
+  const adjOf = new Map();
+  for (const [u, v] of edges.values()) {
+    if (!adjOf.has(u)) adjOf.set(u, new Set());
+    if (!adjOf.has(v)) adjOf.set(v, new Set());
+    adjOf.get(u).add(v);
+    adjOf.get(v).add(u);
+  }
   const actions = [];
-  for (const n of nodes) {
+  for (const n of [...nodes].sort((x, y) => x - y)) {
     const p = coord[n];
-    let best = null;
+    // Every line in reach, nearest first, and not just the nearest: a dead end
+    // whose last drawn segment is shorter than JUNCTION_M finds its own
+    // neighbour's edges first, and those are rightly turned down.
+    const near = [];
     for (const [key, [u, v]] of edges) {
       if (u === n || v === n) continue;
       const d = segDist(p, coord[u], coord[v]);
-      if (d > JUNCTION_M || (best && d >= best.d)) continue;
-      best = { d, key, u, v };
+      if (d <= JUNCTION_M) near.push({ n, d, key, u, v });
     }
-    if (!best) continue;
-    // The guard: only weld where the graph really does send you the long way.
-    const reach = junctionDistances(n, JUNCTION_RATIO * Math.max(best.d, 1) + 1);
-    const around = Math.min(reach.get(best.u) ?? Infinity, reach.get(best.v) ?? Infinity);
-    if (around <= JUNCTION_RATIO * Math.max(best.d, 1)) continue;
-    actions.push({ n, around, ...best });
+    if (!near.length) continue;
+    near.sort((x, y) => x.d - y.d || (x.key < y.key ? -1 : 1));
+    const reach = junctionDistances(n, JUNCTION_RATIO * JUNCTION_M + 1);
+    for (const cand of near) {
+      // The guard: only weld where the graph really does send you the long
+      // way — to the point on the line it would join, not to the line's
+      // nearer end. A fork's two tines meet at their apex, so measured to the
+      // ends they are always a few steps apart, however far round the walk
+      // from one tine across to the other really is.
+      const land = landingOf(cand, JUNCTION_M, JUNCTION_M);
+      if (!land) continue;
+      const around = Math.min(
+        (reach.get(cand.u) ?? Infinity) + dist(coord[cand.u], land.p),
+        (reach.get(cand.v) ?? Infinity) + dist(coord[cand.v], land.p),
+      );
+      if (around <= JUNCTION_RATIO * Math.max(cand.d, 1)) continue;
+      // ...and only on paving. A connector is path the sheet does not draw,
+      // and it has to lie where the sheet paints pavement: no more than
+      // JUNCTION_OFF_M of it off every band and plaza. Where the line it
+      // joins forks off the node's own (a fork), all of it on paving, because
+      // two tines either side of a planted wedge are far apart by the graph by
+      // construction, and the ratio approves a shortcut across the planting.
+      if (land.d > WELD_M) {
+        const fork = [cand.u, cand.v].some((e) => adjOf.get(n)?.has(e));
+        const off = unpaved(p, land.p);
+        if (off > (fork ? 0 : capOn(n, adjOf, land.p) ? JUNCTION_CAP_OFF_M : JUNCTION_OFF_M)) {
+          offPaving.set(unflat(p).join(','), { off, fork, to: unflat(land.p), around, d: cand.d });
+          continue;
+        }
+      }
+      actions.push({ ...cand, around });
+      break;
+    }
   }
   if (!actions.length) break;
 
   actions.sort((x, y) => x.d - y.d);
   let applied = 0;
   for (const act of actions) {
-    const hit = landOnLine(act, JUNCTION_M);
+    const hit = landOnLine(act, JUNCTION_M, JUNCTION_M);
     if (!hit) continue;
     if (hit.d <= WELD_M) {
       anchor(hit.at, hit.n);
@@ -1625,6 +2134,119 @@ collapsePasses();
 // since have moved under a roof, and the passages right through a building,
 // which can only be judged against every other way round.
 clipAtWalls(true);
+
+// --- 3e'. cut across the vee where two paths merge ---------------------------
+//
+// Two paths that merge at a shallow angle are drawn as two strokes whose
+// bands run together for metres before their centrelines meet. On the sheet
+// that is one wedge of paving, and anyone walking from one path onto the
+// other cuts across it. In the graph they meet only at the point of the vee,
+// so the walk ran on to the point and came back down the other arm: south of
+// the stadium, where walkway 1271 runs into 1314 at 27 degrees, a walk from
+// one to the other went 19.5 m east and 10.8 m back, turning through 152
+// degrees, on 130 walks between two places; where 1269 runs into 1376 south of
+// the ITC, on 155 more.
+//
+// None of the stages above sees it. JUNCTION asks for a way round six times
+// the gap, and a vee is never that: its way round is the two arms. So this
+// asks the band instead. At every node, for every two edges leaving it within
+// VEE_ANGLE of each other on different strokes, it slides a point back along
+// one and drops it square onto the other, and keeps the furthest such chord
+// that lies wholly on paving — every sample at least WELL_INSIDE_M inside a
+// drawn band or on a plaza — and under no roof. Where that saves VEE_SAVE_M
+// or more over the point of the vee, the chord is added as a connector,
+// counted and printed beside the junction stage's. The chord sits where the
+// two grey bands have already become one, so it is path the sheet does show,
+// as paving, and does not draw as a line. Both arms stay exactly as drawn.
+//
+// A chord's end within a weld of the far end of its arm is that end, at both
+// ends of the chord. It was only within LAND_MIN_M at one of them, and three
+// chords landed a metre from the junction at the end of their arm, at the
+// west entrance and beside the Evangelisti Culinary Arts Center: two
+// junctions a stride apart, and every walk through them told to turn, walk
+// 3 ft and turn again. Over every walk between two places, instructions
+// under 10 ft after the one before went from 514 to 203. Those three chords
+// are gone (15 -> 12 chords, 48 -> 42 m), and the walking rises by 2.2 km
+// of 3,174, 8.3 m at most.
+const VEE_ANGLE = 45;
+const VEE_SAVE_M = 4;
+const pavedLine = (a, b) => {
+  const n = Math.max(1, Math.ceil(dist(a, b) / BAND_STEP_M));
+  for (let k = 0; k <= n; k += 1) if (!pavedWell([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n])) return false;
+  return true;
+};
+let vees = 0, veeMetres = 0;
+const veeAt = [];
+for (let pass = 0; pass < 4; pass += 1) {
+  rebuild();
+  const adj = new Map();
+  for (const [u, v] of edges.values()) {
+    if (!adj.has(u)) adj.set(u, []);
+    if (!adj.has(v)) adj.set(v, []);
+    adj.get(u).push(v);
+    adj.get(v).push(u);
+  }
+  const cands = [];
+  for (const [n, around] of [...adj].sort((x, y) => x[0] - y[0])) {
+    const o = coord[n];
+    for (const a of around) {
+      for (const b of around) {
+        // Already a triangle: a chord made in an earlier pass, or drawn.
+        if (a === b || edges.has(EK(a, b))) continue;
+        const ka = EK(n, a), kb = EK(n, b);
+        if (shareStroke(edgeS.get(ka) ?? new Set(), edgeS.get(kb) ?? new Set())) continue;
+        const ha = Math.atan2(coord[a][1] - o[1], coord[a][0] - o[0]), hb = Math.atan2(coord[b][1] - o[1], coord[b][0] - o[0]);
+        let gap = Math.abs(ha - hb);
+        if (gap > Math.PI) gap = 2 * Math.PI - gap;
+        if (gap > (VEE_ANGLE * Math.PI) / 180) continue;
+        const La = dist(o, coord[a]), Lb = dist(o, coord[b]);
+        let best = null;
+        for (let s = WELD_M; s <= La + 1e-9; s += BAND_STEP_M) {
+          // Within a weld of the arm's far end is that end, as it is for the
+          // other arm's below. It was only within LAND_MIN_M here, and two
+          // chords landed a metre from the junction at the arm's end: two
+          // junctions a stride apart, and every walk through them told to
+          // turn, walk 3 ft and turn again.
+          const t = La - s < WELD_M ? 1 : s / La;
+          const X = [o[0] + t * (coord[a][0] - o[0]), o[1] + t * (coord[a][1] - o[1])];
+          const f = project(X, o, coord[b]);
+          if (f.t * Lb < WELD_M || f.d > JUNCTION_M) continue;
+          const Y = (1 - f.t) * Lb < WELD_M ? coord[b] : f.foot;
+          if (!pavedLine(X, Y) || underRoof(X, Y)) continue;
+          const save = t * La + dist(o, Y) - dist(X, Y);
+          if (!best || save > best.save) best = { n, a, b, ka, kb, t, X, Y, ty: (1 - f.t) * Lb < WELD_M ? 1 : f.t, save, chord: dist(X, Y) };
+        }
+        if (best && best.save >= VEE_SAVE_M) cands.push(best);
+      }
+    }
+  }
+  cands.sort((x, y) => y.save - x.save || x.n - y.n);
+  let applied = 0;
+  const touched = new Set();
+  for (const c of cands) {
+    if (touched.has(c.ka) || touched.has(c.kb) || !edges.has(c.ka) || !edges.has(c.kb)) continue;
+    touched.add(c.ka); touched.add(c.kb);
+    const cutAt = (key, from, to, t, p) => {
+      if (t >= 1 - 1e-9) return to;
+      const w = coord.length, ew = edgeW.get(key) ?? 1, es = edgeS.get(key);
+      coord.push(p);
+      alias.push(w);
+      edges.delete(key);
+      addEdge(from, w, ew, es);
+      addEdge(w, to, ew, es);
+      return w;
+    };
+    const x = cutAt(c.ka, c.n, c.a, c.t, c.X);
+    const y = cutAt(c.kb, c.n, c.b, c.ty, c.Y);
+    addEdge(x, y, 1, [...strokesAt(x), ...strokesAt(y)]);
+    vees += 1;
+    veeMetres += c.chord;
+    veeAt.push({ at: unflat(coord[c.n]), save: c.save, chord: c.chord });
+    applied += 1;
+  }
+  if (!applied) break;
+}
+rebuild();
 
 // --- 3f. hand-added links ----------------------------------------------------
 //
@@ -1707,7 +2329,36 @@ function attach(p) {
 }
 const freeEnds = [];
 
-let linkCount = 0, linkMetres = 0;
+// What a link crosses that the sheet paints as LAWN: sampled like unpaved(),
+// off every band and plaza, where the topmost filled surface in the
+// cartographer's painter's order is lawn. Printed per link with the count,
+// because a link is accepted against imagery and the sheet may disagree —
+// the apron between the Student Center and CTE is concrete on the ground and
+// lawn on the print — and the disagreement should be on the record, in the
+// log and in the link's `why`, rather than discovered by the next audit.
+const sheetFills = basemap
+  .filter((f) => f.properties.fill)
+  .flatMap((f) => surfacesOf(f.geometry).map((rings) => ({ kind: f.properties.kind, i: f.properties.i, rings: rings.map((r) => r.map(flat)) })))
+  .map((P) => ({ ...P, box: boxOf(P.rings[0]) }));
+function sheetLawn(a, b) {
+  const L = dist(a, b);
+  const n = Math.max(1, Math.ceil(L / BAND_STEP_M));
+  let lawn = 0;
+  for (let k = 0; k < n; k += 1) {
+    const p = [a[0] + ((b[0] - a[0]) * (k + 0.5)) / n, a[1] + ((b[1] - a[1]) * (k + 0.5)) / n];
+    if (paved(p)) continue;
+    let top = null;
+    for (const P of sheetFills) {
+      if (p[0] < P.box[0] || p[0] > P.box[2] || p[1] < P.box[1] || p[1] > P.box[3]) continue;
+      if ((!top || P.i > top.i) && inPoly(p, P)) top = P;
+    }
+    if (top?.kind === 'lawn') lawn += L / n;
+  }
+  return lawn;
+}
+
+let linkCount = 0, linkMetres = 0, linkLawn = 0;
+const linkLawnAt = [];
 {
   const file = src('path-links.json');
   const links = existsSync(file)
@@ -1717,14 +2368,27 @@ let linkCount = 0, linkMetres = 0;
     if (link.geometry?.type !== 'LineString') continue;
     const pts = link.geometry.coordinates.map(flat);
     if (pts.length < 2) continue;
+    // Only the two ends attach. A vertex between them is where the link bends
+    // round something on the ground — the planted bed beside the CTE apron —
+    // and is a node of the link's own, not a loose end.
+    const inner = (p) => {
+      const id = coord.length;
+      coord.push(p);
+      alias.push(id);
+      return id;
+    };
     let prev = attach(pts[0]);
+    let lawn = 0;
     for (let i = 1; i < pts.length; i += 1) {
-      const next = attach(pts[i]);
+      const next = i === pts.length - 1 ? attach(pts[i]) : inner(pts[i]);
       addEdge(find(prev), find(next));
       linkMetres += dist(coord[find(prev)], coord[find(next)]);
+      lawn += sheetLawn(coord[find(prev)], coord[find(next)]);
       prev = next;
     }
     linkCount += 1;
+    linkLawn += lawn;
+    if (lawn >= 0.5) linkLawnAt.push({ at: link.geometry.coordinates[0], lawn });
   }
   rebuild();
 }
@@ -1738,26 +2402,31 @@ let linkCount = 0, linkMetres = 0;
 // carries no stroke at all — and nearest-vertex snapping never noticed it,
 // because nothing snapped into the middle of the long edge.
 //
-// It is here, after the hand links, because today's one case is a hand link:
-// the 29.5 m line across the plaza between Fine & Applied Arts and the Kaneko
-// Gallery. Its east end shares a node with the 6.1 m stroke that turns south
-// out of the plaza, 6 degrees apart and ending 0.66 m off the link; its west
-// end runs over 3.1 m and 2.8 m of drawn walkway into the gate. Snapping onto
-// edges found it: a point on the plaza joined the link, walked 10 m east to
-// the shared node and came 6 m back down the short stroke to turn south —
-// "U-turn" in the directions, 48 ft from the start.
+// It is here, after the hand links, because the case it was written for is a
+// hand link: the 26.4 m line across the mouth of driveway 1081, from the end of
+// the walkway west of Fine & Applied Arts to the College Oak Dr entrance. Its
+// east end shares a node with the 6.1 m stroke the walkway turns south by,
+// ending 0.41 m off the link; its west end runs back over 3.0 m, 3.0 m and
+// 2.5 m of the drawn driveway to the node it was written against. (It used
+// to end 3 m further west, on a lane arrow painted down the driveway that the
+// walk build read as path, and this comment called those pieces walkway.)
+// Snapping onto edges found it: a point beside the link joined it, walked
+// 10 m east to the shared node and came 6 m back down the short stroke to
+// turn south — "U-turn" in the directions, 48 ft from the start.
 //
 // So the long edge is rerouted through the short one's far end, which does not
 // move: the long edge becomes the short edge plus the rest of the way.
 // Repeated to a fixpoint, which walks along a run of short pieces one at a
-// time. At the plaza it takes five folds and leaves the crossing as the drawn
-// pieces at either end with 12 m of link between them, 17 m less network and
-// no doubled line; nothing else on the sheet folds.
+// time. At the driveway it takes four folds and leaves the crossing as the
+// drawn pieces at either end with 11.8 m of link between them, 14.6 m less
+// network and no doubled line. Two more fold a 5.8 m chord of one stroke, 27 m
+// east of the Hutchison Loop bus stop, onto the 2.3 m and 2.9 m pieces of the
+// stroke beside it.
 //
 // FOLD_ANGLE is the collapse stage's own "runs the same way", DUPE_ANGLE; at
-// 8 degrees the last fold, onto a 2.5 m piece of walkway 19 degrees off the
-// link, was missed, and a walk south from the plaza still began by going 6 m
-// west and coming back. FOLD_M is "on it": within the metre a drawn stroke
+// 8 degrees the last fold, onto a 2.5 m piece of the driveway 19 degrees off
+// the link, was missed, and a walk south from the walkway still began by
+// going 6 m west and coming back. FOLD_M is "on it": within the metre a drawn stroke
 // wanders. Together they cannot merge a real fork. A short edge whose end is
 // within a metre of the long one at up to 20 degrees is under 3 m long — the
 // last scrap of a stroke at a node, not a second way.
@@ -1832,13 +2501,147 @@ function components() {
   return out.sort((a, b) => b.length - a.length);
 }
 
-// Fragments go before anything is spliced onto them: splicing first strands a
-// destination whose nearest edge is in a piece that is then dropped.
+// --- 5. across the plazas: the surfaces ---------------------------------------
+//
+// The sheet draws a walkway two ways: as a stroke with a ground width, which is
+// a path and everything above turns into the graph, and as a FILLED shape in
+// the same pavement grey, which is a surface. strokeLines() rightly refuses to
+// ride the outline of a surface as if it were a path, and until this stage
+// nothing else read them at all, so the router only knew the strokes drawn
+// round a plaza's edge. A walk from one side of the paving round the STEM
+// Innovation Center to the other went all the way round it, on a map that
+// shows open paving straight across.
+//
+// WHICH SURFACES. Every shape filled in PAVEMENT on the walkway, parking or
+// driveway layer (PLAZA_KINDS). The colour is what the print shows; the layer
+// the cartographer filed a shape on is not. The promenade east of the Career
+// Technical Education building is on the parking layer and the wedge between
+// the Child Development Center and Kinesiology on the driveway layer, and both
+// are the same grey paving as the rest. The car parks' own tarmac is a darker
+// grey and is not taken. A closed LineString counts as the ring it draws: the
+// apron outside the Welcome and Support Center is filled that way. Anything
+// under PLAZA_MIN_M2 is a strip, not a plaza. Ten on today's sheet, by sheet
+// index:
+//
+//   i=1374  8,195 m2  round STEM, the ITC and the Library
+//   i=1400  4,301 m2  between TEW and Science & Engineering
+//   i=1381  3,796 m2  Kinesiology, Adaptive PE and the Gym, round the pool
+//   i=1257  2,619 m2  south and west of CTE
+//   i=1399  2,190 m2  between the Welcome and Support Center and Admin
+//   i=50    1,890 m2  east of CTE (on the parking layer)
+//   i=1395  1,155 m2  between the Welcome and Support Center and the Library
+//   i=1080    972 m2  between CDC and Kinesiology (on the driveway layer)
+//   i=1398    221 m2  the Welcome and Support Center's apron (a closed line)
+//   i=1380    200 m2  between Howard Hall and Raef Hall
+//
+// WHAT STANDS ON THEM. Everything of a kind that cannot be walked through,
+// filled or not (OBSTACLE_CLEARANCE): 101 building footprints and the three
+// buildings drawn only as an outline, the closed block, 509 trees and 46
+// shrubs in their planters, the pool, 24 rows of bleachers, the tennis courts
+// and the pitches, and the 45 bike-rack and 15 permit-machine symbols painted
+// on the paving where a rack or a machine stands. Each is kept off by its
+// clearance, and a gap between two of them narrower than PLAZA_GAP_M is closed
+// too. An outline drawn as an open line is a wall with no inside.
+
+const PLAZA_SAVE_M = 5;
+const PLAZA_SAVE = 0.15;
+/** How far outside its outline a vertex can sit and still be a way onto a plaza. */
+const PLAZA_REACH_M = 2.0;
+const PLAZA_STEP_M = 0.5;
+/** The narrowest gap between two obstacles a crossing may thread. */
+const PLAZA_GAP_M = 1.5;
+/** How far a corner looks for a drawn edge to step straight onto, how long that edge is, and how far apart two such steps. */
+const PLAZA_FOOT_M = 12;
+const PLAZA_FOOT_EDGE_M = 15;
+const PLAZA_FOOT_GAP_M = 6;
+/** A crossing's end this close to another line's middle meets it there. */
+const PLAZA_TEE_M = 1.0;
+/** Where crossings are cut, a node already on the line this close is the cut. */
+const PLAZA_SNAP_M = 0.3;
+/** How much longer than across, in metres and as a share, a pair may go by what is already kept. */
+const PLAZA_SPANNER = [{ metres: 1, share: 0.03 }, { metres: 2, share: 0.05 }, { metres: 3, share: 0.08 }];
+const PLAZA_LINES_MAX = 150;
+/** A crossing this close to the drawn network over this share of its length runs beside it. */
+const PLAZA_SHADOW_M = 3;
+const PLAZA_SHADOW = 0.5;
+/** Clearance round an obstacle, by kind: a metre off a wall, less off a planter. */
+const OBSTACLE_CLEARANCE = {
+  building: 1.0, closed: 1.0, bleachers: 1.0, pool: 1.0,
+  tree: 0.3, shrub: 0.6, sport: 0.3, tennis: 0.3, tennis_apron: 0.3,
+  bike_marker: 0.5, permit_machine: 0.5,
+};
+
+const toRings = (p, poly) => Math.min(...poly.rings.map((r) => {
+  let d = Infinity;
+  for (let k = 1; k < r.length; k += 1) d = Math.min(d, segDist(p, r[k - 1], r[k]));
+  return d;
+}));
+
+// Every outline of a kind that cannot be walked through, filled or not: a
+// building's wall drawn as a line is still a wall, and a court drawn as its
+// white outline is still a court. An open line is a wall with no inside.
+const obstacles = basemap
+  .filter((f) => f.properties.kind in OBSTACLE_CLEARANCE)
+  .flatMap((f) => {
+    const g = f.geometry;
+    const solid = g.type !== 'LineString' || closedLine(g.coordinates);
+    return (g.type === 'LineString' ? [[g.coordinates]] : surfacesOf(g)).map((rings) => {
+      const flatRings = rings.map((r) => r.map(flat));
+      const c = OBSTACLE_CLEARANCE[f.properties.kind];
+      const [x0, y0, x1, y1] = boxOf(flatRings[0]);
+      const m = Math.max(c, PLAZA_GAP_M);
+      return { i: f.properties.i, kind: f.properties.kind, clear: c, solid, rings: flatRings, box: [x0 - m, y0 - m, x1 + m, y1 + m] };
+    });
+  });
+
+const obstacleGrid = gridOf(obstacles, (o) => o.box);
+
+/**
+ * Whether a point is too near something that cannot be walked through: inside
+ * its clearance, or in a gap between two such things narrower than
+ * PLAZA_GAP_M — a row of planters with a metre between them is one hedge.
+ */
+const blocked = (p) => {
+  let near = null;
+  for (const o of obstacleGrid.get(cellKey(p[0], p[1])) ?? []) {
+    if (p[0] < o.box[0] || p[0] > o.box[2] || p[1] < o.box[1] || p[1] > o.box[3]) continue;
+    const d = o.solid && inPoly(p, o) ? 0 : toRings(p, o);
+    if (d < o.clear) return true;
+    if (d >= PLAZA_GAP_M) continue;
+    if (near && near.d + d < PLAZA_GAP_M) return true;
+    if (!near || d < near.d) near = { d };
+  }
+  return false;
+};
+const walkable = (p) => paved(p) && !blocked(p);
+const clearLine = (a, b) => {
+  const n = Math.max(1, Math.ceil(dist(a, b) / PLAZA_STEP_M));
+  for (let k = 0; k <= n; k += 1) {
+    if (!walkable([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n])) return false;
+  }
+  return true;
+};
+/** Whether a vertex is a way onto plaza P: on it, or within PLAZA_REACH_M of its edge, and not in an obstacle. */
+const portalOf = (P, p) => p[0] >= P.box[0] - PLAZA_REACH_M && p[0] <= P.box[2] + PLAZA_REACH_M
+  && p[1] >= P.box[1] - PLAZA_REACH_M && p[1] <= P.box[3] + PLAZA_REACH_M
+  && (inPoly(p, P) || toRings(p, P) <= PLAZA_REACH_M) && !blocked(p);
+
+// FRAGMENTS, held until the plazas have been crossed. Pieces the drawing does
+// not join to the rest used to go here, before anything was spliced onto
+// them: splicing first strands a destination whose nearest edge is in a piece
+// that is then dropped. But a piece that ends on a plaza is joined to the rest
+// by the plaza — the aprons the sheet draws from the Career Technical
+// Education building's doors out onto the paving south and west of it, and
+// from the Child Development Center's north door, stop on the paving and
+// touch no stroke. So a piece with a vertex that is a way onto a plaza is
+// held, and the plaza stage below decides; the rest go now, as before.
 const fragments = components().slice(1);
+const mainNode = components()[0][0];
+const held = fragments.filter((c) => c.some((n) => plazas.some((P) => portalOf(P, coord[n]))));
 {
-  const main = new Set(components()[0]);
+  const keepNodes = new Set([...components()[0], ...held.flat()]);
   for (const [key, [u, v]] of [...edges]) {
-    if (!main.has(u) || !main.has(v)) edges.delete(key);
+    if (!keepNodes.has(u) || !keepNodes.has(v)) edges.delete(key);
   }
 }
 
@@ -1910,6 +2713,9 @@ function doorFor(p, stubs, onNetwork) {
 }
 
 let spliced = 0, atDoor = 0;
+// Every node a destination or an entrance ended on, to say if any is left
+// on a piece that does not ship.
+const placeNodes = [];
 {
   const stubs = liveStubs();
   for (const place of places) {
@@ -1920,22 +2726,25 @@ let spliced = 0, atDoor = 0;
     // told not to use. See DOORS.
     let onNetwork = Infinity;
     for (const [u, v] of edges.values()) onNetwork = Math.min(onNetwork, segDist(p, coord[u], coord[v]));
-    if (doorFor(p, stubs, onNetwork) !== null) { atDoor += 1; continue; }
-    if (spliceOnto(p) !== null) spliced += 1;
+    const door = doorFor(p, stubs, onNetwork);
+    if (door !== null) { atDoor += 1; placeNodes.push(door); continue; }
+    const id = spliceOnto(p);
+    if (id !== null) { spliced += 1; placeNodes.push(id); }
   }
 }
 
 // ENTRANCES, the same way. build-directory.mjs sends a building's Directions
 // to where its walls come nearest the network — every corner about as near as
-// the nearest, see wallNearest() in building-names.mjs — and a point on an
-// edge is no vertex until something splices one there. The directory used to
+// the nearest, see wallNearest() in building-names.mjs, and for a building
+// drawn as several footprints the point nearest each of them, memberNearest()
+// — and a point on an edge is no vertex until something splices one there. The directory used to
 // take the nearest VERTEX instead, which made the entrance depend on where the
 // stages above happened to leave one: when COLLAPSE took the Learning Resource
 // Center's away, its entrance moved 53 m to the next corner whose vertex had
 // survived, with the network still passing 0.3 m from the old one. The
 // buildings are buildings.json's, grouped and named as the directory groups
 // and names them, so each point spliced is one the directory asks for.
-let entranceNodes = 0, entranceSplices = 0;
+let entranceNodes = 0, entranceSplices = 0, memberNodes = 0, memberSplices = 0;
 {
   const footprints = adoptPrintedNames(loadFootprints(src('buildings.json')),
     JSON.parse(readFileSync(src('labels.json'), 'utf8')).features);
@@ -1943,18 +2752,580 @@ let entranceNodes = 0, entranceSplices = 0;
     const segments = [...edges.values()].map(([u, v]) => [unflat(coord[u]), unflat(coord[v])]);
     for (const { at } of wallNearest(group, segments)) {
       const before = coord.length;
-      if (spliceOnto(flat(at)) === null) continue;
+      const id = spliceOnto(flat(at));
+      if (id === null) continue;
+      placeNodes.push(id);
       entranceNodes += 1;
       if (coord.length > before) entranceSplices += 1;
     }
   }
 }
 
-// --- ship -------------------------------------------------------------------
+// --- 5. across the plazas: the crossings ---------------------------------------
+//
+// Each plaza is walked the way open ground is walked: a visibility graph. Its
+// nodes are its WAYS ON and the corners worth turning at. The ways on are
+// every vertex of the network on the plaza or within PLAZA_REACH_M of its edge
+// (the fragments held above among them), every point where a drawn edge crosses
+// its outline, and points on the long drawn edges beside it (below). The
+// corners are each convex corner of an obstacle, pushed out past its
+// clearance, and each reflex corner of the plaza's own outline, pushed in. Two
+// nodes see each other when the straight line between them stays on pavement
+// (inside a plaza, or on the drawn band of a stroke) and walkable, tested every
+// PLAZA_STEP_M, which is finer than anything on the sheet that could be missed
+// between samples.
+//
+// THE OUTLINE ITSELF GETS NO CLEARANCE, only its reflex corners. Two ways on
+// the outline see each other along it, so where a plaza's edge meets lawn
+// rather than more paving a crossing can run on the edge: 191 m of the 4,628 m
+// has unpaved ground within 0.75 m of one side, most of it along the paving
+// west and east of CTE, and a route there is drawn on the grey's edge. It is
+// on the paving; an inset off an edge that meets lawn would keep it a stride
+// in, at the price of every figure in this stage.
+//
+// A pair of ways on is worth a crossing when the way across the plaza is
+// shorter than the way round by the drawn network, by PLAZA_SAVE_M and by
+// PLAZA_SAVE of the way round. That rule is a judgement, not a proof: a
+// walk that carries on past the two ways on can want a crossing between two
+// that do not qualify. It keeps a route from being pulled off a drawn path to
+// save a stride. On today's sheet 1,090 pairs qualify, and their shortest
+// paths across are 716 lines, 19.3 km. Most of those are near-twins (see THE
+// SPANNER below), and what is kept is 221 lines, 4.8 km. Noded with each
+// other and with the network, those become the 590 pieces, 4,628 m, that
+// ship. When this was measured on the network of the time, keeping every path
+// instead, 643 lines once one pair's path serves another, saved 166.4 km over
+// every walk between two places, by what the router weighs, and the lines
+// kept 157.7 km, 95% of that.
+//
+// What ships goes to src/plaza-paths.json, not paths.json, for the reason
+// approach-paths.json is separate: paths.json is what the map DRAWS, and these
+// lines are not drawn — the plaza already is, as paving, and a route across it
+// shows on its own ribbon. The router unions the file in (see `plazas` in
+// createGraph()) and measures nothing to it: a plaza line is offered beside the
+// drawn network, never instead of it. Ways on are shipped vertices at the
+// coordinates they shipped at, so the two files weld exactly; the corners, and
+// the points where two crossings cross, are vertices only plaza lines touch.
+// There are 268 of those.
 
-const keep = new Set(components()[0]);
+/** Dijkstra over `adj` (node -> [{ v, w, line }]) from one node, out to `cap` metres or until `target` is settled. */
+function plazaDijkstra(adj, from, cap = Infinity, target = null) {
+  const d = new Map([[from, 0]]);
+  const prev = new Map();
+  const heap = [[0, from]];
+  const push = (item) => {
+    heap.push(item);
+    for (let i = heap.length - 1; i > 0;) {
+      const up = (i - 1) >> 1;
+      if (heap[up][0] <= heap[i][0]) break;
+      [heap[up], heap[i]] = [heap[i], heap[up]];
+      i = up;
+    }
+  };
+  const pop = () => {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) {
+      heap[0] = last;
+      for (let i = 0; ;) {
+        const l = 2 * i + 1, r = l + 1;
+        let m = i;
+        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+        if (m === i) break;
+        [heap[m], heap[i]] = [heap[i], heap[m]];
+        i = m;
+      }
+    }
+    return top;
+  };
+  while (heap.length) {
+    const [du, u] = pop();
+    if (du > d.get(u)) continue;
+    if (u === target) break;
+    for (const { v, w, line } of adj.get(u) ?? []) {
+      if (line?.removed) continue;
+      const dv = du + w;
+      if (dv > cap || dv >= (d.get(v) ?? Infinity)) continue;
+      d.set(v, dv);
+      prev.set(v, { u, line });
+      push([dv, v]);
+    }
+  }
+  return { d, prev };
+}
+const link = (adj, u, v, w, line = null) => {
+  if (!adj.has(u)) adj.set(u, []);
+  if (!adj.has(v)) adj.set(v, []);
+  adj.get(u).push({ v, w, line });
+  adj.get(v).push({ v: u, w, line });
+};
+
+// Every node of the crossings by key: a drawn node by its id, and `c`orners,
+// `f`eet on drawn edges and `x` crossings by name. `at` is where it is.
+const plazaNode = new Map();
+const nodeKeyOf = (n) => {
+  if (!plazaNode.has(n)) plazaNode.set(n, { key: n, at: coord[n] });
+  return n;
+};
+const liveNodes = [...new Set([...edges.values()].flat())].sort((x, y) => x - y);
+
+// The drawn edges as they stand, for the feet and the shadow test.
+const drawnSegs = [...edges].map(([key, [u, v]]) => ({ key, u, v, a: coord[u], b: coord[v] }));
+const drawnGrid = gridOf(drawnSegs, ({ a, b }) => [
+  Math.min(a[0], b[0]) - PLAZA_FOOT_M, Math.min(a[1], b[1]) - PLAZA_FOOT_M,
+  Math.max(a[0], b[0]) + PLAZA_FOOT_M, Math.max(a[1], b[1]) + PLAZA_FOOT_M,
+]);
+const nearDrawn = (p) => drawnGrid.get(cellKey(p[0], p[1])) ?? [];
+/** Every drawn edge whose box comes near the line a-b. */
+const drawnAlong = (a, b) => {
+  const out = new Set();
+  const n = Math.max(1, Math.ceil(dist(a, b) / (CELL / 2)));
+  for (let k = 0; k <= n; k += 1) {
+    for (const seg of nearDrawn([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n])) out.add(seg);
+  }
+  return [...out];
+};
+
+// Feet: points on drawn edges a crossing may start from, by edge, each `t` of
+// the way along it. Shared between plazas, so two that step onto one edge at
+// one place step onto one node.
+const feetOn = new Map();
+let footCount = 0;
+function footAt(seg, t, apart = WELD_M) {
+  const L = dist(seg.a, seg.b);
+  if (t * L < WELD_M) return nodeKeyOf(seg.u);
+  if ((1 - t) * L < WELD_M) return nodeKeyOf(seg.v);
+  const list = feetOn.get(seg.key) ?? [];
+  const same = list.find((f) => Math.abs(f.t - t) * L < apart);
+  if (same) return same.key;
+  const key = `f${footCount += 1}`;
+  const at = flat(unflat([seg.a[0] + t * (seg.b[0] - seg.a[0]), seg.a[1] + t * (seg.b[1] - seg.a[1])]));
+  list.push({ key, t });
+  feetOn.set(seg.key, list);
+  plazaNode.set(key, { key, at, foot: seg });
+  return key;
+}
+
+// A corner: each convex corner of an obstacle near the plaza, pushed out
+// along its bisector past the clearance; each reflex corner of the plaza's
+// own outline, pushed half a metre in.
+const cornerOf = (r, k, sign, push) => {
+  const n = r.length - 1;                          // rings repeat their first vertex
+  const p = r[k], a = r[(k - 1 + n) % n], b = r[(k + 1) % n];
+  const ua = [(a[0] - p[0]) / (dist(a, p) || 1), (a[1] - p[1]) / (dist(a, p) || 1)];
+  const ub = [(b[0] - p[0]) / (dist(b, p) || 1), (b[1] - p[1]) / (dist(b, p) || 1)];
+  const cross = ua[0] * ub[1] - ua[1] * ub[0];
+  // On a counter-clockwise ring a convex corner turns right (cross < 0) and a
+  // reflex one left; `sign` says which is wanted, already flipped for winding.
+  if (Math.sign(cross) * sign <= 0) return null;
+  const bis = [ua[0] + ub[0], ua[1] + ub[1]];
+  const L = Math.hypot(...bis);
+  if (L < 1e-6) return null;
+  return [p[0] - (bis[0] / L) * push, p[1] - (bis[1] / L) * push];
+};
+
+let cornerCount = 0;
+const plazaRuns = [];
+for (const P of plazas) {
+  const reach = [P.box[0] - PLAZA_REACH_M, P.box[1] - PLAZA_REACH_M, P.box[2] + PLAZA_REACH_M, P.box[3] + PLAZA_REACH_M];
+  const keys = [];
+  const has = new Set();
+  const add = (key) => { if (!has.has(key)) { has.add(key); keys.push(key); } };
+  const near = (q) => keys.some((k) => dist(plazaNode.get(k).at, q) < WELD_M);
+
+  // Ways on: the network's vertices on the plaza or within reach of its edge.
+  for (const n of liveNodes) if (portalOf(P, coord[n])) add(nodeKeyOf(n));
+  // ...and where a drawn edge crosses its outline, away from the edge's ends.
+  for (const seg of drawnSegs) {
+    for (const r of P.rings) {
+      for (let k = 1; k < r.length; k += 1) {
+        const hit = crossing(seg.a, seg.b, r[k - 1], r[k]);
+        if (!hit) continue;
+        const q = [seg.a[0] + hit[0] * (seg.b[0] - seg.a[0]), seg.a[1] + hit[0] * (seg.b[1] - seg.a[1])];
+        if (!blocked(q)) add(footAt(seg, hit[0]));
+      }
+    }
+  }
+
+  // Corners worth turning at, welded: none within WELD_M of a way on or of
+  // a corner already taken, so a row of planters is not a fan of near-twins.
+  const corners = [];
+  const take = (q) => {
+    if (!q || !walkable(q) || near(q)) return;
+    const key = `c${cornerCount += 1}`;
+    plazaNode.set(key, { key, at: q });
+    add(key);
+    corners.push(key);
+  };
+  for (const o of obstacles) {
+    if (!o.solid || o.box[2] < reach[0] || o.box[0] > reach[2] || o.box[3] < reach[1] || o.box[1] > reach[3]) continue;
+    const r = o.rings[0];
+    const orient = Math.sign(ringArea(r));
+    for (let k = 0; k < r.length - 1; k += 1) take(cornerOf(r, k, -orient, o.clear + 0.3));
+  }
+  {
+    const r = P.rings[0];
+    const orient = Math.sign(ringArea(r));
+    for (let k = 0; k < r.length - 1; k += 1) take(cornerOf(r, k, orient, 0.5));
+  }
+
+  // ...and from each corner, straight onto the long drawn edge beside it:
+  // its foot on the nearest edge of PLAZA_FOOT_EDGE_M or more within
+  // PLAZA_FOOT_M, if it can see it, and one step every PLAZA_FOOT_GAP_M along
+  // it at most. A long edge along a plaza has no vertex in its middle to cross
+  // from — the 107 m south face of STEM has none in 107 m — and a short one
+  // has its ends.
+  for (const c of corners) {
+    const p = plazaNode.get(c).at;
+    const seg = nearDrawn(p)
+      .filter((sg) => dist(sg.a, sg.b) >= PLAZA_FOOT_EDGE_M && segDist(p, sg.a, sg.b) <= PLAZA_FOOT_M)
+      .sort((x, y) => segDist(p, x.a, x.b) - segDist(p, y.a, y.b) || x.key.localeCompare(y.key))[0];
+    if (!seg) continue;
+    const vx = seg.b[0] - seg.a[0], vy = seg.b[1] - seg.a[1];
+    const t = Math.max(0, Math.min(1, ((p[0] - seg.a[0]) * vx + (p[1] - seg.a[1]) * vy) / (vx * vx + vy * vy)));
+    if (clearLine(p, [seg.a[0] + t * vx, seg.a[1] + t * vy])) add(footAt(seg, t, PLAZA_FOOT_GAP_M));
+  }
+  plazaRuns.push({ P, keys });
+}
+
+// The drawn network with every foot in it, by node: what a crossing is
+// judged against, and what the kept crossings are added to.
+const network = new Map();
+for (const seg of drawnSegs) {
+  const chain = [{ t: 0, key: seg.u }, ...(feetOn.get(seg.key) ?? []), { t: 1, key: seg.v }].sort((x, y) => x.t - y.t);
+  const L = dist(seg.a, seg.b);
+  for (let k = 1; k < chain.length; k += 1) link(network, chain[k - 1].key, chain[k].key, (chain[k].t - chain[k - 1].t) * L);
+}
+
+// The visibility graph of each plaza, and every pair of ways on that is
+// shorter across it than round it by PLAZA_SAVE_M and PLAZA_SAVE.
+const pairs = [];
+for (const run of plazaRuns) {
+  const { P, keys } = run;
+  const vis = new Map();
+  const at = keys.map((k) => plazaNode.get(k).at);
+  for (let x = 0; x < keys.length; x += 1) {
+    for (let y = x + 1; y < keys.length; y += 1) {
+      if (clearLine(at[x], at[y])) link(vis, keys[x], keys[y], dist(at[x], at[y]));
+    }
+  }
+  const portals = keys.filter((k) => !String(k).startsWith('c'));
+  const span = dist([P.box[0], P.box[1]], [P.box[2], P.box[3]]);
+  run.portals = portals.length;
+  run.nodes = keys.length;
+  run.pairs = 0;
+  for (const [x, a] of portals.entries()) {
+    const across = plazaDijkstra(vis, a, span * 2);
+    const round = plazaDijkstra(network, a, span * 6);
+    for (const b of portals.slice(x + 1)) {
+      const dAcross = across.d.get(b);
+      if (dAcross === undefined) continue;
+      const dRound = round.d.get(b) ?? Infinity;
+      if (dRound - dAcross < Math.max(PLAZA_SAVE_M, PLAZA_SAVE * dRound)) continue;
+      const path = [b];
+      for (let v = b; v !== a; v = across.prev.get(v).u) path.push(across.prev.get(v).u);
+      pairs.push({ a, b, dAcross, dRound, path: path.reverse(), plaza: P.i });
+      run.pairs += 1;
+    }
+  }
+}
+
+// THE SPANNER. Every qualifying pair's whole path was the first cut, and it
+// kept fans of near-twins: 247 lines for 206 pairs, a dozen of them meeting at
+// one point, and every instruction on a walk across them a few feet from the
+// last. Shortest pair first, a path is kept only where the network and the
+// crossings kept so far do not already go within a metre and 3% of it. If that
+// still leaves more than PLAZA_LINES_MAX, the next tier of PLAZA_SPANNER is
+// tried, then the one after. On today's sheet the three tiers keep 346, 294
+// and 221 lines, so it is the last one, within 3 m and 8%, that ships. That is
+// still over the mark, because the pairs to serve are five times what they
+// were when the mark was set (1,090 against 206) now that the feet, the
+// outline crossings and four more plazas are counted. Over every walk between
+// two places, 203 instructions come under 10 ft after the one before with the
+// crossings, against 234 without them.
+const lineKey = (a, b) => (String(a) < String(b) ? `${a}|${b}` : `${b}|${a}`);
+pairs.sort((x, y) => x.dAcross - y.dAcross);
+let lines, graph, slack;
+for (slack of PLAZA_SPANNER) {
+  const { metres, share } = slack;
+  lines = new Map();
+  graph = new Map([...network].map(([k, list]) => [k, [...list]]));
+  for (const pair of pairs) {
+    const limit = pair.dAcross + Math.max(metres, share * pair.dAcross);
+    if ((plazaDijkstra(graph, pair.a, limit, pair.b).d.get(pair.b) ?? Infinity) <= limit) continue;
+    for (let k = 1; k < pair.path.length; k += 1) {
+      const [u, v] = [pair.path[k - 1], pair.path[k]];
+      if (lines.has(lineKey(u, v))) continue;
+      const line = { u, v, plaza: pair.plaza };
+      lines.set(lineKey(u, v), line);
+      link(graph, u, v, dist(plazaNode.get(u).at, plazaNode.get(v).at), line);
+    }
+  }
+  if (lines.size <= PLAZA_LINES_MAX) break;
+}
+const linesSpanned = lines.size;
+const metresOf = (list) => list.reduce((s, l) => s + dist(plazaNode.get(l.u).at, plazaNode.get(l.v).at), 0);
+const metresSpanned = metresOf([...lines.values()]);
+const linesAll = new Set(pairs.flatMap((p) => p.path.slice(1).map((v, k) => lineKey(p.path[k], v))));
+const metresAll = [...linesAll].reduce((s, k) => {
+  const [u, v] = k.split('|');
+  const node = (x) => plazaNode.get(/^\d+$/.test(x) ? Number(x) : x);
+  return s + dist(node(u).at, node(v).at);
+}, 0);
+
+// A CROSSING THAT RUNS BESIDE A DRAWN PATH is dropped, where it can be: one
+// within PLAZA_SHADOW_M of the network for PLAZA_SHADOW of its length pulls a
+// walk a metre or two off the path it is beside — the hook beside the Math
+// Learning Center. Unless dropping it costs some pair more than PLAZA_SAVE_M
+// over what the spanner gave it.
+const shadowOf = (line) => {
+  const a = plazaNode.get(line.u).at, b = plazaNode.get(line.v).at;
+  const n = Math.max(1, Math.ceil(dist(a, b) / PLAZA_STEP_M));
+  let near = 0;
+  for (let k = 0; k <= n; k += 1) {
+    const p = [a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n];
+    if (nearDrawn(p).some((seg) => segDist(p, seg.a, seg.b) <= PLAZA_SHADOW_M)) near += 1;
+  }
+  return near / (n + 1);
+};
+let shadowed = 0, shadowMetres = 0;
+{
+  // No pair is further by the spanner than the looser of its two tolerances.
+  const walk = (pair) => {
+    const cap = pair.dAcross + Math.max(2, 0.05 * pair.dAcross) + PLAZA_SAVE_M;
+    const { d, prev } = plazaDijkstra(graph, pair.a, cap, pair.b);
+    const used = new Set();
+    for (let v = pair.b; v !== pair.a && prev.has(v); v = prev.get(v).u) if (prev.get(v).line) used.add(prev.get(v).line);
+    return { d: d.get(pair.b) ?? Infinity, used };
+  };
+  const now = pairs.map(walk);
+  const spanned = now.map((w) => w.d);
+  const beside = [...lines.values()].map((line) => ({ line, share: shadowOf(line) }))
+    .filter((s) => s.share >= PLAZA_SHADOW)
+    .sort((x, y) => y.share - x.share || lineKey(x.line.u, x.line.v).localeCompare(lineKey(y.line.u, y.line.v)));
+  for (const { line } of beside) {
+    line.removed = true;
+    const touched = pairs.map((_, k) => k).filter((k) => now[k].used.has(line));
+    const after = touched.map((k) => walk(pairs[k]));
+    if (after.some((w, j) => w.d > spanned[touched[j]] + PLAZA_SAVE_M)) {
+      line.removed = false;
+      continue;
+    }
+    touched.forEach((k, j) => { now[k] = after[j]; });
+    lines.delete(lineKey(line.u, line.v));
+    shadowed += 1;
+    shadowMetres += dist(plazaNode.get(line.u).at, plazaNode.get(line.v).at);
+  }
+}
+
+// NODED, as the drawn strokes are (see NODE): where two crossings cross, or a
+// crossing crosses a drawn edge, both are cut there, and a crossing's end
+// within PLAZA_TEE_M of another line's middle meets it — the router joins
+// lines only at a shared vertex, and a corner 0.4 m from another crossing was
+// 78 m from it by the graph. A drawn edge cut this way is cut at a point on
+// it, so the drawing does not move.
+let plazaNoded = 0, plazaTeed = 0, plazaSnapped = 0, crossingCount = 0;
+{
+  const cutsOf = new Map();                         // line -> [{ t, key }]
+  const cut = (line, t, key) => {
+    if (!cutsOf.has(line)) cutsOf.set(line, []);
+    cutsOf.get(line).push({ t, key });
+  };
+  const drawnAt = (seg, t) => footAt(seg, t);       // a cut on a drawn edge is a foot
+  const list = [...lines.values()];
+  const ends = (l) => [plazaNode.get(l.u).at, plazaNode.get(l.v).at];
+  const named = (q) => {
+    const key = `x${crossingCount += 1}`;
+    plazaNode.set(key, { key, at: flat(unflat(q)) });
+    return key;
+  };
+  // SNAPPED: a cut within PLAZA_SNAP_M of a node the crossings already have —
+  // an end of one of them, or a cut made before — is made at that node. Three
+  // lines through one point cross at three points a few centimetres apart, and
+  // lines that graze a corner on their way past cross beside it; each of
+  // those was a node of its own, with a line of a centimetre or two from it to
+  // the next: 13 under 10 cm, the shortest 1.4 cm.
+  const inPlay = [...new Set(list.flatMap((l) => [l.u, l.v]))];
+  const snapTo = (q) => {
+    let best = null;
+    for (const k of inPlay) {
+      const d = dist(plazaNode.get(k).at, q);
+      if (d < PLAZA_SNAP_M && (!best || d < best.d)) best = { k, d };
+    }
+    return best?.k ?? null;
+  };
+  const cutOnce = (line, t, key) => {
+    if (key !== line.u && key !== line.v && !(cutsOf.get(line) ?? []).some((c) => c.key === key)) cut(line, t, key);
+  };
+  for (let x = 0; x < list.length; x += 1) {
+    const [a, b] = ends(list[x]);
+    for (let y = x + 1; y < list.length; y += 1) {
+      const A = list[x], B = list[y];
+      if ([A.u, A.v].some((k) => k === B.u || k === B.v)) continue;
+      const [c, d] = ends(B);
+      const hit = crossing(a, b, c, d);
+      if (!hit || hit.some((t) => t < 1e-6 || t > 1 - 1e-6)) continue;
+      const q = [a[0] + hit[0] * (b[0] - a[0]), a[1] + hit[0] * (b[1] - a[1])];
+      const near = snapTo(q);
+      if (near !== null) plazaSnapped += 1;
+      const key = near ?? named(q);
+      if (near === null) inPlay.push(key);
+      cutOnce(A, hit[0], key);
+      cutOnce(B, hit[1], key);
+      plazaNoded += 1;
+    }
+    for (const seg of drawnAlong(a, b)) {
+      if ([seg.u, seg.v].some((k) => k === list[x].u || k === list[x].v)) continue;
+      const hit = crossing(a, b, seg.a, seg.b);
+      if (!hit || hit.some((t) => t < 1e-6 || t > 1 - 1e-6)) continue;
+      const key = drawnAt(seg, hit[1]);
+      if (key === list[x].u || key === list[x].v) continue;
+      if (!(cutsOf.get(list[x]) ?? []).some((c) => c.key === key)) {
+        cut(list[x], hit[0], key);
+        if (!inPlay.includes(key)) inPlay.push(key);
+        plazaNoded += 1;
+      }
+    }
+  }
+  // Tees: an end near another line's middle.
+  const tees = [];
+  const endsOf = new Set(list.flatMap((l) => [l.u, l.v]));
+  for (const e of endsOf) {
+    const p = plazaNode.get(e).at;
+    for (const l of list) {
+      if (l.u === e || l.v === e) continue;
+      const [a, b] = ends(l);
+      if (segDist(p, a, b) > PLAZA_TEE_M) continue;
+      const vx = b[0] - a[0], vy = b[1] - a[1];
+      const t = ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / (vx * vx + vy * vy);
+      const L = Math.hypot(vx, vy);
+      if (t * L < WELD_M || (1 - t) * L < WELD_M) continue;
+      const q = [a[0] + t * vx, a[1] + t * vy];
+      if (!clearLine(p, q)) continue;
+      const near = snapTo(q);
+      if (near === e) continue;
+      if (near !== null) plazaSnapped += 1;
+      const key = near ?? named(q);
+      if (near === null) inPlay.push(key);
+      cutOnce(l, t, key);
+      tees.push({ u: e, v: key, plaza: l.plaza });
+    }
+    // Onto a drawn edge only from a corner or a crossing: two drawn paths
+    // that pass close and never meet are the junction stage's to join.
+    if (!/^[cx]/.test(String(e))) continue;
+    for (const seg of nearDrawn(p)) {
+      if (seg.u === e || seg.v === e || segDist(p, seg.a, seg.b) > PLAZA_TEE_M) continue;
+      const vx = seg.b[0] - seg.a[0], vy = seg.b[1] - seg.a[1];
+      const t = ((p[0] - seg.a[0]) * vx + (p[1] - seg.a[1]) * vy) / (vx * vx + vy * vy);
+      if (t <= 0 || t >= 1) continue;
+      const key = footAt(seg, t);
+      if (key === e || !clearLine(p, plazaNode.get(key).at)) continue;
+      tees.push({ u: e, v: key, plaza: list.find((l) => l.u === e || l.v === e).plaza });
+    }
+  }
+  for (const line of list) {
+    const cs = cutsOf.get(line);
+    if (!cs) continue;
+    lines.delete(lineKey(line.u, line.v));
+    const chain = [{ t: 0, key: line.u }, ...cs.sort((x, y) => x.t - y.t), { t: 1, key: line.v }];
+    for (let k = 1; k < chain.length; k += 1) {
+      if (chain[k].key === chain[k - 1].key) continue;
+      lines.set(lineKey(chain[k - 1].key, chain[k].key), { u: chain[k - 1].key, v: chain[k].key, plaza: line.plaza });
+    }
+  }
+  for (const tee of tees) {
+    if (tee.u === tee.v || lines.has(lineKey(tee.u, tee.v))) continue;
+    lines.set(lineKey(tee.u, tee.v), tee);
+    plazaTeed += 1;
+  }
+}
+
+// A corner or crossing only one line still reaches is a way to nowhere — the
+// line that carried on from it went beside a drawn path, above — and so is
+// the line to it. Off, and again, until every one turns somewhere.
+let danglers = 0;
+for (;;) {
+  const degree = new Map();
+  for (const l of lines.values()) for (const k of [l.u, l.v]) degree.set(k, (degree.get(k) ?? 0) + 1);
+  const loose = [...lines].filter(([, l]) => [l.u, l.v].some((k) => /^[cx]/.test(String(k)) && degree.get(k) === 1));
+  if (!loose.length) break;
+  for (const [key] of loose) lines.delete(key);
+  danglers += loose.length;
+}
+
+// The feet the kept crossings use become vertices of the drawn edges they
+// are on, and nothing else does: an edge is cut only where a crossing leaves
+// it. The rest of the drawing is untouched.
+let edgesSplit = 0, feetUsed = 0;
+{
+  const used = new Set([...lines.values()].flatMap((l) => [l.u, l.v]));
+  for (const seg of drawnSegs) {
+    const feet = (feetOn.get(seg.key) ?? []).filter((f) => used.has(f.key)).sort((x, y) => x.t - y.t);
+    if (!feet.length) continue;
+    const w = edgeW.get(seg.key) ?? 1, s = edgeS.get(seg.key);
+    edges.delete(seg.key);
+    let from = seg.u;
+    for (const f of feet) {
+      const id = coord.length;
+      coord.push(plazaNode.get(f.key).at);
+      plazaNode.get(f.key).id = id;
+      addEdge(from, id, w, s);
+      from = id;
+    }
+    addEdge(from, seg.v, w, s);
+    edgesSplit += 1;
+    feetUsed += feet.length;
+  }
+}
+
+// The point nearest each shard of a building drawn as several footprints
+// (memberNearest() in building-names.mjs), spliced last, once the plazas are
+// crossed: an extra vertex on a drawn edge beside a plaza is one more way onto
+// it, and these are for the directory's ways in, not for the crossings.
+{
+  const footprints = adoptPrintedNames(loadFootprints(src('buildings.json')),
+    JSON.parse(readFileSync(src('labels.json'), 'utf8')).features);
+  for (const group of groupByName(footprints).values()) {
+    const segments = [...edges.values()].map(([u, v]) => [unflat(coord[u]), unflat(coord[v])]);
+    for (const { at } of memberNearest(group, segments)) {
+      const before = coord.length;
+      const id = spliceOnto(flat(at));
+      if (id === null) continue;
+      placeNodes.push(id);
+      memberNodes += 1;
+      if (coord.length > before) memberSplices += 1;
+    }
+  }
+}
+
+// --- ship -------------------------------------------------------------------
+//
+// What ships is what a walk can reach from the network's main piece: by the
+// drawn edges, and across the plazas. A fragment a crossing joins ships with
+// it, in paths.json, drawn like any other stroke; what nothing joins is left
+// out, as it always was.
+const idOf = (k) => (typeof k === 'number' ? k : plazaNode.get(k).id ?? k);
+const keep = new Set();
+let rescued = 0;
+{
+  const adj = new Map();
+  const join = (u, v) => {
+    if (!adj.has(u)) adj.set(u, []);
+    if (!adj.has(v)) adj.set(v, []);
+    adj.get(u).push(v);
+    adj.get(v).push(u);
+  };
+  for (const [u, v] of edges.values()) join(u, v);
+  for (const l of lines.values()) join(idOf(l.u), idOf(l.v));
+  const stack = [mainNode];
+  keep.add(mainNode);
+  while (stack.length) for (const m of adj.get(stack.pop()) ?? []) if (!keep.has(m)) { keep.add(m); stack.push(m); }
+  rescued = held.filter((c) => keep.has(c[0])).length;
+  for (const [key, l] of [...lines]) if (!keep.has(idOf(l.u))) lines.delete(key);
+}
+const stranded = placeNodes.filter((n) => !keep.has(n)).length;
+
 const renumber = new Map();
-[...keep].sort((a, b) => a - b).forEach((id) => renumber.set(id, renumber.size + 1));
+[...keep].filter((id) => typeof id === 'number').sort((a, b) => a - b).forEach((id) => renumber.set(id, renumber.size + 1));
 
 const features = [];
 for (const [u, v] of edges.values()) {
@@ -2002,6 +3373,30 @@ doorFeatures.sort((x, y) => x.properties.i - y.properties.i
 writeFileSync(src('doors.json'), `${JSON.stringify({ type: 'FeatureCollection', features: doorFeatures })}\n`);
 const doorCount = new Set(doorFeatures.flatMap((f) => f.properties.stubs.flatMap((t) => t.doors.map(String)))).size;
 
+// The crossings, at the coordinates their ends shipped at, so the two files
+// weld exactly; corners and crossings are new vertices only crossings touch.
+const llOf = (k) => unflat(typeof idOf(k) === 'number' ? coord[idOf(k)] : plazaNode.get(k).at);
+const plazaFeatures = [...lines.values()]
+  .map((l) => ({
+    type: 'Feature',
+    properties: { plaza: l.plaza },
+    geometry: { type: 'LineString', coordinates: [llOf(l.u), llOf(l.v)].sort(byLonLat) },
+  }))
+  .filter((f) => f.geometry.coordinates[0].join() !== f.geometry.coordinates[1].join())
+  .sort((x, y) => x.properties.plaza - y.properties.plaza
+    || byLonLat(x.geometry.coordinates[0], y.geometry.coordinates[0])
+    || byLonLat(x.geometry.coordinates[1], y.geometry.coordinates[1]));
+writeFileSync(src('plaza-paths.json'), `${JSON.stringify({ type: 'FeatureCollection', features: plazaFeatures })}\n`);
+const plazaMetres = plazaFeatures.reduce((s, f) => s + dist(...f.geometry.coordinates.map(flat)), 0);
+const plazaNodes = new Set(plazaFeatures.flatMap((f) => f.geometry.coordinates.map(String)));
+const shippedLL = new Set(features.flatMap((f) => f.geometry.coordinates.map(String)));
+const plazaOnly = [...plazaNodes].filter((c) => !shippedLL.has(c)).length;
+for (const run of plazaRuns) {
+  const mine = plazaFeatures.filter((f) => f.properties.plaza === run.P.i);
+  run.lines = mine.length;
+  run.metres = mine.reduce((s, f) => s + dist(...f.geometry.coordinates.map(flat)), 0);
+}
+
 const metres = features.reduce((s, f) => {
   const [a, b] = f.geometry.coordinates.map(flat);
   return s + dist(a, b);
@@ -2012,6 +3407,10 @@ const byKind = (list) => Object.entries(list.reduce((acc, s) => {
 }, {})).map(([k, n]) => `${k} ${n}`).join(', ');
 
 console.log(`[walk-network] ${strokes.length} drawn strokes taken verbatim (${byKind(strokes)})`);
+for (const m of standoffs) {
+  console.log(`[walk-network]    ${m.kind} ${m.i}: about ${Math.round(m.metres)} m along the wall of sheet ${m.F}, up to ${m.depth.toFixed(2)} m under it, `
+    + `stood off to the middle of the band that shows (up to ${m.by.toFixed(1)} m out)`);
+}
 console.log(`[walk-network] ${dropped.length} dropped as duplicates (${byKind(dropped.map((d) => d.s))})`);
 console.log(`[walk-network] ${tailKept} kept despite being mostly shadowed — an uncovered tail over ${DUPE_TAIL_M} m`);
 for (const { s, by } of dropped.slice(0, 6)) {
@@ -2020,9 +3419,14 @@ for (const { s, by } of dropped.slice(0, 6)) {
 if (dropped.length > 6) console.log(`[walk-network]    ...and ${dropped.length - 6} more`);
 console.log(`[walk-network] ${kept.length} kept, ${intersections} crossings noded, welded at ${WELD_M} m`);
 console.log(`[walk-network] ${collapsed} nodes collapsed onto a duplicate corridor `
-  + `(tolerance = half the sum of the two drawn widths, min ${DUPE_M} m)`);
+  + `(tolerance = half the sum of the two drawn widths, min ${DUPE_M} m), `
+  + `${strayed.size} refused for dragging an edge over ${STRAY_M} m off the paving`);
 console.log(`[walk-network] ${Math.round(wallMetres)} m in ${wallPieces} pieces cut away at building walls, `
   + 'drawn where the print paints a building over them');
+for (const c of cornerMoves) {
+  console.log(`[walk-network]    a junction under the wall of sheet ${c.F} moved out from ${c.from.join(',')} to ${c.to.join(',')}, `
+    + `${dist(flat(c.from), flat(c.to)).toFixed(1)} m, onto the paving outside`);
+}
 console.log(`[walk-network]    ${roofJoins} stub end(s) under a roof joined to the path beyond the wall instead, `
   + `${roofConnectors} by connector: ${Math.round(roofConnectorMetres)} m the sheet does not draw`);
 for (const j of roofJoined) {
@@ -2043,19 +3447,44 @@ for (const [i, p] of passageExceptions) {
 console.log(`[walk-network] ${teed} dead ends teed onto the stroke they stopped short of within ${TEE_M} m`);
 console.log(`[walk-network] ${welded} near-miss junctions welded within ${JUNCTION_M} m (only where the graph made you walk ${JUNCTION_RATIO}x further around)`);
 console.log(`[walk-network]    ${connectors} of them wider than a weld, joined by a connector instead: ${Math.round(connectorMetres)} m the sheet does not draw`);
-console.log(`[walk-network] ${linkCount} hand-added link(s) from path-links.json, ${Math.round(linkMetres)} m of path the sheet does not draw, each written down by hand`);
+for (const [at, r] of offPaving) {
+  console.log(`[walk-network]    refused at ${at}: a ${r.d.toFixed(1)} m connector${r.fork ? ' across a fork' : ''} `
+    + `${r.off.toFixed(1)} m off the paving (${Number.isFinite(r.around) ? `${Math.round(r.around)} m` : `over ${JUNCTION_RATIO * JUNCTION_M} m`} round)`);
+}
+console.log(`[walk-network] ${vees} vee(s) where two paths merge cut across on the paving, `
+  + `${Math.round(veeMetres)} m of connector the sheet does not draw (only where it saves ${VEE_SAVE_M} m or more)`);
+for (const v of veeAt) console.log(`[walk-network]    at ${v.at.join(',')}: a ${v.chord.toFixed(1)} m chord saves ${v.save.toFixed(1)} m`);
+console.log(`[walk-network] ${linkCount} hand-added link(s) from path-links.json, ${Math.round(linkMetres)} m of path the sheet does not draw, each written down by hand; `
+  + `${linkLawn.toFixed(1)} m of them over what the sheet paints as lawn`);
+for (const { at, lawn } of linkLawnAt) console.log(`[walk-network]    ${lawn.toFixed(1)} m over sheet lawn: the link from ${at.join(',')}`);
 console.log(`[walk-network] ${folded} long edge(s) folded onto a short one leaving the same node within ${FOLD_ANGLE} deg and ending within ${FOLD_M} m of it`);
 for (const [lon, lat] of freeEnds) {
   console.warn(`[walk-network]    WARNING: a link end at ${lon.toFixed(DECIMALS)},${lat.toFixed(DECIMALS)} joins nothing — within ${WELD_M} m of no node and ${TEE_M} m of no edge`);
 }
-console.log(`[walk-network] no bridges invented; ${fragments.length} fragments left disconnected `
-  + `(${fragments.reduce((n, c) => n + c.length, 0)} nodes)`);
+const left = fragments.filter((c) => !keep.has(c[0]));
+console.log(`[walk-network] no bridges invented; ${left.length} fragments left disconnected `
+  + `(${left.reduce((n, c) => n + c.length, 0)} nodes), ${rescued} more joined to the rest across a plaza`);
+if (stranded) console.warn(`[walk-network]    WARNING: ${stranded} destination or entrance node(s) left on a piece that does not ship`);
 console.log(`[walk-network] ${spliced} destinations spliced in, ${atDoor} more resolved to the door of the footprint they are in`);
 console.log(`[walk-network] ${entranceNodes} points where a building's walls come nearest the network, `
   + `${entranceSplices} of them spliced in as new nodes, the rest within a weld of one`);
+console.log(`[walk-network]    and ${memberNodes} nearest a shard of a building drawn as several footprints, ${memberSplices} of them spliced in`);
 console.log(`[walk-network] ${doorCount} doors on ${doorFeatures.length} footprints, `
   + `${doorFeatures.reduce((n, f) => n + f.properties.stubs.length, 0)} pieces taken off the graph under their roofs -> src/doors.json`);
 console.log(`[walk-network] ${renumber.size} nodes, ${features.length} segments, ${Math.round(metres)} m -> src/paths.json`);
+console.log(`[walk-network] ${pairs.length} pairs of ways onto ${plazas.length} plazas shorter across than round, `
+  + `whose paths are ${linesAll.size} lines, ${Math.round(metresAll)} m`);
+console.log(`[walk-network]    ${linesSpanned} lines, ${Math.round(metresSpanned)} m, keep every pair within ${slack.metres} m and ${Math.round(slack.share * 100)}%; `
+  + `${shadowed} beside a drawn path dropped (${Math.round(shadowMetres)} m)`);
+console.log(`[walk-network]    noded: ${plazaNoded} crossings cut, ${plazaTeed} ends teed onto a line within ${PLAZA_TEE_M} m, `
+  + `${plazaSnapped} cuts made at a node within ${PLAZA_SNAP_M} m, `
+  + `${danglers} left leading nowhere dropped; ${feetUsed} feet on ${edgesSplit} drawn edges made vertices`);
+console.log(`[walk-network] ${plazaFeatures.length} plaza crossings, ${Math.round(plazaMetres)} m, ${plazaOnly} vertices only they touch, `
+  + `over ${plazaRuns.filter((r) => r.lines).length} of ${plazas.length} plazas -> src/plaza-paths.json (routed, not drawn)`);
+for (const r of plazaRuns) {
+  console.log(`[walk-network]    plaza i=${r.P.i}: ${Math.round(Math.abs(ringArea(r.P.rings[0])))} m2, ${r.portals} ways on, `
+    + `${r.nodes} nodes, ${r.pairs} pairs shorter across, ${r.lines} lines, ${Math.round(r.metres)} m`);
+}
 
 // CAMPUS_BOUNDS in src/main.js is this box. A network that grows past the old
 // one leaves part of itself outside the initial view.

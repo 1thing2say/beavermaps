@@ -108,13 +108,25 @@ export const ROUTE_LEGS_WIDTH = routeWidth(5, 1.9);
  *
  * Over the printed sheet these need no marking: the network sits under the
  * building band (src/layer-order.js), so the footprints paint out the
- * passages the walls stage keeps under roofs — 143 m in 28 pieces on the
+ * passages the walls stage keeps under roofs — 67 m in 17 pieces on the
  * current build, cut exactly as this cuts them — the way my campus's print
  * paints out its own walkways there. Over imagery there IS no band — the sheet
  * is not drawn on a photograph — and those same stretches were white paths
  * laid across the photographed roofs. So each line is cut where it crosses a
  * wall, and every piece inside a footprint carries `roofed: true`, which the
  * imagery filter in `addNetworkAndRoute` leaves out.
+ *
+ * EXCEPT A CLIP. A path that cuts a few metres across the corner of a
+ * footprint is not a passage under a roof, it is the sheet's corner and the
+ * path's centreline disagreeing by a metre — and leaving it out over imagery
+ * broke the line in two, with a gap where the walk visibly stops and starts
+ * again. At [-121.34639, 38.65109] two edges of 2.9 and 2.6 m inside the
+ * corner of a footprint did that to the line 211 place pairs walk along. So a
+ * roofed run, joined end to end across features, shorter than CLIP_M and
+ * open at both ends onto unroofed network, is put back (see unroofClips) —
+ * 9 pieces and 23 m on the current build, against 44 m that stays out. A
+ * run with one end open is a stub into a building and stays out; so does one
+ * long enough to be a passage.
  *
  * Cut on the client, not in the build, because whether a passage under a roof
  * is DRAWN is a question about which ground is showing, and paths.json is the
@@ -178,7 +190,52 @@ export function markRoofed(network, sheet) {
     if (pieces.length === 1 && !pieces[0].roofed) features.push(tag(feature, null, false));
     else for (const { roofed, coordinates } of pieces) features.push(tag(feature, coordinates, roofed));
   }
+  unroofClips(features);
   return { ...network, features };
+}
+
+/** A roofed run shorter than this, between two open ones, is a corner clip. */
+export const CLIP_M = 8;
+
+/**
+ * Put back every corner clip: a run of roofed pieces, joined end to end and
+ * whichever features they came from, that is shorter than CLIP_M and meets
+ * unroofed network at two or more of its ends. In place, on the `roofed` of
+ * pieces markRoofed has just made, which are its own objects.
+ */
+function unroofClips(features) {
+  const key = (c) => `${c[0].toFixed(7)},${c[1].toFixed(7)}`;
+  const ends = (f) => [f.geometry.coordinates[0], f.geometry.coordinates.at(-1)];
+  const open = new Set();
+  for (const f of features) if (!f.properties.roofed) for (const c of ends(f)) open.add(key(c));
+
+  const roofed = features.filter((f) => f.properties.roofed);
+  const parent = roofed.map((_, n) => n);
+  const find = (n) => (parent[n] === n ? n : (parent[n] = find(parent[n])));
+  const byEnd = new Map();
+  roofed.forEach((f, n) => {
+    for (const c of ends(f)) {
+      const k = key(c);
+      if (byEnd.has(k)) parent[find(n)] = find(byEnd.get(k));
+      else byEnd.set(k, n);
+    }
+  });
+
+  const runs = new Map();
+  roofed.forEach((f, n) => {
+    const root = find(n);
+    if (!runs.has(root)) runs.set(root, { metres: 0, open: new Set(), pieces: [] });
+    const run = runs.get(root);
+    run.pieces.push(f);
+    const cs = f.geometry.coordinates;
+    for (let k = 1; k < cs.length; k += 1) {
+      run.metres += Math.hypot((cs[k][0] - cs[k - 1][0]) * M_PER_LON, (cs[k][1] - cs[k - 1][1]) * M_PER_LAT);
+    }
+    for (const c of ends(f)) if (open.has(key(c))) run.open.add(key(c));
+  });
+  for (const run of runs.values()) {
+    if (run.metres < CLIP_M && run.open.size >= 2) for (const f of run.pieces) f.properties.roofed = false;
+  }
 }
 
 /** The sheet kinds a roof is drawn for — the walls stage's footprints. */
