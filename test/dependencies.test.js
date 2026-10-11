@@ -96,3 +96,18 @@ test('texture-compressor gets argparse 2, so sprintf-js and its advisory are not
     assert.match(entry.version, /^2\./, `${key} is ${entry.version}`);
   }
 });
+
+test('loaders.gl is one copy at one version, not a second tree nested under deck.gl', () => {
+  // geo-layers asks for ^4.4.3 and once got its own 4.5.2 tree beside the root
+  // 4.4.4. Both were bundled into the flyover chunk, and the root
+  // Tiles3DLoader src/flyover-view.js passes in ran on the nested 4.5.2
+  // loader-utils. deck.gl and luma.gl 9.3 peer-require ~4.4, so a later
+  // regeneration that re-nests 4.5 is the same bug again.
+  const loaders = Object.entries(lock.packages)
+    .filter(([key]) => /(^|\/)node_modules\/@loaders\.gl\/[^/]+$/.test(key));
+  assert.ok(loaders.length > 0);
+  const nested = loaders.map(([key]) => key).filter((key) => !key.startsWith('node_modules/@loaders.gl/'));
+  assert.deepEqual(nested, []);
+  const versions = new Set(loaders.map(([, entry]) => entry.version));
+  assert.equal(versions.size, 1, `@loaders.gl at ${[...versions].join(', ')}`);
+});
