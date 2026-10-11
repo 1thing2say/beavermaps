@@ -71,7 +71,8 @@ const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
 /**
  * The tile layer's id, which is also the prefix Tile3DLayer gives its sublayers
- * — so it is how `drawn` asks whether any geometry exists yet.
+ * — so it is how `drawn` asks whether any geometry exists yet. The first root's
+ * layer wears it bare; see `tilesId` for the ones after.
  */
 const TILES_ID = 'flyover-tiles';
 
@@ -307,7 +308,23 @@ function keyedFetch(key) {
     if (target.hostname.endsWith('googleapis.com') && !target.searchParams.has('key')) {
       target.searchParams.set('key', key);
     }
-    const response = await fetch(target.toString(), options);
+    const isRoot = target.pathname === new URL(TILESET).pathname;
+    let response;
+    try {
+      response = await fetch(target.toString(), options);
+    } catch (error) {
+      // No answer at all — offline, a captive portal, campus wifi dropping out.
+      // This used to reject before anything below could hear it, so the card
+      // spun for as long as it was open, and so did every card after it: the
+      // layer had asked once and would never ask again. Said, and marked as
+      // worth asking again on the next card. See `rootFailed`.
+      if (isRoot) {
+        stage.rootFailed = true;
+        stage.rootError = error;
+        stage.onRefused?.('Aerial view unavailable. Check your connection.');
+      }
+      throw error;
+    }
     // THE ONE REQUEST WHOSE REFUSAL IS THE WHOLE ANSWER, and nothing else was
     // listening for it. deck.gl's Tile3DLayer loads the root itself and does
     // not catch what that throws, so a refused key — the API not enabled, a
@@ -319,12 +336,20 @@ function keyedFetch(key) {
     // Said here because this is the only code on that path that is ours.
     // Google's own sentence is the message when it sent one, which is the
     // policy src/ground.js already follows for the same key's 2D half.
-    if (!response.ok && target.pathname === new URL(TILESET).pathname) {
+    //
+    // ONLY A KEY PROBLEM IS FOR GOOD. A 400, 401 or 403 is the key, the API or
+    // the referrer, and asking again in this tab will get the same answer. A
+    // 429 or a 503 is Google being busy for a minute, and recording one of
+    // those as a refusal disabled the aerial view until a reload; those are
+    // asked again on the next card instead, which costs nothing — a root that
+    // failed was not billed.
+    if (!response.ok && isRoot) {
       let message = `Aerial view unavailable (HTTP ${response.status})`;
       try {
         message = (await response.clone().json())?.error?.message ?? message;
       } catch { /* not JSON: the status is all there is */ }
-      stage.refused = message;
+      if ([400, 401, 403].includes(response.status)) stage.refused = message;
+      else stage.rootFailed = true;
       stage.onRefused?.(message);
     }
     return response;
@@ -512,6 +537,19 @@ const stage = {
    */
   broken: false,
   /**
+   * Which tile layer this is, counted up each time the root has to be fetched
+   * again. The layer's id is what deck.gl matches across renders, so a new id
+   * is how a new root is asked for. See `tilesId`.
+   */
+  generation: 0,
+  /**
+   * The root failed in a way that asking again may fix — no network, or a
+   * 408, 429 or 5xx. Unlike `refused`, it is not the answer for the tab.
+   */
+  rootFailed: false,
+  /** What the failed root threw, so its unhandled rejection can be recognised. */
+  rootError: null,
+  /**
    * Google's sentence, once the root has been refused.
    *
    * Kept because the refusal only happens once. The layer and its tileset
@@ -551,6 +589,28 @@ const stage = {
    */
   base: [],
 };
+
+/**
+ * The tile layer's id for the current root.
+ *
+ * TILES_ID itself for the first, so nothing changes for the tab whose root
+ * never fails; a suffix after that. `~` rather than `-` because `-` is how
+ * Tile3DLayer joins its sublayers' ids on, and `drawn` looks for those.
+ */
+const tilesId = () => (stage.generation ? `${TILES_ID}~${stage.generation}` : TILES_ID);
+
+/**
+ * The root that could not be fetched, kept out of the console.
+ *
+ * keyedFetch has already said so on the card, but it has to rethrow — the
+ * layer is waiting on it — and Tile3DLayer floats the promise it rethrows into,
+ * so every offline card also left an "Uncaught (in promise)" behind it. Matched
+ * by identity, which loaders.gl preserves, so nothing else that rejects on this
+ * page is hidden.
+ */
+globalThis.addEventListener?.('unhandledrejection', (event) => {
+  if (stage.rootError && event.reason === stage.rootError) event.preventDefault();
+});
 
 /**
  * The tile layer, built fresh for each building because the clip is a prop.
@@ -631,7 +691,11 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
     // reloaded. deck.gl matches layers across renders by id and only calls
     // `_loadTileset` when `props.data` actually changes — so every subsequent
     // building reuses the tree that is already in memory, and pays nothing.
-    id: TILES_ID,
+    //
+    // EXCEPT WHEN THE ROOT HAS TO BE ASKED FOR AGAIN, because it failed,
+    // which is what a new id is for. deck.gl finalizes the old layer and its
+    // tileset and the new one loads from scratch. See `tilesId`.
+    id: tilesId(),
     data: TILESET,
     loader: Tiles3DLoader,
     loadOptions: {
@@ -1136,6 +1200,12 @@ export function createFlyover({
 
     // A renderer that failed is not handed to another card. See `broken`.
     if (stage.broken) discardStage();
+    // A root worth asking for again: one that failed for want of a network or
+    // of a quiet minute at Google. A new layer id is what makes deck.gl ask.
+    if (stage.rootFailed) {
+      stage.generation += 1;
+      stage.rootFailed = false;
+    }
 
     stage.maxTileSpan = maxTileSpan ?? 0;
     stage.bounds = bounds ? campusBox(bounds) : null;
@@ -1221,7 +1291,7 @@ export function createFlyover({
      * the orbit. There is no public route to "has this composite drawn yet".
      */
     const drawn = () => !!stage.deck?.layerManager?.getLayers?.()
-      ?.some((l) => l.id.startsWith(`${TILES_ID}-`));
+      ?.some((l) => l.id.startsWith(`${tilesId()}-`));
 
     /** Spinner off, once, the moment there is a building to look at. */
     const reveal = () => {

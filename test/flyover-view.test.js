@@ -3,9 +3,9 @@
 // The flyover keeps ONE Deck and one tileset for the tab, by design (it is a
 // billing decision; see the top of that file). Every failure here was the price
 // of that sharing going unhandled: a renderer that never got a WebGL context, or
-// lost the one it had, left every later card blank; a render loop kept ticking
-// after the card closed; and the pin dropped on the first coarse tile rather
-// than on the roof.
+// lost the one it had, left every later card blank; a root that failed once was
+// never asked for again; a render loop kept ticking after the card closed; and
+// the pin dropped on the first coarse tile rather than on the roof.
 //
 // The module imports a stylesheet (through src/spinner.js) and deck.gl, neither
 // of which node can load, so both are swapped for fakes at resolve time. The
@@ -146,6 +146,7 @@ function runFrames(count, gap = 16) {
 const errors = [];
 console.error = (...args) => errors.push(args);
 
+const realFetch = globalThis.fetch;
 const { createFlyover } = await import('../src/flyover-view.js');
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -164,9 +165,17 @@ const failed = (card) => card.el.classList.contains('g-flyover--failed');
 const spinning = (card) => card.el.children.some((c) => c.classList.contains('g-spinner'));
 const latestTiles = () => fakes.tileLayers.at(-1);
 
+/** A root fetch through the layer's own keyed fetch. */
+const fetchRoot = () => latestTiles().props.loadOptions.fetch(
+  'https://tile.googleapis.com/v1/3dtiles/root.json',
+);
+const respond = (status, body = {}) => async () => new Response(JSON.stringify(body), { status });
+
 // ---------------------------------------------------------------------------
 // The tests, in tab order
 // ---------------------------------------------------------------------------
+
+
 
 test('a Deck that never gets a WebGL context fails the card instead of spinning', async () => {
   // What luma does: the device is created asynchronously, its failure goes to
@@ -252,5 +261,50 @@ test('a coarse tile arriving does not drop the pin; the roof\'s own tile does', 
   }]);
   runFrames(250);
   assert.ok(pins() > 0, 'the pin is down');
+  card.destroy();
+});
+
+test('a root that cannot be fetched is asked for again on the next card', async () => {
+  const card = await open();
+  const firstId = latestTiles().id;
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  await assert.rejects(fetchRoot());
+  globalThis.fetch = realFetch;
+  assert.ok(failed(card), 'said rather than spun');
+  card.destroy();
+
+  const next = await open();
+  assert.notEqual(latestTiles().id, firstId, 'a new layer, so a new root');
+  assert.ok(latestTiles().id.startsWith('flyover-tiles'));
+  assert.ok(!failed(next));
+  next.destroy();
+});
+
+test('a busy Google is asked again on the next card', async () => {
+  let card = await open();
+  let id = latestTiles().id;
+  globalThis.fetch = respond(503, { error: { message: 'Backend Error' } });
+  await fetchRoot();
+  assert.ok(failed(card));
+  card.destroy();
+  card = await open();
+  assert.ok(!failed(card), 'a 503 is not the answer for the tab');
+  assert.notEqual(latestTiles().id, id);
+  card.destroy();
+});
+
+// LAST, because it is the answer for the rest of the tab.
+
+test('a refused key is the answer for the tab, and is not asked for again', async () => {
+  let card = await open();
+  const id = latestTiles().id;
+  globalThis.fetch = respond(403, { error: { message: 'API key not valid' } });
+  await fetchRoot();
+  globalThis.fetch = realFetch;
+  assert.ok(failed(card));
+  card.destroy();
+  card = await open();
+  assert.ok(failed(card));
+  assert.equal(latestTiles().id, id);
   card.destroy();
 });
