@@ -277,6 +277,17 @@ export function createEndpoints({
     // failed even when a fix arrived, as did Start here on any card.
     if (!routingEnabled() || !networkPoints()) return false;
 
+    // A walk already drawn runs from the start this is about to replace, and
+    // the wait below can be nine seconds — plenty of time to press Start on
+    // it, and have the re-route that follows swap the route out from under
+    // the walk. So it cannot be started while its start is in question. If
+    // the start stays where it was, so does the walk, and the buttons come
+    // back; unless something newer has been asked for in the meantime (the
+    // sequence moved), which owns the buttons now. See placeEnd.
+    const seq = requestSeq;
+    setNavButtonsEnabled(false);
+    const keepRoute = () => { if (seq === requestSeq) setNavButtonsEnabled(route.isWalkable); };
+
     // The fixture answers on the next tick, so this spinner is a real wait only
     // for a real GPS — which is exactly when it is worth showing.
     setBusy(true);
@@ -286,6 +297,7 @@ export function createEndpoints({
       at = await currentPosition();
     } catch (error) {
       setStatus(locationProblem(error), true);
+      keepRoute();
       return false;
     } finally {
       setBusy(false);
@@ -304,7 +316,7 @@ export function createEndpoints({
     // dotted leg from the blue dot to the line is that last bit of ground.
     const node = nearestPoint(point(at), networkPoints()).geometry.coordinates;
     const problem = reachProblem(distance(point(at), point(node)) * 1000);
-    if (problem) { setStatus(problem, true); return false; }
+    if (problem) { setStatus(problem, true); keepRoute(); return false; }
 
     panel.show();
     startPoint = point(at);
@@ -394,6 +406,12 @@ export function createEndpoints({
 
     // Guard against a stale response landing after the user has moved on.
     const seq = ++requestSeq;
+    // The route still drawn is the one this request replaces, so it cannot be
+    // started while the request is out. Left enabled, Start began a walk along
+    // the old line, and the answer then swapped the route out from under it:
+    // navigation kept counting maneuvers the new route did not have, and
+    // threw on every fix after. Enabled again only by an answer that is a walk.
+    setNavButtonsEnabled(false);
     let result;
     let failure = null;
     // The only wait in this app the user asked for directly. "Calculating
@@ -455,6 +473,12 @@ export function createEndpoints({
       pendingEnd = { coords, name: label };
       return;
     }
+
+    // A walk already running is on the route this replaces. Navigation reads
+    // the route live, so swapping it under a running walk left its step
+    // counter pointing into a maneuver list it no longer had. The buttons
+    // above keep that from starting here; this is for one that already had.
+    nav.end();
 
     // `stepIndex` used to be zeroed here too. It is navigation's, it is only
     // ever read while a walk is running, and nav.start() zeroes it — so this

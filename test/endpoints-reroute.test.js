@@ -206,6 +206,77 @@ test('a destination routed after one was parked is not routed to again later', a
   assert.equal(h.endpoints.takeParked(), null);
 });
 
+test('Start is off while a replacement route is out', async () => {
+  let release;
+  const h = harness((from, to) => (to === CTE && from === DESIGN_HUB
+    ? new Promise((resolve) => { release = () => resolve(walk(from, to)); })
+    : walk(from, to)));
+  h.endpoints.placeStart(LIBRARY, 'Library');
+  await h.endpoints.placeEnd(CTE, 'CTE');
+  assert.equal(h.buttons(), true);
+
+  h.endpoints.placeStart(DESIGN_HUB, 'Design Hub');
+  const landing = h.endpoints.rerouteFromStart();
+  await Promise.resolve();
+  assert.equal(h.buttons(), false, 'the route being replaced can still be started');
+  release();
+  await landing;
+  assert.equal(h.buttons(), true);
+});
+
+test('an answer that lands under a running walk ends the walk before swapping the route', async () => {
+  let release;
+  const h = harness((from, to) => (from === DESIGN_HUB
+    ? new Promise((resolve) => { release = () => resolve(walk(from, to)); })
+    : walk(from, to)));
+  h.endpoints.placeStart(LIBRARY, 'Library');
+  await h.endpoints.placeEnd(CTE, 'CTE');
+  h.endpoints.placeStart(DESIGN_HUB, 'Design Hub');
+  const landing = h.endpoints.rerouteFromStart();
+  await Promise.resolve();
+
+  // However the walk got started — this is the case the disabled buttons are
+  // there to prevent, and the swap must still be safe if one gets through.
+  h.nav.start();
+  assert.equal(h.nav.isActive(), true);
+  h.log.length = 0;
+  release();
+  await landing;
+
+  assert.equal(h.nav.isActive(), false);
+  assert.ok(h.log.indexOf('nav.end') !== -1, 'the walk was left running');
+  assert.ok(h.log.indexOf('nav.end') < h.log.indexOf('route.set'), 'the route was swapped first');
+});
+
+test('"Your location" in the start field holds Start off until the fix is in', async () => {
+  const h = harness(walk);
+  h.endpoints.placeStart(LIBRARY, 'Library');
+  await h.endpoints.placeEnd(CTE, 'CTE');
+  assert.equal(h.buttons(), true);
+
+  const locating = h.endpoints.locateStart();
+  assert.equal(h.buttons(), false, 'Start was live through the nine-second wait');
+  h.control.fire('geolocate', { coords: { longitude: DESIGN_HUB[0], latitude: DESIGN_HUB[1] } });
+  assert.equal(await locating, true);
+  assert.equal(h.buttons(), false, 'the old walk was offered again before its re-route');
+
+  await h.endpoints.rerouteFromStart();
+  assert.equal(h.buttons(), true);
+});
+
+test('a location that never comes gives the old walk its Start back', async () => {
+  const h = harness(walk);
+  h.endpoints.placeStart(LIBRARY, 'Library');
+  await h.endpoints.placeEnd(CTE, 'CTE');
+
+  const locating = h.endpoints.locateStart();
+  h.control.fire('error', { code: 1 });
+  assert.equal(await locating, false);
+  // The start never moved, so the walk on screen is still the right one.
+  assert.equal(h.route.isWalkable, true);
+  assert.equal(h.buttons(), true);
+});
+
 test('an answer that lands during a style swap still finishes the panel', async () => {
   let release;
   const h = harness((from, to) => new Promise((resolve) => {

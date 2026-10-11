@@ -77,6 +77,9 @@ export function createNavigation({
 }) {
   let active = false;
   let stepIndex = 0;
+  // The coordinates of the route this walk was started on — by identity, which
+  // is what changes when the route is set again. See `replaced`.
+  let walking = null;
   let lastBearing = 0;
   let userMarker = null;
 
@@ -96,6 +99,7 @@ export function createNavigation({
 
     active = true;
     stepIndex = 0;
+    walking = route.coords;
     resetBannerAnimation();
     buildings.add();
     // The legend goes with the rest of the chrome here, and an outline with
@@ -143,6 +147,7 @@ export function createNavigation({
     stopSimulation();
     if (!active) return;
     active = false;
+    walking = null;
     resetBannerAnimation();
 
     document.body.classList.remove('navigating');
@@ -164,7 +169,9 @@ export function createNavigation({
    * make the dot jump between path endpoints instead of sliding along.
    */
   function moved(coords, { duration = SIM_TICK_MS } = {}) {
-    if (!active || !route.isWalkable) return;
+    if (!active) return;
+    if (replaced()) { end(); return; }
+    if (!route.isWalkable) return;
 
     const snapped = nearestPointOnLine(route.line, point(coords));
     const distanceAlong = snapped.properties.location;  // km travelled so far
@@ -173,6 +180,21 @@ export function createNavigation({
     advanceSteps(distanceAlong);
     renderBanner(distanceAlong);
     moveCamera(here, distanceAlong, duration);
+  }
+
+  /**
+   * Whether the route on screen is no longer the one this walk was started on.
+   *
+   * The route holder is read live, not copied at start, so a route set while a
+   * walk is running changes everything under it but `stepIndex` — which then
+   * pointed past the end of a shorter maneuver list, and the next fix threw
+   * reading it. endpoints.js ends the walk before it swaps the route; this is
+   * the backstop for anything that does not. The walk ENDS rather than carrying
+   * on: it was a walk along a line that is gone, and the panel it ends on is
+   * showing the one that replaced it, with its own Start.
+   */
+  function replaced() {
+    return route.coords !== walking;
   }
 
   /** Retire every maneuver we have already walked past. */
@@ -342,6 +364,7 @@ export function createNavigation({
     const viaFixture = Boolean(geolocation.fixture);
 
     simTimer = setInterval(() => {
+      if (replaced()) { end(); return; }
       simAlong = Math.min(simAlong + perTickKm, totalKm);
       const position = along(route.line, simAlong).geometry.coordinates;
       if (viaFixture) {
