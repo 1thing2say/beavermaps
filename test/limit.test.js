@@ -6,7 +6,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRateLimit, WINDOW_MS, MAX_PER_WINDOW } from '../server/limit.js';
+import { createRateLimit, clientKey, WINDOW_MS, MAX_PER_WINDOW } from '../server/limit.js';
 
 /** A limiter on a clock the test drives. */
 function onClock({ windowMs = 1000, max = 3 } = {}) {
@@ -83,6 +83,63 @@ test('expired callers are swept rather than accumulating for the life of the pro
   const back = clock.take('caller-0');
   assert.equal(back.allowed, true);
   assert.equal(back.remaining, 4);
+});
+
+test('a new window sweeps out the callers of the last one', () => {
+  // The bound the once-per-window sweep keeps: a row lives one window and waits
+  // at most one more for the next sweep.
+  const clock = onClock({ windowMs: 1000, max: 5 });
+  for (let i = 0; i < 300; i++) clock.take(`early-${i}`);
+  clock.advance(1000);
+  for (let i = 0; i < 300; i++) clock.take(`late-${i}`);
+  assert.equal(clock.take.size, 300, 'the expired window was not swept out');
+
+  // Halfway through: nobody has expired, and nobody live may be dropped.
+  clock.advance(500);
+  clock.take('now');
+  assert.equal(clock.take.size, 301);
+});
+
+test('the sweep runs at most once per window, not once per new caller', () => {
+  // It walks the whole map. Run on every new key, n new callers in a minute
+  // cost n walks of up to n rows; that is the O(n²) this replaced. Observed
+  // through the one thing a skipped sweep leaves behind: an expired row that
+  // is still there.
+  const clock = onClock({ windowMs: 1000, max: 5 });
+  clock.take('a');                 // t=0: sweeps (first ever), next due at 1000
+  clock.advance(999);
+  clock.take('b');                 // t=999: no sweep due; b lives until 1999
+  clock.advance(1);
+  clock.take('c');                 // t=1000: sweeps, a (until 1000) goes
+  assert.equal(clock.take.size, 2);
+
+  clock.advance(999);              // t=1999: b has just expired...
+  clock.take('d');                 // ...but the next sweep is not due until 2000
+  assert.equal(clock.take.size, 3, 'swept again inside the same window');
+
+  clock.advance(1);                // t=2000: due, and b and c both go
+  clock.take('e');
+  assert.equal(clock.take.size, 2);
+});
+
+test('a full map does not turn new callers away', () => {
+  // A cap that refused new keys would hand the endpoint to whoever filled it.
+  const clock = onClock({ windowMs: 1000, max: 1 });
+  for (let i = 0; i < 20_000; i++) clock.take(`flood-${i}`);
+  assert.equal(clock.take('somebody-real').allowed, true);
+});
+
+test('clientKey: Fly-Client-IP on Fly, req.ip everywhere else', () => {
+  const req = (headers, ip) => ({ ip, get: (name) => headers[name.toLowerCase()] });
+  const behindFly = req({ 'fly-client-ip': '203.0.113.7' }, '172.16.0.2');
+
+  assert.equal(clientKey(behindFly, { FLY_APP_NAME: 'beavermaps' }), '203.0.113.7');
+  // Off Fly the header is the client's own writing, and is not believed.
+  assert.equal(clientKey(behindFly, {}), '172.16.0.2');
+  assert.equal(clientKey(behindFly, { FLY_APP_NAME: '' }), '172.16.0.2');
+  // On Fly without the header (a health check from inside, say) req.ip stands.
+  assert.equal(clientKey(req({}, '172.16.0.2'), { FLY_APP_NAME: 'beavermaps' }), '172.16.0.2');
+  assert.equal(clientKey(req({}, undefined), {}), 'unknown');
 });
 
 test('the shipped defaults leave room for a person and not for a loop', () => {
