@@ -62,9 +62,15 @@
     "mapbox-gl": "^3.23.1",
     "spin.js": "^4.1.2"
   },
+  "//": [
+    "overrides.texture-compressor: texture-compressor is a command-line tool that @loaders.gl/textures only ever runs as `npx texture-compressor` from a Node-only encoder (dist/lib/encoders/encode-texture.js). Nothing imports it and it is never bundled. Its argparse 1.x pulls in sprintf-js <=1.1.3 (GHSA-hp3w-g68c-fv3c), which has no patched release, and that one advisory was every deck.gl and loaders.gl line in npm audit. argparse 2 renamed the API texture-compressor calls, so this override breaks its CLI. That is acceptable only because nothing in this repo runs it; drop the override if anything ever does."
+  ],
   "overrides": {
     "fflate": "^0.8.3",
-    "image-size": "^2.0.4"
+    "image-size": "^2.0.4",
+    "texture-compressor": {
+      "argparse": "^2.0.1"
+    }
   },
   "allowScripts": {
     "@parcel/watcher@2.5.6": true,

@@ -75,3 +75,24 @@ test('the import scan sees the dynamic imports it exists to check', () => {
   assert.ok(roofs.includes('@math.gl/core') && roofs.includes('@math.gl/geospatial'),
     `build-roofs.mjs imports ${roofs.join(', ')}`);
 });
+
+// ---------------------------------------------------------------------------
+// The lockfile
+
+const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+/** Lockfile entries whose installed name is `name`, wherever they are nested. */
+const installed = (name) => Object.entries(lock.packages)
+  .filter(([key]) => key === `node_modules/${name}` || key.endsWith(`/node_modules/${name}`));
+
+test('texture-compressor gets argparse 2, so sprintf-js and its advisory are not in the tree', () => {
+  // See the "//" note in package.json: loaders.gl only ever spawns this CLI
+  // through npx, and argparse 1.x is the sole route to sprintf-js <=1.1.3,
+  // which has no fixed release. If a regenerated lockfile drops the override,
+  // npm audit goes back to nine moderates under every deck.gl package.
+  assert.deepEqual(installed('sprintf-js'), []);
+  const compressor = lock.packages['node_modules/texture-compressor'];
+  assert.ok(compressor, 'texture-compressor is no longer in the tree; the override can go');
+  for (const [key, entry] of installed('argparse')) {
+    assert.match(entry.version, /^2\./, `${key} is ${entry.version}`);
+  }
+});
