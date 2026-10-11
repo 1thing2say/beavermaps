@@ -24,6 +24,19 @@
 // A category may use either; none needs both, and `icon` is the disc registered
 // in map-images.js for the pins a `match` category draws.
 
+/** A name with its accents taken off, so "Oak Café" is spelt the way people type it. */
+const fold = (name) => name.normalize('NFD').replace(/\p{M}/gu, '');
+
+/**
+ * A `match` predicate from a pattern written in plain ASCII.
+ *
+ * The directory spells "Oak Café and Bakery" with a precomposed é, and a
+ * pattern typed as "oak cafe" never matched it, so the one bakery the food
+ * pattern was written for was missing from Food & drink. Folding here rather
+ * than in each caller means the map's highlight and the list agree.
+ */
+const named = (pattern) => (name) => pattern.test(fold(name));
+
 /** Ordered as they appear on the chip strip: most-asked-for first. */
 export const CATEGORIES = [
   {
@@ -41,7 +54,7 @@ export const CATEGORIES = [
     // Their lot names all end in "Parking Lot", "Parking Garage" or name the
     // metered lot. These are the pins that carry a real name — "Myrtle Parking
     // Lot East" — which is what somebody asking about parking is looking for.
-    match: (name) => /parking (lot|garage)|metered parking/i.test(name),
+    match: named(/parking (lot|garage)|metered parking/i),
     // ...the ten machines you buy the permit from, and the two drop-off points.
     //
     // All three are one errand. Knowing which lot to use is no help without
@@ -73,7 +86,7 @@ export const CATEGORIES = [
     glyph: 'vending',
     icon: 'food',
     kinds: ['food_vending', 'drink_vending'],
-    match: (name) => /^cafeteria|oak cafe|culinary/i.test(name),
+    match: named(/^cafeteria|oak cafe|culinary/i),
     legend: 'Cafeteria, cafe and vending machines',
   },
   {
@@ -84,7 +97,7 @@ export const CATEGORIES = [
     // The three sign plates come from the sheet; Para Transit is a directory
     // row with real nodes and no printed symbol, so this category needs both.
     kinds: ['bus_stop'],
-    match: (name) => /^para transit/i.test(name),
+    match: named(/^para transit/i),
     legend: 'Bus routes 1 and 82',
   },
   {
@@ -138,7 +151,7 @@ export const CATEGORIES = [
     label: 'HomeBase',
     glyph: 'homebase',
     icon: 'homebase',
-    match: (name) => /homebase/i.test(name),
+    match: named(/homebase/i),
     legend: 'HOME BASE LOCATIONS (inside the LRC)',
   },
 ];
