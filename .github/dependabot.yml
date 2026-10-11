@@ -1,0 +1,36 @@
+# Three ecosystems, because the thing that ships is built from all three and
+# each goes stale on its own schedule: npm packages, the node:24-slim base image
+# in the Dockerfile, and the actions in .github/workflows. The base image is the
+# one that matters most and is the easiest to forget — Node 20 reached end of
+# life on 2026-04-30 while this repository was still building on it, and
+# nothing said so.
+#
+# Weekly and grouped, so it arrives as a handful of PRs to read rather than a
+# stream to ignore. Every PR runs the full CI, the docker job included, so a
+# bump that breaks the image is red before anyone merges it.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Minor and patch bumps together; a major gets its own PR, because a
+      # major is where the reading is.
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
