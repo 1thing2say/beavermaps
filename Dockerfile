@@ -30,12 +30,12 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 COPY server ./server
-# The whole of src/, not a hand-listed subset. server/index.js reads ten JSON
-# files at boot — paths, approach-paths, doors and campus-boundary for the
-# graph, and the six overlays, of which buildings and directory feed the graph
-# too — and server/graph.js imports maneuvers.js, directions.js and
-# campus-clip.js. Listing them individually meant the
-# image built clean and then died on the first missing readFileSync at startup.
+# The whole of src/, not a hand-listed subset. server/index.js reads eleven JSON
+# files at boot — paths, plaza-paths, approach-paths, doors and campus-boundary
+# for the graph, and the six overlays, of which buildings and directory feed the
+# graph too — and server/graph.js imports maneuvers.js, directions.js and
+# campus-clip.js. Listing them individually meant the image built clean and
+# then died on the first missing readFileSync at startup.
 # src/ is ~3.5MB and the .js in it is already bundled into dist; the duplication
 # costs less than the next boot crash.
 COPY src ./src

@@ -18,15 +18,6 @@
     "here carry 571 m and 409 m of drawn path respectively: 980 m of my campus's",
     "own linework returned to the routable network for 25 m of connector.",
     "",
-    "Three later ones are rescues of a different shape: walkway strokes the sheet",
-    "draws out of a FILLED paving polygon (the plaza between the Student Center,",
-    "the CTE and the CDC) into the buildings round it. The build reads strokes,",
-    "not fills, so the plaza itself is nothing to it and the strokes were pruned",
-    "as fragments. They carry only 60 m of drawn path for 73 m of connector, all",
-    "of it on the filled paving; what they return is the CTE's plaza-side doors",
-    "and the CDC's north door. A stage that joins any stroke ending in a filled",
-    "walkway polygon would replace them, and needs its own ablation first.",
-    "",
     "READ THIS BEFORE ADDING ONE. An earlier version of this file had 15 links, and",
     "eleven of them ran PARALLEL to a path my campus already draws. That was the wrong",
     "diagnosis: the gap was never a missing path, it was a DRAWN path that failed",
@@ -49,14 +40,18 @@
     "and `why` must say what is on the ground and what the sheet does instead.",
     "A rescue may be longer, but its gap is still bounded: seven stranded fragments",
     "were refused because reaching them needs 75 to 117 m of invented path, which",
-    "is the automatic bridging step this pipeline deliberately does not have."
+    "is the automatic bridging step this pipeline deliberately does not have.",
+    "",
+    "Each `why` says how much of its link the sheet paints as lawn, where any of it is:",
+    "the sheet and the ground disagree there, and the LINK stage prints the same",
+    "figure per link on every build."
   ],
   "type": "FeatureCollection",
   "features": [
     {
       "type": "Feature",
       "properties": {
-        "why": "Hutchison Loop bus stop. The sheet draws the zebra crossing over the road and stops at the kerb; on the ground the crossing lands on a concrete pad with a handrail that ramps down to the south footway, which is plainly visible in imagery. Without it the two footways either side of the road only met 65 m west at the car-park entrance, so an 11 m walk across the road routed 523 ft round three sides of a rectangle.",
+        "why": "Hutchison Loop bus stop. The sheet draws the zebra crossing over the road and stops at the kerb; on the ground the crossing lands on a concrete pad with a handrail that ramps down to the south footway, which is plainly visible in imagery. Without it the two footways either side of the road only met 65 m west at the car-park entrance, so an 11 m walk across the road routed 523 ft round three sides of a rectangle. The sheet paints 6 m of the link as the verge's lawn.",
         "kind": "crossing",
         "added": "2026-08-06"
       },
@@ -99,10 +94,10 @@
     {
       "type": "Feature",
       "properties": {
-        "why": "The open plaza between Fine and Applied Arts and the Kaneko Art Gallery. The sheet draws paths round three sides of a paved plaza and none across it.",
+        "why": "College Oak Dr entrance to driveway 1081, west of Fine and Applied Arts. The walkway from Fine and Applied Arts runs west to the edge of the driveway's mouth and stops there, 26 m short of the street; imagery shows the walk ending at the tarmac and nothing painted across it, so walkers cross the apron to the entrance. The fold stage lays the link's west 8.5 m and east 6.1 m onto the drawn driveway and walkway, leaving 11.8 m of new line. Until 2026-10 this was written up as the plaza between Fine and Applied Arts and the Kaneko Gallery, which is 110 m east, and ended on a lane arrow painted in the driveway.",
         "kind": "walkway",
         "added": "2026-08-06",
-        "detourSavedFt": 1002
+        "detourSavedFt": 570
       },
       "geometry": {
         "type": "LineString",
@@ -112,8 +107,8 @@
             38.652032
           ],
           [
-            -121.35037,
-            38.652015
+            -121.350334,
+            38.652012
           ]
         ]
       }
@@ -165,10 +160,10 @@
     {
       "type": "Feature",
       "properties": {
-        "why": "Paved apron between the Student Center and CTE. The sheet stops a footway either side of it and draws nothing between.",
+        "why": "Paved apron between the Student Center and CTE. The sheet stops a footway either side of it and draws nothing between, and paints the apron as lawn: 13 m of this link. Imagery (Sacramento County, 2022, 7.5 cm) shows concrete from the walk along the plaza's west edge to the building corner, with a planted bed on its west side; the link bends at the bed's south tip to stay off it, and its last 2 m cross the grass strip at the building corner, where the drawn walk ends.",
         "kind": "walkway",
         "added": "2026-08-06",
-        "detourSavedFt": 230
+        "detourSavedFt": 224
       },
       "geometry": {
         "type": "LineString",
@@ -176,6 +171,10 @@
           [
             -121.346078,
             38.651362
+          ],
+          [
+            -121.3462306,
+            38.6512626
           ],
           [
             -121.346258,
@@ -187,29 +186,7 @@
     {
       "type": "Feature",
       "properties": {
-        "why": "Paved way between the Library and the Student Center, undrawn on the sheet.",
-        "kind": "walkway",
-        "added": "2026-08-06",
-        "detourSavedFt": 133
-      },
-      "geometry": {
-        "type": "LineString",
-        "coordinates": [
-          [
-            -121.3474432,
-            38.6511015
-          ],
-          [
-            -121.347351,
-            38.651182
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "why": "RESCUE: the whole perimeter footway around the south car park \u2014 562 m over 8 nodes \u2014 was stranded, because the sheet never joins it to campus. It comes within 9.7 m of the network at the head of the accessible bays, and imagery shows hatched crossing markings and unbroken tarmac across that gap. 9.7 m of connector returns 562 m of drawn path to the routable network.",
+        "why": "RESCUE: the whole perimeter footway around the south car park \u2014 562 m over 8 nodes \u2014 was stranded, because the sheet never joins it to campus. It comes within 9.7 m of the network at the head of the accessible bays, and imagery shows hatched crossing markings and unbroken tarmac across that gap. 9.7 m of connector returns 562 m of drawn path to the routable network. The sheet paints 4 m of it as lawn.",
         "kind": "walkway",
         "added": "2026-08-07",
         "rescuesM": 562
@@ -253,21 +230,21 @@
     {
       "type": "Feature",
       "properties": {
-        "why": "RESCUE, with the next two: the paved plaza between the Student Center, the CTE and the Child Development Center. The sheet fills it as one walkway polygon (i=1257, #e2e3e4) and draws three walkway strokes out of it into the buildings round it, but a filled polygon is not linework, so nothing joined the strokes to the network and the component pass dropped all three. Dropped, they left the CTE no way in from the plaza and the CDC none from the north, and a walk from the Student Center to the CTE went 412 m round the CDC. This one runs across the plaza from the end of walkway 1438, which leads 13 m north into the CTE, to the plaza's west footway; every metre of it lies on the filled paving and none under a roof.",
+        "why": "Tarmac strip along CTE's east wall between the north drive and the east walk; the sheet ends both strokes at the lot. The drive along CTE's north side stops at the lot's south edge and the walk past CTE's east doors stops at its south stall row, 34 m apart and 398 m by the network; the sheet paints the strip between as parking, with no stall, tree or building on the line, and 2022 county imagery shows a sidewalk along it.",
         "kind": "walkway",
         "added": "2026-10-11",
-        "rescuesM": 13
+        "detourSavedFt": 1195
       },
       "geometry": {
         "type": "LineString",
         "coordinates": [
           [
-            -121.345784,
-            38.651374
+            -121.34516,
+            38.651842
           ],
           [
-            -121.3460777,
-            38.6513777
+            -121.345172,
+            38.652144
           ]
         ]
       }
@@ -275,43 +252,25 @@
     {
       "type": "Feature",
       "properties": {
-        "why": "Along the plaza's south strip (see the link above), joining the plaza end of walkway 1440, 17.5 m into the CTE's south wall, to the plaza end of walkway 1439, which runs 29 m south to the Child Development Center's north wall. Both ends are drawn strokes the sheet stops on its filled paving; the line between them is on that paving throughout.",
+        "why": "Small car park west of the pool. The driveway into it ends in the lot with a round cap, and the walk along the building on the lot's south side passes 22 m away, 131 m round by the network; the sheet paints everything between as parking. Imagery (2022, 7.5 cm) shows a planted bed of shrubs along the lot's south kerb on the straight line, so the link goes round the bed's east end, beside the accessible bay's hatched aisle, and down the open tarmac strip along the building to the walk.",
         "kind": "walkway",
         "added": "2026-10-11",
-        "rescuesM": 18
+        "detourSavedFt": 346
       },
       "geometry": {
         "type": "LineString",
         "coordinates": [
           [
-            -121.345649,
-            38.650794
+            -121.346695,
+            38.649724
           ],
           [
-            -121.345446,
-            38.650821
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "why": "From the plaza end of walkway 1439 east across the filled paving (see the two links above) to the footway past the CDC's service yard. With the link before it, this brings walkways 1439 and 1440 into the network: the CTE gains its south door and the CDC its north one, and the walk from the Student Center to the CTE goes from 98 m to 64 m.",
-        "kind": "walkway",
-        "added": "2026-10-11",
-        "rescuesM": 29
-      },
-      "geometry": {
-        "type": "LineString",
-        "coordinates": [
-          [
-            -121.345446,
-            38.650821
+            -121.3466163,
+            38.6496776
           ],
           [
-            -121.3450999,
-            38.6508168
+            -121.3466512,
+            38.6495244
           ]
         ]
       }
@@ -552,6 +511,15 @@
       "straightM": 8.5,
       "savingFt": 91,
       "why": "ends on a roof"
+    },
+    {
+      "at": [
+        -121.347397,
+        38.651142
+      ],
+      "straightM": 12,
+      "savingFt": 133,
+      "why": "a hedge and a lawn strip between two parallel walks, Library to Student Center: imagery (2022, 7.5 cm) shows no paving across it. Was in this file from 2026-08-06 to 2026-10-11 as a \"paved way\", drawn corner to corner over 5.9 m of sheet lawn"
     }
   ]
 }

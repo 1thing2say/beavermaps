@@ -29,7 +29,7 @@ import {
 import { CAMPUS_STACK } from '../src/layer-order.js';
 import {
   NETWORK_WIDTH, NETWORK_CASING_WIDTH, ROUTE_WIDTH, ROUTE_CASING_WIDTH, ROUTE_LEGS_WIDTH,
-  markRoofed, networkFilter, createRouteLayers,
+  markRoofed, networkFilter, createRouteLayers, CLIP_M,
 } from '../src/route-layers.js';
 import { trimToCampus, ringOf, M_PER_LON, M_PER_LAT } from '../src/campus-clip.js';
 import { LOOKS, SATELLITE } from '../src/palette.js';
@@ -431,8 +431,9 @@ const lengthOf = (c) => c.slice(1)
   .reduce((sum, p, n) => sum + Math.hypot((p[0] - c[n][0]) * M_PER_LON, (p[1] - c[n][1]) * M_PER_LAT), 0);
 
 test('markRoofed cuts a line at the walls and marks only the piece under the roof', () => {
-  // A 10 m square with a 4 m courtyard, and a line straight through both.
-  const d = 1e-5;
+  // An 87 m square with a 35 m courtyard, and a line straight through both —
+  // big enough that every piece under the roof is a passage, not a clip.
+  const d = 1e-4;
   const square = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
   const sheet = {
     type: 'FeatureCollection',
@@ -492,13 +493,24 @@ test('over imagery the network leaves out what runs under a roof, and only there
   };
   const underRoof = (p) => roofs.some(({ geometry: g }) => (g.type === 'Polygon' ? [g.coordinates] : g.coordinates)
     .some(([outer, ...yards]) => inRing(p, outer) && !yards.some((y) => inRing(p, y))));
+  let putBack = 0;
   for (const f of out.features) {
     const c = f.geometry.coordinates;
     for (let n = 1; n < c.length; n += 1) {
       const mid = [(c[n - 1][0] + c[n][0]) / 2, (c[n - 1][1] + c[n][1]) / 2];
-      assert.equal(underRoof(mid), f.properties.roofed, `a piece of ${f.properties.from}-${f.properties.to} is marked wrong`);
+      if (f.properties.roofed) {
+        assert.ok(underRoof(mid), `a piece of ${f.properties.from}-${f.properties.to} is roofed in the open`);
+      } else if (underRoof(mid)) {
+        // A corner clip, put back so the line does not break: never longer
+        // than CLIP_M, and never a whole passage.
+        assert.ok(lengthOf(c) < CLIP_M, `${f.properties.from}-${f.properties.to} is ${lengthOf(c).toFixed(1)} m under a roof and drawn`);
+        putBack += lengthOf(c);
+        break;
+      }
     }
   }
+  const roofed = total(out.features.filter((f) => f.properties.roofed));
+  assert.ok(putBack < roofed, `${putBack.toFixed(1)} m of clips put back against ${roofed.toFixed(1)} m left out`);
   // The walls stage keeps some passages under roofs; if it ever keeps none,
   // this whole mechanism is idle and the test above proves nothing.
   assert.ok(out.features.some((f) => f.properties.roofed), 'nothing under a roof to hide');
@@ -510,6 +522,44 @@ test('over imagery the network leaves out what runs under a roof, and only there
   const imagery = networkFilter(SATELLITE);
   assert.equal(evaluate(imagery, { roofed: true }), false);
   assert.equal(evaluate(imagery, { roofed: false }), true);
+});
+
+test('a corner clip is drawn over imagery; a stub into a building is not', () => {
+  // At [-121.34639, 38.65109] two edges of 2.9 and 2.6 m cut the corner of a
+  // footprint, and over imagery the line stopped and started 6 m apart.
+  const d = 1e-5;   // about 0.87 m east, 1.1 m north
+  const sheet = {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: { kind: 'building', i: 2000 },
+      geometry: { type: 'Polygon', coordinates: [[[0, 0], [40 * d, 0], [40 * d, 40 * d], [0, 40 * d], [0, 0]]] },
+    }],
+  };
+  const line = (coordinates, from, to) => ({ type: 'Feature', properties: { from, to }, geometry: { type: 'LineString', coordinates } });
+  const network = {
+    type: 'FeatureCollection',
+    features: [
+      // Across the corner as two features meeting inside it, each open at its
+      // far end onto a path outside.
+      line([[-20 * d, 38 * d], [-1 * d, 38 * d]], 'w', 'c1'),
+      line([[-1 * d, 38 * d], [2 * d, 39 * d]], 'c1', 'k'),
+      line([[2 * d, 39 * d], [3 * d, 42 * d]], 'k', 'c2'),
+      line([[3 * d, 42 * d], [3 * d, 60 * d]], 'c2', 'n'),
+      // A stub that runs in through a wall and stops.
+      line([[20 * d, -20 * d], [20 * d, 3 * d]], 's', 'door'),
+      // A passage right through.
+      line([[-10 * d, 20 * d], [50 * d, 20 * d]], 'p', 'q'),
+    ],
+  };
+  const out = markRoofed(network, sheet);
+  const inside = (f) => f.geometry.coordinates.every(([x, y]) => x >= 0 && x <= 40 * d && y >= 0 && y <= 40 * d);
+  const under = out.features.filter(inside);
+  const clip = under.filter((f) => ['c1', 'k'].includes(f.properties.from));
+  assert.equal(clip.length, 2, 'the corner was not cut into its two pieces');
+  assert.ok(clip.every((f) => f.properties.roofed === false), 'the corner clip still breaks the line');
+  assert.equal(under.find((f) => f.properties.from === 's').properties.roofed, true, 'a stub into a building is drawn across its roof');
+  assert.equal(under.find((f) => f.properties.from === 'p').properties.roofed, true, 'a passage is drawn across its roof');
 });
 
 test('the imagery filter lands on both network layers and never on the route', () => {

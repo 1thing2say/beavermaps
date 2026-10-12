@@ -266,3 +266,31 @@ export function wallNearest(group, segments) {
   }
   return offered;
 }
+
+/**
+ * A way in for every shard of a building, not only the shards nearest the
+ * network.
+ *
+ * wallNearest() ties corners against the nearest corner of the whole group,
+ * so on a building drawn as several footprints the shards further from the
+ * network than the nearest one plus WALL_TIE_M offer nothing: three of the
+ * Portable Village's seven were 66-68 m by the graph from a way in, with a
+ * path 16 m from their own walls, and Technical Education West's southern
+ * portables 48-66 m. So each member is also asked on its own, and its nearest
+ * point is offered when it is within MEMBER_REACH_M of the member's walls.
+ * build-directory.mjs lists it only where no way in already lies within
+ * MEMBER_APART_M of it (see entranceFor); build-walk-network.mjs splices a
+ * node at every one, as at wallNearest()'s. Only for a group of more than one
+ * footprint: a single building's walls are wallNearest()'s question, and a
+ * door on every face of it would be a guess.
+ *
+ * Returns [{ at, d }], one per member that qualifies, in member order.
+ */
+export const MEMBER_REACH_M = 12;
+export const MEMBER_APART_M = 20;
+export function memberNearest(group, segments) {
+  if (group.members.length < 2) return [];
+  return group.members
+    .map((member) => wallNearest({ members: [member] }, segments)[0])
+    .filter((point) => point && point.d <= MEMBER_REACH_M);
+}

@@ -102,11 +102,13 @@ export function closedBearing(basemap) {
  *
  * They go in the ground band wherever the sheet put them, because the network
  * is drawn over the band and has to be drawn over THESE: it is their
- * centrelines. Thirty-one of their strokes sit late in the print — the gate
- * crosswalks and their arrows at i 2324-2377, which my campus drew after the
- * buildings, and one 6.6 m driveway at i 3116 — and taken at their index they
- * would land in the building band, over the ribbon traced along them, as a
- * slab of crosswalk paint across every gate. None of them touches a building,
+ * centrelines. Thirty-one of their strokes sit late in the print — at i
+ * 2324-2377, which my campus drew after the buildings, the mouths of six
+ * driveway entrances and the shafts of twenty-four lane arrows, all filed as
+ * `crossing`, with the arrows' twenty-four heads as fills between them; and one
+ * 6.6 m driveway at i 3116 — and taken at their index they would land in the
+ * building band, over the ribbon traced along them, as a slab of paint across
+ * every entrance. None of them touches a building,
  * so lowering them changes nothing the print showed but which is in front
  * where 102 m of them pass under a tree.
  */
