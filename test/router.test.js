@@ -333,6 +333,26 @@ test('two nearby rooms are walked between, not declared the same place', () => {
   assert.ok(total < 60, `${total.toFixed(0)} m between two rooms 27 m apart`);
 });
 
+test('a walk whose every nearest pairing is passed over does not search the whole graph', () => {
+  // Two rooms 13 m apart in Fine and Applied Arts, each offered the same six
+  // doors. The joint search reaches every door first by a pairing of one door
+  // with itself, passes each over, and so never has a best walk to bound it:
+  // it settled all 7,094 vertices, streets and all, before the search from
+  // each door alone found the walk in 130. Any client could ask for such a
+  // pair and make a request fifty times dearer. A search now stops once it
+  // has settled every way off, since nothing further out pairs with one.
+  const A = [-121.3497585, 38.6523809];
+  const B = [-121.34964205396176, 38.652304032325745];
+  const result = graph.route(A, B);
+  assert.ok(result.ok, `refused: ${result.error}`);
+  // The walk the unbounded search found; stopping early changes no answer.
+  // 191 ft by the paths between the doors 30 and 32 m from the two rooms.
+  // It was 67 ft between doors 40 and 41 m off, before a room's ways out were
+  // kept beside its own building (doorFor() in server/graph.js).
+  assert.equal(result.distanceFeet, 191);
+  assert.ok(graph.settled < 1000, `settled ${graph.settled} vertices for two rooms 13 m apart`);
+});
+
 test('a point on the network is never moved off it to a path beside it', () => {
   // The alternatives are for points well off the network, where which side is
   // nearest is a matter of a metre. A building's entrance is a node; walking
@@ -509,6 +529,37 @@ test('a walk to a building is never longer than one to where its walls come near
     }
   }
   assert.ok(compared > 300, `only ${compared} walks compared`);
+});
+
+test('a walk to a building may end at a door on any of its footprints', () => {
+  // The directory used to list only the doors of the footprint a card stands
+  // on. Science & Engineering has drawn doors on two other shards, 2.9 m from
+  // the Science Success Center's wall, and the walk between the two buildings
+  // went 166 m round to the ones it listed; the Student Center to the CTE went
+  // 412 m round to its east wall, past the annexe's door.
+  const entrance = (name) => load('directory').features.find((f) => f.properties.name === name).properties.entrance;
+  for (const [from, to, under] of [
+    ['Science Success Center', 'Science & Engineering', 40],
+    ['Science & Engineering', 'Science Success Center', 40],
+    // 98 m with the annexe's door; 64 m now the plaza's walkways are joined.
+    ['Student Center', 'Career Technical Education (CTE)', 120],
+  ]) {
+    const result = graph.route(entrance(from), entrance(to));
+    assert.ok(result.ok, `${from} to ${to} refused: ${result.error}`);
+    const m = result.distanceFeet * 0.3048;
+    assert.ok(m < under, `${m.toFixed(0)} m from ${from} to ${to}`);
+  }
+});
+
+test('the CTE is reached across its plaza, not round the CDC', () => {
+  // The walkways the sheet draws from the plaza into the CTE and the CDC were
+  // dropped as fragments (see path-links.json), and from the middle of the
+  // plaza, 68 m from the CTE's door, the walk went 405 m south round the CDC.
+  const cte = load('directory').features.find((f) => f.properties.name === 'Career Technical Education (CTE)');
+  const PLAZA = [-121.3458679, 38.6512015];
+  const result = graph.route(PLAZA, cte.properties.entrance);
+  assert.ok(result.ok, `refused: ${result.error}`);
+  assert.ok(result.distanceFeet * 0.3048 < 60, `${(result.distanceFeet * 0.3048).toFixed(0)} m from the plaza to the CTE`);
 });
 
 test('a room at the fork of two walkways leaves by the arm that leads where it is going', () => {
@@ -860,6 +911,24 @@ test('the dotted legs are served beside the walk, and the instructions know wher
   assert.ok(Math.abs(plain.legFeet.from - feet(placeNamed('Kaneko Art Gallery'), plain.snapped.from)) <= 1);
 });
 
+
+test('the way onto the network from beside a wall never runs through a building either', () => {
+  // Only the open-ground ways used to be asked. The nearest join, every way
+  // on within the slack and the campus edge offered from the kerb were not,
+  // and route() chose freely among them. 4 m outside a wall:
+  //   - to the Library, a slack way on 32.5 m off with 20 m of it through the
+  //     STEM Innovation Center, over one 30.1 m off that crossed nothing;
+  //   - a nearest join 39.8 m off, 28.4 m of it through the Pool.
+  const library = load('directory').features.find((f) => f.properties.name === 'Library').properties.entrance;
+  for (const [from, ft] of [[[-121.3484687, 38.6503222], 320], [[-121.3460087, 38.6496456], null]]) {
+    const result = graph.route(from, library);
+    assert.ok(result.ok, `refused: ${result.error}`);
+    const depth = deepestInside(from, result.snapped.from);
+    assert.ok(depth <= WALL_CLIP_M + 0.1, `the leg from ${from} to ${result.snapped.from} goes ${depth.toFixed(1)} m into a building`);
+    // 274 ft through STEM; 293 ft round it.
+    if (ft) assert.ok(result.distanceFeet < ft, `${result.distanceFeet} ft from beside STEM to the Library`);
+  }
+});
 
 test('the path finder is built at the precision this file says', () => {
   // geojson-path-finder 2.x reads `tolerance`; the option was passed as

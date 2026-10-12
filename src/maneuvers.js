@@ -30,6 +30,15 @@ export const CURVE_DEG = 45;
 export const CURVE_M = 30;
 /** A bend back this sharp, after a full turn, starts a corner of its own. */
 export const JOG_DEG = 45;
+/**
+ * A bend back that leaves the walk further than this to the side of the line
+ * it came in on is a dogleg, not a wobble: about the width of a campus
+ * walkway. Left off the path, a few steps, right into a door is two turns, and
+ * folding them would walk you straight past the first. The kink west of
+ * Administration, where a stroke was cut and anchored, is 2.7 m sideways and
+ * is no turn at all.
+ */
+export const JOG_WIDTH_M = 3.5;
 /** A junction this close to the middle of a corner is where the corner is said. */
 export const JUNCTION_M = 4;
 /** Another drawn branch this close to the one taken makes going straight a choice. */
@@ -117,6 +126,10 @@ function pointAt(coords, cumulative, m) {
  *      across a jog. A full turn, a leg longer than LOOK_M and a bend of
  *      JOG_DEG or more back the other way is a walker stepping sideways round
  *      something, and merged it nets to nothing and is never said.
+ *      Nor across a dogleg: a bend back the other way at a vertex more than
+ *      JOG_WIDTH_M to the side of the line the group came in on, however
+ *      close. A jog inside the width of the path nets to nothing; one wider
+ *      than it is a step off the path the walker has to be told about.
  *   2. A CORNER IS JUDGED BY WHERE IT TAKES YOU. The group's turn is the
  *      bearing from LOOK_M before its first vertex to that vertex, against the
  *      bearing from its last vertex to LOOK_M after it — so a dog-leg that nets
@@ -288,6 +301,12 @@ export function buildManeuvers(coords, opts = {}) {
     return null;
   }
 
+  /** How far vertex k lies to the side of the line the walk came in to vertex i on, in metres. */
+  const sideways = (i, k) => {
+    const off = wrap(heading(coords[i], coords[k]) - heading(coords[i - 1], coords[i]));
+    return Math.abs(metresBetween(coords[i], coords[k]) * Math.sin((off * Math.PI) / 180));
+  };
+
   let i = 1;
   while (i < n - 1) {
     if (Math.abs(bend[i]) < BEND_DEG && !isJunction(i)) {
@@ -304,6 +323,8 @@ export function buildManeuvers(coords, opts = {}) {
       // two corners, and merging them would net it to "straight".
       const back = Math.sign(bend[k]) !== Math.sign(turned) && Math.abs(bend[k]) >= JOG_DEG;
       if (back && Math.abs(turned) >= 60 && cumulative[k] - cumulative[i] >= LOOK_M) break;
+      // A dogleg: back the other way, from wider to the side than a path.
+      if (Math.sign(bend[k]) !== Math.sign(turned) && sideways(i, k) > JOG_WIDTH_M) break;
       j = k;
       turned += bend[k];
     }

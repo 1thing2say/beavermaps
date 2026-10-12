@@ -316,11 +316,11 @@
    "offCampus": false,
    "campus": "Main Campus",
    "sections": 23,
-   "mapName": "Science & Engineering",
+   "mapName": "Science Success Center",
    "mapKind": "building",
    "coords": [
-    -121.3476218,
-    38.6520174
+    -121.3471646,
+    38.6526243
    ],
    "rooms": [
     "490",

@@ -141,8 +141,13 @@ const SPELLING = {
  * that introduces a new building fails the build rather than vanishing.
  *
  * `Makeup room` is not a building at all; the schedule uses it for two sections
- * in room 519, and 5xx is Fine Arts throughout, so it is filed there. That is
- * the one entry below inferred from the room number rather than from a name.
+ * in room 519, and 5xx is Fine Arts throughout, so it is filed there.
+ * `Science Portable` is filed by room number too: it holds 490, 492 and 493,
+ * and the footprint 78 m from Science & Engineering's anchor that my campus
+ * names "Science Success Center (Rm 491)" is the one building numbered in that
+ * block. Filed under Science & Engineering, a search for Room 490 flew to the
+ * wrong building. Those two are the entries below inferred from a room number
+ * rather than from a name.
  */
 const OURS = {
   STEM: 'Diane Bryant STEM Innovation Center',
@@ -158,13 +163,13 @@ const OURS = {
   'Environmental Resources': 'Environmental Resources (ER)',
   'Art Gallery': 'Kaneko Art Gallery',
   'Makeup room': 'Fine & Applied Arts',
+  'Science Portable': 'Science Success Center',
   // Not directory buildings — the printed sheet names them but the 30-building
   // directory does not cover them, so they resolve to a label or a place. The
   // resolver below finds them; they are listed here only because their schedule
   // spelling differs from the sheet's.
   'Tech Ed West': 'Technical Education West (TEW)',
   'Swimming Pool': 'Pool',
-  'Science Portable': 'Science & Engineering',
 };
 
 /**

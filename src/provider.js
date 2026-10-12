@@ -142,10 +142,21 @@ export function createProviderToggle({ surfaces, onChange }) {
       }
     },
 
-    /** Drop back to Mapbox without re-notifying the caller that asked us to. */
-    revert() {
+    /**
+     * Drop back to Mapbox without re-notifying the caller that asked us to.
+     *
+     * `persist` is whether the fallback outlives this page, and it is only
+     * for a REFUSAL. A key Google turned down will be turned down on the next
+     * load as well, and remembering that is what spares every later visit the
+     * same failed request (see preferredProvider). A request that never got an
+     * answer is not one: a dropped connection, a captive portal or a Google
+     * 5xx says nothing about tomorrow, and remembering it used to opt the
+     * visitor out of Google's ground for good on the strength of one bad
+     * moment, with nothing but the toggle to put it back.
+     */
+    revert({ persist = true } = {}) {
       provider = 'mapbox';
-      writeText(STORAGE_KEY, provider);
+      if (persist) writeText(STORAGE_KEY, provider);
       paint();
     },
   };

@@ -202,7 +202,8 @@ for (const f of doors) {
  * is where the card's pin goes; it is not the only way in, and a walk to the
  * building should not be made to go round to it. server/graph.js takes any of
  * a building's `doors` as the end of a walk to it (see `entrances` in
- * createGraph), and the pin moves to the door the walk used. Two kinds go in:
+ * createGraph), and the pin moves to the door the walk used. Three kinds go
+ * in:
  *
  *   - Every drawn door of the footprint the card stands on, nearest the anchor
  *     first. The Parking Garage has five and the one nearest its anchor is on

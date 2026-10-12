@@ -162,6 +162,9 @@ test('every building is offered where its walls come nearest the network', () =>
     }
     return best;
   };
+  const ends = new Map();
+  for (const seg of segments) for (const c of seg) ends.set(String(c), (ends.get(String(c)) ?? 0) + 1);
+  const degree = (d) => ends.get(String(d)) ?? 0;
   let offered = 0;
   for (const f of directory) {
     const { officialName, doors = [] } = f.properties;
@@ -173,7 +176,13 @@ test('every building is offered where its walls come nearest the network', () =>
     }
     if (!wall) continue;
     const by = Math.min(...doors.map((d) => metresBetween(d, wall.q)));
-    assert.ok(by <= 2.5, `${officialName}'s nearest way in is ${by.toFixed(1)} m from where its walls `
+    // Bar a point on a drawn door's own approach: within APPROACH_M of a door
+    // that ends a dead end, the door stands for it (build-directory.mjs), so
+    // a walk is not ended a few steps short of the door it is walking to. The
+    // Health Education Complex's walkway, cut at portable 1998's wall, passes
+    // 0.6 m from the portable 6 m before it gets there.
+    const approach = doors.some((d) => degree(d) === 1 && metresBetween(d, wall.q) <= 10);
+    assert.ok(by <= 2.5 || approach, `${officialName}'s nearest way in is ${by.toFixed(1)} m from where its walls `
       + `come nearest the network, at ${wall.q.map((n) => n.toFixed(7))}`);
     offered += 1;
   }

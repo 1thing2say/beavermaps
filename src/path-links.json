@@ -276,6 +276,37 @@
       }
     }
   ],
+  "_passages_note": [
+    "Passages the walls stage keeps although no pavement shows over them. A",
+    "passage under a roof with a metre or more of it bare (BARE_M in",
+    "build-walk-network.mjs) is cut unless it is listed here by the sheet order",
+    "of the footprint over it, or unless it rejoins outside the wall. Each is a",
+    "decision, with what the sheet shows and what cutting it would do. Neither",
+    "has been checked against aerial imagery yet: if imagery shows open ground",
+    "round the corner, a link round it belongs in `features` and the entry here",
+    "goes; if it shows the building standing on the paths, the entry goes and the",
+    "walk takes the long way round."
+  ],
+  "passages": [
+    {
+      "under": 1955,
+      "at": [
+        -121.3470237,
+        38.6526803
+      ],
+      "why": "Science Success Center. Walkways 1295 and 1296 meet under its north-east corner, and the visible ends of their two bands are about 4 m apart along the east wall with lawn between. The straight line between where they leave the building is 6.7 m and cuts the corner, so it cannot rejoin outside. Cut, it strands the 12 m of 1295 that is plainly visible between the Center and Science & Engineering, and with it the two Science & Engineering doors at its far end that put that walk at 22 m.",
+      "added": "2026-10-11"
+    },
+    {
+      "under": 2017,
+      "at": [
+        -121.3473135,
+        38.645928
+      ],
+      "why": "Small unnamed building on the stadium side, drawn over the corner where walkway 1313 meets the diagonal walkway. The bands' visible ends are about 5 m apart round the building's west corner, across lawn on the sheet; the straight line between where they leave it is 7.6 m and cuts the corner. Cut, the walk round is 530 m against 9 m.",
+      "added": "2026-10-11"
+    }
+  ],
   "_rejected_note": [
     "Gaps the same sweep found and this file deliberately does NOT close, with the",
     "reason each was turned down. Kept so a later audit does not re-propose them:",

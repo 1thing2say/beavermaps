@@ -354,11 +354,16 @@ routing network stopped coming from it.
    visible on the ground, each with a `why` naming what is there and what the
    sheet drew instead. It is a separate file, applied as its own stage, and its
    count and metres print on every build — currently **10 links, 196 m out of
-   13.8 km (1.4%)**, so the invented share is never in doubt. So does what each
+   13.7 km (1.4%)**, so the invented share is never in doubt. So does what each
    crosses that the sheet paints as **lawn**, link by link: **24 m** in all, 13.5 m
    of it the apron between the Student Center and CTE, which is concrete on the
    ground and grass on the print. A link is accepted against imagery, and where
    the sheet disagrees that belongs on the record, in the log and in its `why`.
+
+   The walkway strokes the sheet draws out of the filled plaza between the
+   Student Center, the CTE and the CDC are not links: the plaza stage joins
+   them to the network across the paving, and a walk to the CTE from the
+   plaza crosses it rather than going round the CDC.
 
    Two of the ten are **rescues**: connectors that bring a whole stranded
    fragment into the largest component. They carry **571 m and 409 m** of

@@ -20,6 +20,7 @@ import { pinColour } from './map-images.js';
 import { paintIcons } from './g-icons.js';
 import { CAMPUS_BOUNDS } from './campus-bounds.js';
 import { REVEAL_ZOOM } from './camera.js';
+import { directoryFeature } from './place-names.js';
 
 /**
  * @param {object} deps
@@ -219,15 +220,19 @@ export function createCards({
    * The sheet's own wording is kept on the map — it is what is printed on the
    * building and what somebody standing outside it will be looking for. This
    * only says which row it is.
+   *
+   * The places file's spellings, which are what a search result is called,
+   * are decided the same way in src/place-names.js, and `directoryFeature`
+   * there also accepts the directory's official name.
    */
   const LABEL_ALIASES = new Map([
     ['Health & Ed (HeEd) 710-716', 'Health Education Complex'],
   ]);
 
   function directoryRow(name) {
-    if (!directory() || !name) return null;
+    if (!name) return null;
     const want = LABEL_ALIASES.get(name.trim()) ?? name;
-    return directory().features.find((f) => f.properties?.name === want)?.properties ?? null;
+    return directoryFeature(directory(), want)?.properties ?? null;
   }
 
   function showBuildingCard(raw) {

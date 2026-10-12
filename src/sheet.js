@@ -80,6 +80,19 @@ const PROJECT_MS = 120;
  */
 const FLICK = 0.45;
 
+/**
+ * How long a finger can rest before letting go and still be throwing, in ms.
+ *
+ * A finger held still sends no moves — iOS sends none for a stationary touch —
+ * so the speed of the last move it did send is kept for as long as it is held.
+ * Drag, stop, adjust and let go a second later, and that stale speed was
+ * projected 120ms ahead and read as a flick: measured, a sheet held at 281px
+ * between half (332) and full (568) landed at full. Past this the release is a
+ * placement, and lands at the nearest detent. Longer than a frame or two, so
+ * the gap between the last move of a real throw and its pointerup never trips it.
+ */
+const STILL_MS = 80;
+
 /** Two detents closer together than this are one detent. */
 const DISTINCT = 24;
 
@@ -279,8 +292,17 @@ export function createSheet({ el, grip, enabled, onSettle, reserve }) {
     // at 97. `reserve` is whoever built this sheet saying where those controls
     // end — see src/shell.js — so this file still knows nothing about them.
     const strip = Math.max(MAP_STRIP, Math.round(reserve?.() ?? 0));
-    const full = clamp(content, rest, screen - strip);
-    const half = clamp(Math.round(screen * 0.5), rest, full);
+    const ceiling = screen - strip;
+    // AND NEVER TALLER THAN THE SCREEN, whatever rest measured. `rest` was the
+    // floor of both clamps, and rest is capped by the stylesheet at 62dvh —
+    // which iOS does not shrink for a keyboard. With the keys up on a 390x844
+    // phone the visible screen is 464px and a resting sheet holding eight
+    // results is 523, so the floor sat above the ceiling and `full` and `half`
+    // both came out taller than the screen: the field being typed into ended
+    // up above y = 0. The floor gives way to the ceiling now.
+    const floor = Math.min(rest, ceiling);
+    const full = clamp(content, floor, ceiling);
+    const half = clamp(Math.round(screen * 0.5), floor, full);
     return { rest, half, full };
   }
 
@@ -501,9 +523,12 @@ export function createSheet({ el, grip, enabled, onSettle, reserve }) {
       return;
     }
 
+    // How fast it was going when it was let go, which is nothing if the finger
+    // had stopped. See STILL_MS.
+    const still = event.timeStamp - done.at > STILL_MS;
     const height = snapTo({
       height: released,
-      velocity: done.velocity,
+      velocity: still ? 0 : done.velocity,
       detents: stops(done.heights),
       from: done.h0,
     });
