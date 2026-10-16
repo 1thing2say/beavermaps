@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import {
   createNavigation,
   LOOK_AHEAD_KM,
-  MANEUVER_REACHED_KM,
+  MANEUVER_PASSED_KM,
   JUMP_FIXES,
   OFF_ROUTE_M,
   OFF_ROUTE_FIXES,
@@ -25,6 +25,8 @@ import {
 import { instructionFor } from '../src/maneuvers.js';
 import { REACH_M } from '../src/directions.js';
 import { createRoute } from '../src/route-state.js';
+import { buildManeuvers, FEET_PER_KM } from '../src/maneuvers.js';
+import { walkLabel, walkSeconds } from '../src/directions.js';
 import { element, withDocument } from './fake-dom.js';
 import { point } from '@turf/helpers';
 import { along } from '@turf/along';
@@ -283,11 +285,11 @@ test('on a long straight the aim is the full look-ahead', () => {
   });
 });
 
-test('MANEUVER_REACHED_KM is a stride, not a block', () => {
-  // 25 ft. If this ever grows to something like the distance between corners,
-  // advanceSteps skips whole maneuvers on the first fix.
-  assert.ok(MANEUVER_REACHED_KM > 0);
-  assert.ok(MANEUVER_REACHED_KM < 0.02, `${MANEUVER_REACHED_KM} km is not a stride`);
+test('MANEUVER_PASSED_KM is a stride, not a block', () => {
+  // About 3 m. It was 25 ft, and a step retired 25 ft before its corner was
+  // a step 15% of walks never saw.
+  assert.ok(MANEUVER_PASSED_KM > 0);
+  assert.ok(MANEUVER_PASSED_KM * FEET_PER_KM <= 12, `${MANEUVER_PASSED_KM} km is not a stride`);
 });
 
 test('the first sign arrives without a swap, and the second swaps', () => {
@@ -646,13 +648,13 @@ test('a corner retired too early comes back once fixes put you well short of it'
     const corner = h.route.maneuverKm(1);
     strideAlong(h, 0, corner - 0.03);
 
-    for (const km of [corner - 0.015, corner - 0.004, corner - 0.004]) h.nav.moved(at(h, km), { accuracy: 5 });
+    for (const km of [corner - 0.015, corner - 0.002, corner - 0.002]) h.nav.moved(at(h, km), { accuracy: 5 });
     assert.equal(h.nav.stepIndex(), 2, 'the precondition: the corner was retired');
     assert.equal(liveSign(h).instruction, instructionFor('left'));
 
     // Short of where it was retired, but by less than GIVE_BACK_M: a walker
     // standing at a corner in noise does not see it come and go.
-    const retiredAt = corner - MANEUVER_REACHED_KM;
+    const retiredAt = corner - MANEUVER_PASSED_KM;
     for (let i = 0; i < 3; i++) h.nav.moved(at(h, retiredAt - GIVE_BACK_M / 2000), { accuracy: 5 });
     assert.equal(h.nav.stepIndex(), 2, 'given back inside the slack');
 
@@ -1154,5 +1156,139 @@ test('joining the line away from its start keeps the camera following', () => {
       assert.equal(h.map.eases.length, eases + 1, `the camera stopped ${m} m from the line`);
     }
     assert.ok(Math.abs(believedKm(h) - 0.1) < 0.002);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Corners close together, and the dotted legs. Built from metres and handed to
+// buildManeuvers, so the shapes are the ones the router actually answers with.
+// ---------------------------------------------------------------------------
+
+const O = [-121.3460, 38.6490];
+const en = (e, n) => [O[0] + e / 86940, O[1] + n / 110980];
+const FT = 0.3048;
+
+/**
+ * A route over `coords`, its pins `ends` if given, held the way main.js holds
+ * it. The maneuvers are buildManeuvers' unless given.
+ */
+function routeOver(coords, ends = {}, maneuvers = buildManeuvers(coords, ends)) {
+  const route = createRoute();
+  route.set({ geometry: { type: 'LineString', coordinates: coords }, maneuvers }, ends);
+  return route;
+}
+
+const signText = (h) => {
+  const sign = h.dom.stack.children.at(-1);
+  return `${sign.querySelector('.nav-distance').textContent} | ${sign.querySelector('.nav-instruction').textContent}`;
+};
+
+test('a first turn ten feet from the start is shown, not skipped', () => {
+  // North 10 ft, then east. The old 25 ft rule retired it on the first fix.
+  withDocument(() => {
+    const route = routeOver([en(0, 0), en(0, 10 * FT), en(60, 10 * FT)]);
+    assert.equal(route.maneuvers[1].type, 'right');
+    const h = harness({ route });
+    h.nav.start();
+    assert.equal(h.nav.stepIndex(), 1);
+    assert.match(signText(h), /Turn right/);
+
+    h.nav.moved(en(0, 3 * FT));                      // seven feet short of it
+    assert.equal(h.nav.stepIndex(), 1, 'retired while still ahead');
+    h.nav.moved(en(5, 10 * FT));                     // round it
+    assert.equal(h.nav.stepIndex(), 2);
+  });
+});
+
+test('two turns fifteen feet apart go on one sign, and neither is skipped', () => {
+  withDocument(() => {
+    // North 60 m, east 15 ft, north again. buildManeuvers would call a jog
+    // this short one bend and say nothing; given as two, the way a router
+    // that reads it otherwise would hand it over.
+    const coords = [en(0, 0), en(0, 60), en(15 * FT, 60), en(15 * FT, 120)];
+    const route = routeOver(coords, {}, [
+      { type: 'depart', index: 0 }, { type: 'right', index: 1 },
+      { type: 'left', index: 2 }, { type: 'arrive', index: 3 },
+    ]);
+    const h = harness({ route });
+    h.nav.start();
+    assert.match(signText(h), /Turn right, then turn left/);
+
+    // Twenty feet short of the first corner: the old rule had already jumped
+    // to the second one here, five feet short of retiring that too.
+    h.nav.moved(en(0, 60 - 20 * FT));
+    assert.equal(h.nav.stepIndex(), 1);
+
+    h.nav.moved(en(2, 60));                          // round the first
+    assert.equal(h.nav.stepIndex(), 2);
+    assert.match(signText(h), /^\S+ ft \| Turn left$/);
+  });
+});
+
+test('a last turn twenty feet before the end is shown before the arrival', () => {
+  withDocument(() => {
+    const route = routeOver([en(0, 0), en(0, 60), en(20 * FT, 60)]);
+    const h = harness({ route });
+    h.nav.start();
+    h.nav.moved(en(0, 60 - 20 * FT));
+    assert.equal(route.maneuvers[h.nav.stepIndex()].type, 'right', 'the corner was skipped for the arrival');
+    h.nav.moved(en(20 * FT, 60));
+    assert.equal(route.maneuvers[h.nav.stepIndex()].type, 'arrive');
+  });
+});
+
+test('depart is on the sign until the walker is on the path', () => {
+  withDocument(() => {
+    // A pin 30 m west of a path that runs north: walk east to it, turn left.
+    const from = en(-30, 0);
+    const route = routeOver([en(0, 0), en(0, 100)], { from, to: en(0, 100) });
+    assert.equal(route.maneuvers[0].turn, 'left');
+    const h = harness({ route });
+    h.nav.start();
+    assert.equal(h.nav.stepIndex(), 0, 'depart was retired at the pin');
+    assert.match(signText(h), /Walk to the path, then turn left/);
+    assert.match(signText(h), /^100 ft/);
+
+    h.nav.moved(en(-15, 0));
+    assert.equal(h.nav.stepIndex(), 0);
+    h.nav.moved(en(-1, 1));
+    assert.equal(h.nav.stepIndex(), 1);
+  });
+});
+
+test('the remaining distance and the ETA include the dotted legs, in the card\'s words', async () => {
+  await withDocument(async () => {
+    const route = routeOver([en(0, 0), en(0, 100)], { from: en(-30, 0), to: en(40, 100) });
+    const legs = route.legFeet;
+    assert.ok(Math.abs(legs.from - 30 / FT) < 1 && Math.abs(legs.to - 40 / FT) < 1, JSON.stringify(legs));
+    const h = harness({ route });
+    h.nav.start();
+    const whole = route.totalKm * FEET_PER_KM + legs.from + legs.to;
+    assert.equal(h.dom.eta.textContent, walkLabel(walkSeconds(whole)));
+    // 170 m is 558 ft, which niceFeet calls 550 here and on the card alike.
+    assert.equal(h.dom.remaining.textContent, '550 ft');
+
+    // At the end of the line the destination is still 40 m off. Walked there
+    // a few metres a fix, as a phone reports it: one fix a hundred metres on
+    // is a leap the tracker rightly waits to believe.
+    for (let n = 0; n <= 100; n += 5) h.nav.moved(en(0, n));
+    assert.notEqual(h.dom.stack.children.at(-1).querySelector('.nav-distance').textContent, 'Arrived');
+    assert.match(signText(h), /Destination on your right/);
+    await new Promise((done) => setTimeout(done, 400));   // let the sign land
+    for (const e of [10, 20, 30, 39]) h.nav.moved(en(e, 100));
+    assert.equal(h.dom.stack.children.at(-1).querySelector('.nav-distance').textContent, 'Arrived');
+    assert.equal(h.dom.remaining.textContent, '0 ft');
+  });
+});
+
+test('a walk of 1 min 29 s reads the same on the banner as on the card', () => {
+  // The banner rounded and the card rounds up: "1 min" against "2 min".
+  withDocument(() => {
+    const metres = 89 * 1.4;
+    const route = routeOver([en(0, 0), en(0, metres)]);
+    const h = harness({ route });
+    h.nav.start();
+    assert.equal(h.dom.eta.textContent, '2 min');
+    assert.equal(walkLabel(walkSeconds(metres / FT)), '2 min');
   });
 });

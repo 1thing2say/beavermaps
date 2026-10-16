@@ -198,7 +198,7 @@ export function createBuildingsLighting({
     if (active?.buildings) {
       if (!map.getLayer('campus-buildings')) add();
     } else if (!navigating()) {
-      remove();
+      drop();
     }
 
     // The camera, and only when the bench actually moved it. applyLighting runs
@@ -230,11 +230,14 @@ export function createBuildingsLighting({
     // The campus is emissive and cannot be relit; it has to be repainted. See
     // `paintedFor`. Read here rather than at the point of use because the lights
     // below need the same answer.
+    //
+    // Recorded only once the repaint has actually happened. Written first, a
+    // repaint that found no style to draw on still marked the preset done, and
+    // the daylight timer — which calls back here with the same preset until the
+    // sun crosses the next threshold — saw nothing left to do, so the city went
+    // to dusk while the campus stayed painted for day until the preset after.
     const wanted = active && active.preset !== 'auto' ? active.preset : clockPreset();
-    if (wanted !== paintedFor) {
-      paintedFor = wanted;
-      repaintCampus();
-    }
+    if (wanted !== paintedFor && repaintCampus() !== false) paintedFor = wanted;
 
     // NOT A RETURN, and it used to be one — `if (colors.lightPreset === null)
     // return;` stood here, and it is the whole reason "Stand the buildings up"
@@ -321,8 +324,25 @@ export function createBuildingsLighting({
    * standing, which on the dark theme is a campus full of black blocks over a
    * map that is supposed to be flat.
    */
-  function remove() {
+  function drop() {
     if (map.getLayer('campus-buildings')) map.removeLayer('campus-buildings');
+  }
+
+  /**
+   * The walk is over: take the extrusions down, and the app's sun with them.
+   *
+   * Not just `drop`. Standing the layer up swapped Standard's lights for
+   * sunLights, and only applyLighting puts them back — so a walk that ended with
+   * the layer merely removed left the whole city under the app's pale ambient
+   * (or its shadow-casting sun) until the next theme change or daylight tick.
+   * The caller has already stopped navigating, so the pass below sees a flat
+   * campus and restores the captured lights. Skipped when nothing was standing,
+   * since then there is nothing of ours on the map to undo.
+   */
+  function remove() {
+    const had = Boolean(map.getLayer('campus-buildings'));
+    drop();
+    if (had) applyLighting();
   }
   return { add, remove, applyLighting };
 }

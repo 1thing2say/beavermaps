@@ -173,6 +173,9 @@ export function createApp({
     return res.json({
       geometry: result.geometry,
       distanceFeet: result.distanceFeet,
+      // The dotted legs at either end, which distanceFeet is not: see route()
+      // in graph.js. The browser adds them for the walk's whole length.
+      legFeet: result.legFeet,
       maneuvers: result.maneuvers,
       snapped: result.snapped,
       door: result.door,

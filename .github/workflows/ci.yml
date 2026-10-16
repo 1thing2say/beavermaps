@@ -38,6 +38,11 @@ jobs:
       # `npm ci` rather than `npm install`: the lockfile is the input, and a
       # resolution that drifts under CI is a green tick for code nobody ran.
       - run: npm ci
+      # `npm ci` installs whatever the lockfile says, including a tree that
+      # breaks its own peer ranges. One did: geo-layers carried a nested
+      # loaders.gl 4.5.2 beside the root 4.4.4, and the flyover shipped both.
+      # `npm ls` exits non-zero on an invalid, missing or extraneous package.
+      - run: npm ls --all
       - run: npm run lint
 
   test:

@@ -41,6 +41,7 @@ const ROUTE = {
   ok: true,
   geometry: { type: 'LineString', coordinates: [[-121.3355, 38.6555], [-121.3356, 38.6556]] },
   distanceFeet: 42,
+  legFeet: { from: 6, to: 45 },
   maneuvers: [],
   snapped: null,
   door: null,
@@ -98,6 +99,18 @@ const postRoute = (base, body, headers = {}) => request(base, '/api/route', {
 
 const A = [-121.3355, 38.6555];
 const B = [-121.3365, 38.6565];
+
+// --- what a route answer carries ---------------------------------------------
+
+test('a route answer carries its dotted legs', async () => {
+  // legFeet is the walk off the network at either end, which distanceFeet is
+  // not. It was lost once already, when the routes moved out of index.js into
+  // this file and the move was resolved against a branch that had added it.
+  const base = await start({});
+  const res = await postRoute(base, { from: A, to: B });
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.body).legFeet, { from: 6, to: 45 });
+});
 
 // --- the rate limit's key (item 2) ------------------------------------------
 

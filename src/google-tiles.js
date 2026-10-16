@@ -33,6 +33,28 @@ export const GOOGLE_MAP_TYPE = {
   satellite: 'satellite',
 };
 
+/**
+ * How long a call to Google gets before it counts as refused.
+ *
+ * Google is the default provider and its style is BLANK — no sources, no
+ * layers — so until a session is minted there is no ground at all. The only
+ * way off that empty canvas is src/ground.js's fallback to Mapbox, and that
+ * runs when the session REJECTS. A network that drops googleapis.com traffic
+ * rather than refusing it, or a stalled mobile link, never rejects: it leaves
+ * the request hanging for as long as the browser's own socket timeout, which is
+ * minutes, with the provider button spinning over nothing. Ten seconds is
+ * generous for one small POST and short enough that somebody is still looking.
+ */
+export const GOOGLE_TIMEOUT_MS = 10_000;
+
+/** An abort after `ms`, where the browser can say that; nothing where it cannot. */
+const deadline = (ms) => (
+  typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined
+);
+
+/** A timed-out request, said in words rather than as the DOMException's. */
+const timedOut = (error) => error?.name === 'TimeoutError' || error?.name === 'AbortError';
+
 // Shown until the viewport call answers, and kept if it never does. Google
 // requires an attribution; a slightly less specific one beats none, and beats
 // blocking the basemap on a second network round trip.
@@ -354,12 +376,19 @@ function sessionBody(mapType, theme, skin) {
   return body;
 }
 
-async function mintSession(key, mapType, theme, skin) {
-  const response = await fetch(`${CREATE_SESSION}?key=${encodeURIComponent(key)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(sessionBody(mapType, theme, skin)),
-  });
+async function mintSession(key, mapType, theme, skin, timeoutMs) {
+  let response;
+  try {
+    response = await fetch(`${CREATE_SESSION}?key=${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sessionBody(mapType, theme, skin)),
+      signal: deadline(timeoutMs),
+    });
+  } catch (error) {
+    if (timedOut(error)) throw new Error('Google did not answer in time');
+    throw error;
+  }
 
   // Google puts the actionable part in the body, not the status line: a
   // disabled API and a referrer-rejected key are both 403, and only the message
@@ -367,7 +396,10 @@ async function mintSession(key, mapType, theme, skin) {
   // API in the console" and a blank grey rectangle.
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(payload?.error?.message ?? `createSession failed (HTTP ${response.status})`);
+    const error = new Error(payload?.error?.message ?? `createSession failed (HTTP ${response.status})`);
+    // Kept so a refusal can be told from a failure. See isRefusal.
+    error.status = response.status;
+    throw error;
   }
   if (!payload?.session) throw new Error('createSession returned no session token');
   return payload;
@@ -381,14 +413,14 @@ async function mintSession(key, mapType, theme, skin) {
  */
 const sessionId = (mapType, theme, skin) => `${mapType}:${theme}:${skin}`;
 
-function session(key, mapType, theme, skin) {
+function session(key, mapType, theme, skin, timeoutMs) {
   const id = sessionId(mapType, theme, skin);
   const cached = sessions.get(id);
   // `expiry` is a unix timestamp in seconds, as a string. A minute of slack, so
   // a session cannot expire between this check and the tile requests it feeds.
   if (cached && cached.expiresAt > Date.now() + 60_000) return cached.promise;
 
-  const promise = mintSession(key, mapType, theme, skin);
+  const promise = mintSession(key, mapType, theme, skin, timeoutMs);
   // Assume the documented two weeks until the response says otherwise, then
   // correct. Guessing short is safe — the worst case is one extra mint.
   const entry = { promise, expiresAt: Date.now() + 12 * 24 * 3600 * 1000 };
@@ -426,19 +458,19 @@ function session(key, mapType, theme, skin) {
 // the session it described.
 const attributions = new Map();
 
-async function attribution(key, id, token, bounds, zoom) {
+async function attribution(key, id, token, bounds, zoom, timeoutMs) {
   const cached = attributions.get(id);
   if (cached?.token === token) return cached.promise;
 
   // Safe to cache before it settles: fetchAttribution resolves to the fallback
   // on every failure path rather than rejecting, so there is no rejected promise
   // to get stuck in here.
-  const promise = fetchAttribution(key, token, bounds, zoom);
+  const promise = fetchAttribution(key, token, bounds, zoom, timeoutMs);
   attributions.set(id, { token, promise });
   return promise;
 }
 
-async function fetchAttribution(key, token, [[west, south], [east, north]], zoom) {
+async function fetchAttribution(key, token, [[west, south], [east, north]], zoom, timeoutMs) {
   const query = new URLSearchParams({
     session: token,
     key,
@@ -449,13 +481,32 @@ async function fetchAttribution(key, token, [[west, south], [east, north]], zoom
     west: String(west),
   });
   try {
-    const response = await fetch(`${VIEWPORT}?${query}`);
+    // Bounded like the session, because the basemap waits on this string: a
+    // hang here held the ground back exactly as long as a hang there did.
+    const response = await fetch(`${VIEWPORT}?${query}`, { signal: deadline(timeoutMs) });
     if (!response.ok) return FALLBACK_ATTRIBUTION;
     const payload = await response.json();
     return payload?.copyright || FALLBACK_ATTRIBUTION;
   } catch {
     return FALLBACK_ATTRIBUTION;
   }
+}
+
+/**
+ * Whether a rejection from googleGround is Google saying no, rather than the
+ * request failing to get an answer.
+ *
+ * The difference is whether falling back to Mapbox is remembered past this
+ * page (see `revert` in src/provider.js). A missing key, and a 4xx — key
+ * invalid, API not enabled, referrer not allowed — will be the same on the
+ * next load. A fetch that threw (offline, DNS, a reset connection), a 5xx, a
+ * 408 or a 429 will not; nor will a 200 that was not Google's, which is what
+ * "returned no session token" usually is: a captive portal's sign-in page.
+ */
+export function isRefusal(error) {
+  if (error?.refused) return true;
+  const status = error?.status;
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 /**
@@ -471,13 +522,19 @@ async function fetchAttribution(key, token, [[west, south], [east, north]], zoom
  * @param {string}   options.theme    'light' | 'dark'.
  * @param {string}   options.skin     'apple' | 'classic'.
  * @param {number[][]} options.bounds [[w, s], [e, n]], for the attribution call.
+ * @param {number}   [options.timeoutMs] how long each call to Google may take.
  */
-export async function googleGround({ key, basemap, theme, skin, bounds }) {
-  if (!key) throw new Error('No Google Maps API key — set VITE_GOOGLE_MAPS_KEY in .env');
+export async function googleGround({
+  key, basemap, theme, skin, bounds, timeoutMs = GOOGLE_TIMEOUT_MS,
+}) {
+  if (!key) {
+    throw Object.assign(new Error('No Google Maps API key — set VITE_GOOGLE_MAPS_KEY in .env'),
+      { refused: true });
+  }
 
   const mapType = GOOGLE_MAP_TYPE[basemap] ?? GOOGLE_MAP_TYPE.map;
   const id = sessionId(mapType, theme, skin);
-  const { session: token } = await session(key, mapType, theme, skin);
+  const { session: token } = await session(key, mapType, theme, skin, timeoutMs);
   const auth = `session=${encodeURIComponent(token)}&key=${encodeURIComponent(key)}`;
 
   return {
@@ -492,6 +549,6 @@ export async function googleGround({ key, basemap, theme, skin, bounds }) {
     // Setting this short is not free — Mapbox would oversample the last level
     // it thinks exists and blur the deepest navigation zooms.
     maxzoom: 22,
-    attribution: await attribution(key, id, token, bounds, 17),
+    attribution: await attribution(key, id, token, bounds, 17, timeoutMs),
   };
 }

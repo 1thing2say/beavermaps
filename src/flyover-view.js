@@ -73,7 +73,8 @@ const TILESET = 'https://tile.googleapis.com/v1/3dtiles/root.json';
 
 /**
  * The tile layer's id, which is also the prefix Tile3DLayer gives its sublayers
- * — so it is how `drawn` asks whether any geometry exists yet.
+ * — so it is how `drawn` asks whether any geometry exists yet. The first root's
+ * layer wears it bare; see `tilesId` for the ones after.
  */
 const TILES_ID = 'flyover-tiles';
 
@@ -261,6 +262,30 @@ const GRID_DEPTH_M = -8;
 const FALLBACK_CREDIT = 'Google Maps';
 
 /**
+ * How long one root's session is trusted for, in ms.
+ *
+ * Google's 3D Tiles session runs out three hours after the root that minted it:
+ * every child URI carries that `session` parameter, and past the three hours
+ * each one is refused. The root is fetched once per tab by design (see the top
+ * of this file), so a tab left open over lunch — a phone resumed in the
+ * afternoon, a kiosk — went on asking with a dead session, every new tile
+ * failed, and loaders.gl marks a failed tile FAILED and never asks for it
+ * again. Ten minutes short of the three hours, so a card opened just before the
+ * limit is not left to run into it, and about one billable root per three hours
+ * of actual use.
+ */
+const SESSION_MS = (3 * 60 - 10) * 60 * 1000;
+
+/**
+ * How many tiles may fail before a card that still has no roof says so.
+ *
+ * A failed tile is never retried, so past a handful of them the roof is not
+ * coming and the spinner — or a pin that never drops — is a wait for nothing.
+ * Enough that one blip on a flaky connection does not cost the picture.
+ */
+const TILE_FAILURES = 5;
+
+/**
  * deck.gl and loaders.gl, fetched the first time somebody opens a building and
  * never again.
  *
@@ -335,7 +360,28 @@ function keyedFetch(key) {
     if (target.hostname.endsWith('googleapis.com') && !target.searchParams.has('key')) {
       target.searchParams.set('key', key);
     }
-    const response = await fetch(target.toString(), options);
+    const isRoot = target.pathname === new URL(TILESET).pathname;
+    let response;
+    try {
+      response = await fetch(target.toString(), options);
+    } catch (error) {
+      // No answer at all — offline, a captive portal, campus wifi dropping out.
+      // This used to reject before anything below could hear it, so the card
+      // spun for as long as it was open, and so did every card after it: the
+      // layer had asked once and would never ask again. Said, and marked as
+      // worth asking again on the next card. See `rootFailed`.
+      if (isRoot) {
+        stage.rootFailed = true;
+        stage.rootError = error;
+        stage.onRefused?.('Aerial view unavailable. Check your connection.');
+      }
+      throw error;
+    }
+    // A child tile refused for its session — see SESSION_MS. Marked rather than
+    // acted on: this card keeps what it has, and the next one starts afresh.
+    if ([400, 401, 403].includes(response.status) && target.searchParams.has('session')) {
+      stage.sessionStale = true;
+    }
     // THE ONE REQUEST WHOSE REFUSAL IS THE WHOLE ANSWER, and nothing else was
     // listening for it. deck.gl's Tile3DLayer loads the root itself and does
     // not catch what that throws, so a refused key — the API not enabled, a
@@ -349,14 +395,22 @@ function keyedFetch(key) {
     // src/ground.js sends the same key's 2D refusal: always to the console,
     // and onto the card only in dev or under ?debug. A visitor gets the plain
     // line — see forVisitor.
-    if (!response.ok && target.pathname === new URL(TILESET).pathname) {
+    //
+    // ONLY A KEY PROBLEM IS FOR GOOD. A 400, 401 or 403 is the key, the API or
+    // the referrer, and asking again in this tab will get the same answer. A
+    // 429 or a 503 is Google being busy for a minute, and recording one of
+    // those as a refusal disabled the aerial view until a reload; those are
+    // asked again on the next card instead, which costs nothing — a root that
+    // failed was not billed.
+    if (!response.ok && isRoot) {
       let detail = `Aerial view unavailable (HTTP ${response.status})`;
       try {
         detail = (await response.clone().json())?.error?.message ?? detail;
       } catch { /* not JSON: the status is all there is */ }
       console.error(`[beavermaps] 3D tiles refused: ${detail}`);
       const message = forVisitor(detail, PLAIN_AERIAL_PROBLEM);
-      stage.refused = message;
+      if ([400, 401, 403].includes(response.status)) stage.refused = message;
+      else stage.rootFailed = true;
       stage.onRefused?.(message);
     }
     return response;
@@ -538,8 +592,35 @@ const stage = {
   owner: null,
   /** Set by whichever flyover holds the canvas, so traversals reach the right card. */
   onReady: null,
+  /** ...a tile did not. Counted by the card; see TILE_FAILURES. */
+  onTileFailed: null,
   /** ...and the same for a tileset Google refused. See keyedFetch. */
   onRefused: null,
+  /** ...and for a renderer that could not start or has lost its context. */
+  onFailed: null,
+  /**
+   * The Deck cannot draw any more: it never got a WebGL context, or it lost
+   * the one it had. Every card reuses the one Deck, so left alone this was a
+   * blank aerial view for the rest of the tab; the next card builds a new one.
+   */
+  broken: false,
+  /**
+   * Which tile layer this is, counted up each time the root has to be fetched
+   * again. The layer's id is what deck.gl matches across renders, so a new id
+   * is how a new root is asked for. See `tilesId`.
+   */
+  generation: 0,
+  /**
+   * The root failed in a way that asking again may fix — no network, or a
+   * 408, 429 or 5xx. Unlike `refused`, it is not the answer for the tab.
+   */
+  rootFailed: false,
+  /** What the failed root threw, so its unhandled rejection can be recognised. */
+  rootError: null,
+  /** When the current root loaded, for SESSION_MS. 0 until it has. */
+  rootAt: 0,
+  /** A child tile was refused for its session. See SESSION_MS. */
+  sessionStale: false,
   /**
    * What the card says once the root has been refused — Google's sentence in
    * dev or under ?debug, the plain line otherwise. See keyedFetch.
@@ -583,24 +664,37 @@ const stage = {
 };
 
 /**
- * The refused root's second report, kept out of the console.
+ * The tile layer's id for the current root.
  *
- * keyedFetch hears the refusal and puts it on the card, but it hands the
- * response back regardless — it has to, the layer is waiting for it — and
- * Tile3DLayer then throws on it from a promise nobody catches. So every refused
- * key produced an "Uncaught (in promise)" on top of the sentence that had
- * already handled it, which reads as a second, unexplained failure to anybody
- * looking.
+ * TILES_ID itself for the first, so nothing changes for the tab whose root
+ * never fails; a suffix after that. `~` rather than `-` because `-` is how
+ * Tile3DLayer joins its sublayers' ids on, and `drawn` looks for those.
+ */
+const tilesId = () => (stage.generation ? `${TILES_ID}~${stage.generation}` : TILES_ID);
+
+/**
+ * The failed root's second report, kept out of the console.
+ *
+ * keyedFetch hears the failure and puts it on the card, but it hands the
+ * response back regardless, or rethrows what fetch threw — it has to, the layer
+ * is waiting for it — and Tile3DLayer then throws on it from a promise nobody
+ * catches. So every refused key, and every offline card, produced an "Uncaught
+ * (in promise)" on top of the sentence that had already handled it, which
+ * reads as a second, unexplained failure to anybody looking.
  *
  * Module-level, and once, because the stage is: the layer and its root outlive
- * every card. Narrow on purpose — only after keyedFetch has recorded a refusal,
- * and only a rejection carrying the root's own URL (see isTilesetRootFailure).
- * Everything else that rejects on this page is still somebody's bug, and still
- * reaches the console as one. loaders.gl's own "A 3D tile failed to load" line
- * is a console.error inside the library, not a rejection, and is left alone.
+ * every card. Narrow on purpose — only after keyedFetch has recorded a refusal
+ * or a passing failure, and only a rejection carrying the root's own URL (see
+ * isTilesetRootFailure), or the very error fetch threw, which loaders.gl passes
+ * on unchanged. Everything else that rejects on this page is still somebody's
+ * bug, and still reaches the console as one. loaders.gl's own "A 3D tile failed
+ * to load" line is a console.error inside the library, not a rejection, and is
+ * left alone.
  */
 globalThis.addEventListener?.('unhandledrejection', (event) => {
-  if (stage.refused && isTilesetRootFailure(event.reason, TILESET)) event.preventDefault();
+  const answered = (stage.refused || stage.rootFailed) && isTilesetRootFailure(event.reason, TILESET);
+  const unreached = stage.rootError && event.reason === stage.rootError;
+  if (answered || unreached) event.preventDefault();
 });
 
 /**
@@ -682,7 +776,12 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
     // reloaded. deck.gl matches layers across renders by id and only calls
     // `_loadTileset` when `props.data` actually changes — so every subsequent
     // building reuses the tree that is already in memory, and pays nothing.
-    id: TILES_ID,
+    //
+    // EXCEPT WHEN THE ROOT HAS TO BE ASKED FOR AGAIN — it failed, or its
+    // session ran out — which is what a new id is for. deck.gl finalizes the
+    // old layer and its tileset and the new one loads from scratch. See
+    // `tilesId`.
+    id: tilesId(),
     data: TILESET,
     loader: Tiles3DLoader,
     loadOptions: {
@@ -789,15 +888,23 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
       // not say which source covered more of the view, which is the order
       // Google asks for. The line is counted from `stage.drawn` instead; see
       // `tileCredits` in src/google-tiles.js.
+      //
+      // It is also what lets the pin drop. Leaving that to the traversal alone
+      // (bddded3) meant its showsSubject test never passed in a real browser,
+      // and the pin never fell at all.
       stage.onReady?.();
     },
-    onTileError: () => {},
+    // Counted rather than swallowed. A failed tile is never asked for again, so
+    // a card waiting on one waits for ever without this. See TILE_FAILURES.
+    onTileError: () => stage.onTileFailed?.(),
     // The one moment the tileset exists and nothing has traversed it yet. Fires
     // once for the tab, because `_loadTileset` runs once — see the note on `id`
     // above. This is where MAX_GPU_MB has to be applied to bite; the option of
     // the same name does nothing.
     onTilesetLoad: (tileset) => {
       tileset.maximumMemoryUsage = MAX_GPU_MB;
+      // The session's clock starts here. See SESSION_MS.
+      stage.rootAt = Date.now();
     },
     // The perimeter, pushed down onto the layers that actually draw glTF.
     // Tile3DLayer is a composite and renders one ScenegraphLayer per tile, so
@@ -854,7 +961,59 @@ function buildStage(tools, view) {
     // shows through everywhere the clip discarded, which is the whole point of
     // drawing a grid there.
     layers: stage.base,
+    /**
+     * WHERE A RENDERER THAT NEVER STARTED SAYS SO. deck.gl creates its device
+     * asynchronously and does not wait for it, so a browser that will not hand
+     * out a WebGL context does not throw from `new Deck` — the try around
+     * buildStage never sees it, and the card said "Loading aerial view" for as
+     * long as it was open. This is the one place that failure arrives.
+     *
+     * Two kinds of error come through here and only one is fatal. A layer's
+     * own error arrives with the layer as its second argument and leaves the
+     * renderer working, so it is logged — passing onError replaces deck's own
+     * logging — and the stage is left alone.
+     */
+    onError: (error, layer) => {
+      if (layer) {
+        console.error('flyover layer error:', error);
+        return;
+      }
+      stage.broken = true;
+      stage.onFailed?.(error);
+    },
   });
+
+  // A lost context is not handed to onError — luma only notes it, and deck's
+  // own handler for it is never called — so it is listened for here. Not
+  // restored: the stage is thrown away and the next card builds another, which
+  // is simpler than rebuilding every GPU resource deck.gl and loaders.gl hold.
+  // iOS does this to a backgrounded tab, and to one under GPU memory pressure
+  // while Mapbox GL holds a context of its own.
+  canvas.addEventListener('webglcontextlost', () => {
+    stage.broken = true;
+    stage.onFailed?.(new Error('WebGL context lost'));
+  });
+}
+
+/**
+ * Throw the renderer away, so the next card builds a new one.
+ *
+ * After a failure only. A new Deck is a new tileset and therefore a billable
+ * root request, which is everything the shared stage exists to avoid — but a
+ * Deck that cannot draw costs nothing and shows nothing.
+ */
+function discardStage() {
+  try {
+    stage.deck?.finalize();
+  } catch (error) {
+    console.error('flyover stage teardown:', error);
+  }
+  stage.host?.remove();
+  stage.deck = null;
+  stage.host = null;
+  stage.canvas = null;
+  stage.broken = false;
+  stage.rootAt = 0;
 }
 
 /**
@@ -1037,9 +1196,17 @@ export function createFlyover({
 
   let frame = 0;
   let dead = false;
+  /** Whether this card has given up and said so. The orbit stops with it. */
+  let failed = false;
+  /** Tiles this card has seen fail. See TILE_FAILURES. */
+  let tileFailures = 0;
 
   function fail(message) {
-    if (dead) return;
+    if (dead || failed) return;
+    failed = true;
+    // The orbit too, which used to go on driving the hidden canvas behind the
+    // note for as long as the card was open.
+    cancelAnimationFrame(frame);
     busy.stop?.();
     busy.remove();
     // Replaces the box rather than sitting over it. A viewport that stays empty
@@ -1072,7 +1239,16 @@ export function createFlyover({
     if (stage.owner === token) {
       stage.owner = null;
       stage.onReady = null;
+      stage.onTileFailed = null;
       stage.onRefused = null;
+      stage.onFailed = null;
+      // Off between cards. The one Deck is kept for the tab, and its render
+      // loop asked for a frame sixty times a second whether or not its canvas
+      // was in a card — on a phone, for the rest of the visit, after a single
+      // building had been opened and closed. Only once the device exists: a
+      // loop stopped while its device is still being created skips handing the
+      // device to deck.gl, and a later start would then run a Deck with none.
+      if (stage.deck?.layerManager) stage.deck.animationLoop?.stop();
       // Not left set. The layer's traversal keeps running for a frame or two
       // after the canvas is detached, and culling those against a box for a
       // building nobody is looking at is the sort of thing that shows up as a
@@ -1140,6 +1316,19 @@ export function createFlyover({
       },
     };
 
+    // A renderer that failed is not handed to another card. See `broken`.
+    if (stage.broken) discardStage();
+    // A root worth asking for again: one that failed for want of a network or
+    // of a quiet minute at Google, or one whose session has run out or been
+    // refused. A new layer id is what makes deck.gl ask. See SESSION_MS.
+    const expired = stage.rootAt && Date.now() - stage.rootAt > SESSION_MS;
+    if (stage.rootFailed || stage.sessionStale || expired) {
+      stage.generation += 1;
+      stage.rootFailed = false;
+      stage.sessionStale = false;
+      stage.rootAt = 0;
+    }
+
     stage.maxTileSpan = maxTileSpan ?? 0;
     stage.bounds = bounds ? campusBox(bounds) : null;
     stage.roof = roof ?? null;
@@ -1156,6 +1345,10 @@ export function createFlyover({
         return;
       }
     } else {
+      // Back on, having been stopped when the last card let go. Resumes the
+      // loop rather than re-initialising it, so the device and the tileset —
+      // and the one billable root — are the ones already held.
+      stage.deck.animationLoop?.start();
       // Per building, because both the camera and the perimeter are. Replacing
       // rather than mutating is what deck.gl expects of each: a View is
       // immutable once constructed, and a layer's props are read at
@@ -1178,6 +1371,10 @@ export function createFlyover({
     // the root comes back refused. See keyedFetch.
     if (stage.refused) { fail(stage.refused); return; }
     stage.onRefused = (message) => fail(message);
+    stage.onFailed = (error) => {
+      console.error('aerial view renderer failed:', error);
+      fail('Aerial view unavailable');
+    };
 
     // Called both when a traversal selects tiles and when one finishes loading,
     // so it does two jobs and has to be safe to call repeatedly.
@@ -1191,6 +1388,11 @@ export function createFlyover({
       // geometry out of it, and is checked per frame because it becomes true
       // between frames rather than in any callback.
       roofReady = true;
+    };
+    stage.onTileFailed = () => {
+      if (dead || roofReady) return;
+      tileFailures += 1;
+      if (tileFailures >= TILE_FAILURES) fail('Aerial view unavailable');
     };
 
     /**
@@ -1214,7 +1416,7 @@ export function createFlyover({
      * the orbit. There is no public route to "has this composite drawn yet".
      */
     const drawn = () => !!stage.deck?.layerManager?.getLayers?.()
-      ?.some((l) => l.id.startsWith(`${TILES_ID}-`));
+      ?.some((l) => l.id.startsWith(`${tilesId()}-`));
 
     /** Spinner off, once, the moment there is a building to look at. */
     const reveal = () => {
@@ -1292,7 +1494,7 @@ export function createFlyover({
         layers: [...stage.base, ...marks(landed ? STILL_MS : null)],
       });
       const wait = () => {
-        if (dead || stage.owner !== token) return;
+        if (dead || failed || stage.owner !== token) return;
         if (busy.isConnected && drawn()) reveal();
         if (!(roofReady && drawn())) { frame = requestAnimationFrame(wait); return; }
         // Landed, so the fall's length changes nothing on screen — but the
@@ -1307,7 +1509,7 @@ export function createFlyover({
 
     const start = performance.now();
     const tick = (now) => {
-      if (dead || stage.owner !== token || !stage.deck) return;
+      if (dead || failed || stage.owner !== token || !stage.deck) return;
       // Wall-clock rather than a per-frame increment, so the circle takes
       // ORBIT_MS whether the tab is rendering at 120fps or dropping frames
       // decoding tiles — which is exactly when this is running.
@@ -1352,7 +1554,7 @@ export function createFlyover({
         // A dev-only mark, the same kind of handle as `window.__map`. Whether
         // the pin waited for calm or timed out is the one thing about this that
         // cannot be read off the outside, and it is stripped from the build.
-        if (import.meta.env.DEV) {
+        if (import.meta.env?.DEV) {
           window.__flyoverDrop = { at: now, waited: Math.round(waited), calm: calm() };
         }
         if (roof) fall = measureDrop(bearing);

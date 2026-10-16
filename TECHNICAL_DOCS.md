@@ -37,30 +37,40 @@ a factory, wired together by `src/main.js`. The ones a route passes through are
 
 ## 1. Why the graph is on the server
 
-Building the topology is `O(E)` over 7,561 segments, and it produces the same
+Building the topology is `O(E)` over 8,285 segments, and it produces the same
 graph every time. Done in the browser it was paid on every visitor's phone,
 during the cold load, before the first route could be asked for.
 
-`server/graph.js` builds it once at boot — about 50 ms — and holds it. The
+`server/graph.js` builds it once at boot — about 60 ms — and holds it. The
 client asks `POST /api/route` with two coordinates and gets back a line, a
 distance and a list of maneuvers.
 
-The graph is the union of two files, concatenated:
+The graph is the union of three files, concatenated:
 
 - **`src/paths.json`** — the campus's own paths, traced from its printed sheet.
   Owned by `scripts/build-walk-network.mjs`. This is also what gets *drawn*.
+- **`src/plaza-paths.json`** — the ways across the sheet's paved plazas, the
+  walkways it paints as filled surfaces rather than strokes: 590 straight
+  crossings, 4.6 km, over eight of the ten plazas, round everything that stands
+  on them. Written by the last stage of the same script. Routed over, **never
+  drawn**: the plaza is already on the map as paving, and a walk across it
+  shows on the route ribbon. Their ends weld to `paths.json`'s vertices the way
+  the gates do; their corners are vertices only they touch.
 - **`src/approach-paths.json`** — the surrounding streets, from OpenStreetMap.
   Owned by `scripts/build-approach-network.mjs`. Routed over, **never drawn**,
   because whichever provider is painting the ground is already drawing them.
   By default that script re-gates the streets already in the file against the
   current `paths.json` and leaves them otherwise byte-for-byte. Only `--fetch`
   goes to Overpass, so a campus rebuild cannot bring in OSM edits nobody has
-  reviewed.
+  reviewed. Besides the streets (`source: 'osm'`) it holds the gates onto the
+  campus (`'gate'`, 12 m at most) and four `'lot'` connectors, straight across
+  a car park from an entrance the campus clip cut to the campus path beyond —
+  78 to 111 m, which is why they are their own source.
 
 Concatenation *is* the merge. `geojson-path-finder` derives topology from
-coordinates rather than from feature identity, so the twenty-two gate connectors
-that script prints on every build weld to campus vertices simply by ending on them at the same seven
-decimals.
+coordinates rather than from feature identity, so the sixteen gate connectors
+and four lot connectors that script prints on every build weld to campus vertices simply by ending on them at the same seven
+decimals, and so do the plaza crossings.
 
 A third file is read beside them and routed over by nobody: **`src/doors.json`**,
 also written by `build-walk-network.mjs`. It holds what that script's walls
@@ -111,36 +121,109 @@ corner every edge at it leads away from). The extra metres to it are counted
 against it, and the walk picks: College Oak Parking Lot to STEM is 155 m by the
 south side and 210 m by the nearest. A point on or beside the network has no
 alternative — the slack is proportional — so a walk to a building's entrance
-ends at a door of it, not on a path beside it. A pairing whose walk along the
+ends at a door of it, not on a path beside it. Both ends of every edge joined
+within the slack are offered too, so a walk can stop at the corner it comes
+to rather than run on to the foot and step back off it: the walk from Room 560
+to CalWORKs used to end in a 127° hook, and the hooks at the ends of walks
+between two places went from 99 to 61. A pairing whose walk along the
 network would be shorter than the weld is passed over: it is "cross the ground
 and you are there", and there is nothing to draw.
 
 **From open ground, every way.** The slack is for a tie of a metre or two. A
 point at least 4 m from any path (`OPEN_GROUND_M`) — the middle of a car park, a
-lawn — is also offered the nearest way on in each of eight directions, out to
-five times the nearest distance and no more than 40 m further than it, and not
-where the straight leg to it would cross a building (`buildings` passed to
-`createGraph`). The car parks needed it: their aisles are clipped away, and a
+lawn — is also offered the nearest way on in each of eight directions, and any
+other in that direction no more than 5 m further than that one (three at
+most), out to five times the nearest distance and no more than 40 m further
+than it (off the campus, no more than 5 m further: OSM draws the footways
+that serve a stop, and the bus stop for lines 1 and 82 used to walk 42 m to the
+street's centreline past one 8.9 m away). The car parks needed it: their aisles are clipped away, and a
 permit machine 10 m from the walk down the north lot's east side is 46 m from
 the corner of the walk at its west end. With only the first, the Science
 Success Center 89 m away was 272 m up the east side and round; across the
 tarmac it is 98 m. Under 4 m you are standing on the pavement, and a pin
 dropped on a path keeps the single answer the slack gives it.
 
-**A detour, asked again wider.** That reach is the most the car parks needed,
+**A wider reach, at a price.** That reach is the most the car parks needed,
 and it can still leave a point with only a nearby path that goes the long way
 round: a point on a lawn 7.2 m from walkway 1313 was offered ways on out to
 36 m, the end of walkway 1314 was 58 m across the same grass, and a walk to a
 point 123 m away went down 1313 and back up it, 336 m (the nearest-vertex
-router, snapped to 1314, walked 155). So on the campus, when a walk comes out
-more than twice the straight line between its two points, legs and all
-(`DETOUR_SHARE`), and the point has ways on beyond the reach, it is searched
-again with every way on within 60 m further than the nearest
-(`OPEN_GROUND_WIDE_M`), bounded by the first answer, and the shorter answer
-stands: 157 m on that lawn, and 230 of 37,391 test walks shorter, by 48 m at the
-median. Widening the reach for every walk instead changed 7,118 of them, nearly
-tripled the walks with a dotted leg over 60 m, and saved 1.3% of the walking.
-The ways on for both reaches are gathered in the one scan of the edges.
+router, snapped to 1314, walked 155). So on the campus, from open ground and
+out of a room, every way on within 60 m further than the nearest
+(`OPEN_GROUND_WIDE_M`) is offered too, in the same search, each charged half
+again for every metre of its leg beyond the first reach
+(`OPEN_GROUND_WIDE_CHARGE`): a leg 20 m past it has to save 10 m of path. Free,
+the wider reach changed 7,118 of 37,220 test walks and nearly tripled the
+walks with a dotted leg over 60 m to save 1.3% of the walking. So for a while
+it was searched only when the first answer was a detour, more than twice the
+straight line (`DETOUR_SHARE`). That made the better walk depend on the first
+being bad enough: a new edge that brought the first answer just under twice
+switched the wider search off, and three connectors added through the north
+lot took Drop-off North to the permit machine there from 213 m to 351 m.
+Charged per way on, a way on offered beside the drawn edges can only make a
+walk cheaper (a new drawn edge can still cost a walk a little, by changing
+which corners a point is offered; see `LEG_CHARGE`). Against the
+detour rule, over 15,323 walks between places, amenities and 2,000 random
+campus points, 2,589 come out shorter (by 15 m at the median, 204 m at most)
+and the walking falls by 1.1%; the dotted legs over 60 m go from 740 to 1,882.
+At no charge they would be 2,403, for 5% more saving. The ways on for both
+reaches are gathered in the one scan of the edges.
+
+**The plazas, beside the paths.** The plaza crossings are campus network once
+a walk is on them, but nothing a point is measured by is measured to them: the
+nearest edge, the slack, whether a point is on open ground, the directions it
+can leave in and whether a room is nearer a peeled stub than the network are
+all asked of the drawn edges, and the foot of each crossing within the drawn
+slack is offered after, unless its leg crosses a building. Measured like any
+other edge, a crossing 3.4 m from the Math Learning Center put it under the
+4 m open-ground mark, five ways on became one, and its walk to Para Transit
+went from 333 m to 377 m; of every walk between two places, 539 came out
+longer. Offered beside the drawn edges they lengthen none, and
+`test/plaza.test.js` holds every pair of places to that, and to a connector
+added through the north lot doing the same. The lot connectors that now run
+through the north and south-west car parks are offered the same way, beside
+the drawn edges: a lot's pin stands on one (Myrtle Parking Lot West is 0.2 m
+off it), and measured as its nearest edge it lost every way across the tarmac
+and its walk to the Administration Building went from 307 m to 371 m.
+
+**Never through a building, and never for free.** No way on is offered whose
+straight leg goes more than 1.5 m into a building's footprint (`WALL_CLIP_M`,
+`buildings` passed to `createGraph`) — the nearest join no more than any
+other, and the building a leg ends at no exception. Only the open-ground ways
+used to be asked, and a leg was let through any building either end of it
+stood in; a door is on its wall or just inside it, so a leg to one was let
+through the whole building. Para Transit left by a 43.7 m leg to the Arts and
+Science door, 21 m of it through Arts and Science; a stall in lot 42 crossed
+35.4 m of CTE; a bike rack among the portables joined the walk through one.
+Now the last 2 m of a leg stands for the door's own wall, the building a
+point is inside is let off only on its way out, and depth rather than length
+is what counts, so a leg along a wall a metre under the drawn roof is beside
+the building: Receiving's walk north up the car park beside its loading dock
+is that, and refusing it sent 137 walks round by the south. Where every way
+on is behind a building, the ways round it are offered — the nearest clear
+one in each direction, read every 2 m along the edges out to the wider
+reach — and only where there are none of those does the nearest stand. Of
+the legs walked between places, amenities and entrances, 41 went more than
+1.5 m into a building, 36 of them more than 3 m; none does now.
+
+Every metre of a leg beyond the nearest join is charged 0.3 again
+(`LEG_CHARGE`), and every metre past a drawn path it steps over on the way
+to another once again (`CROSSING_CHARGE`), with the path it steps over
+offered as a way on where it crosses. Costed at its straight metres a
+diagonal across a lawn always beat the path round two sides of it: a bike
+rack beside the Child Development Center took a 61.3 m leg across the grass,
+and a telephone on the Gym's north wall walked 47.7 m over the walkway outside
+it and 26 m of lawn to the next. Over the 10,440 walks between two places the
+dotted legs come to 369 km instead of 472, and the walking to 3,174 km instead
+of 3,150 km, 0.8% more; none is refused that was answered or answered that
+was refused. Legs over a drawn path before their join went from 163 distinct
+to 29. Both charges are fixed per way on, so `test/plaza.test.js` still holds
+every pair of places to costing no more with the plazas than without; in
+walked metres 121 pairs come out longer with them, by 3.8 m at the median and
+25 m at most, each having traded dotted leg for path. A room's ways out that
+are not its own footprint's drawn doors are offered only where the leg runs no
+more than 4 m outside the building and over no drawn path; see *Inside a
+building: the door, not the nearest face*.
 
 **The campus, from the street side.** The streets join the campus only at the
 gates, and the gate stage keeps those hundreds of metres apart on purpose (see
@@ -193,10 +276,21 @@ If it is, it snaps to that piece's door — the nearer one, where a cut passage
 left two — and `metres` is the distance to the door. Its ways on are then
 **every door of that footprint**, that one first and the rest nearest first,
 then — where those doors are a building's in `entrances` — every other way into
-that building whose straight leg does not cross another building and is no more
-than 40 m further than the nearest door (`OPEN_GROUND_MAX_M`; 60 m when the walk
-is a detour, above), each leg through the building counted, and the walk picks;
-nothing else is offered. Unbounded, the telephones in the Parking Garage, 7.7 m
+that building whose straight leg does not go through another building, runs
+no more than 4 m out of doors and over no drawn path, and is no more
+than 40 m further than the nearest door (`OPEN_GROUND_MAX_M`; out to 60 m at the
+wider reach's price, above), each leg through the building counted, and the walk picks;
+nothing else is offered. Without the second and third conditions a room walked
+out of its building and over the paths outside to where the walls come nearest
+somewhere else: the Counseling Center, inside Administration, left for the lawn
+west of it by a node on another face of Administration, 35.9 m off and over the
+path between. Seven such ways out of four rooms are turned away. Out of doors
+is outside every footprint of the building, not only the room's: CTE is drawn
+as two footprints that abut, and the Design Hub and the MCT HomeBase, in one,
+were refused CTE's north door on the other for metres that never leave the
+building, the second footprint held against the leg as a wall besides. Leaving
+by it, the MCT HomeBase walks 48 m to the bike rack north of CTE, not 98 m
+round. Unbounded, the telephones in the Parking Garage, 7.7 m
 from a door, began the walk to the Baseball field with a 132 m dotted line
 across the deck; between two places, 28 legs ran more than 50 m further than the
 nearest join. The footprint's drawn doors are not capped. The
@@ -224,9 +318,23 @@ network (`doors`, entrance first), and `server/index.js` passes those lists to
 point on the network is within a metre of the nearest corner's — which corner
 the network passes closest to is the drawing's slop, and the old router's end
 was whichever of them had a vertex — and `scripts/build-walk-network.mjs`
-splices a node at each, so a way in is always a vertex. A point the walls of
+splices a node at each, so a way in is always a vertex: 88 of them. Three
+more kinds follow. The drawn doors of a building's other footprints come
+straight after the home footprint's (four were listed nowhere, on Science &
+Engineering's wings and the CTE's north wing). A building drawn as several
+footprints offers each shard's own nearest point, within 12 m of its walls,
+where no way in lies within 20 m (`memberNearest()` in
+`scripts/building-names.mjs`; 11 today, the Portable Village's and TEW's
+far portables among them), spliced like the rest. And a corner of the plaza
+crossings standing about as near the walls as the network does is offered
+last, since the router walks plaza vertices like any other. A point the walls of
 two buildings come nearest goes to one of them: to the building whose drawn
-door it is, then to a building with no drawn door, then to the nearer. A coordinate that is one of a building's doors is
+door it is, then to a building with no drawn door, then to the nearer. None
+is listed inside another building's footprint, or a weld or two from another
+building's way in when it is plainly nearer that building's walls; and none
+within 10 m by the network of a drawn door at the end of a dead-end approach,
+because that is the door's own approach path: Kinesiology's wall-nearest point
+was 7.3 m back along it, and walks ended there, short of the door. A coordinate that is one of a building's doors is
 then every door of it, all at no distance — what was asked for is the building
 — and the walk ends (or starts) at whichever suits it. The answer says which in
 `door`, and the browser moves the pin there, so it is not left at the door it
@@ -284,10 +392,11 @@ that share coordinates, and weights each edge by its true geographic length.
 That graph — a public field of the library — is what the router searches.
 
 **Precision matters here.** The library's default is `1e-5` degrees, and the
-closest pair of *distinct* campus nodes is now `4.1e-6` apart — under the
-default, not over it. Five pairs are closer than `1e-5`: sub-metre joints where
-the build cuts a path at a building wall, each pair joined by its own short
-edge. At the default those would weld into one vertex, the edge between them
+closest pair of *distinct* campus nodes is now `2.9e-6` apart — under the
+default, not over it. Six pairs in `paths.json` are closer than `1e-5`:
+sub-metre joints where the build cuts a path at a building wall, each pair
+joined by its own short edge. Another 72 are among the corners and cuts of the
+plaza crossings. At the default those would weld into one vertex, the edge between them
 would become a self-loop and vanish, and the route through that wall opening
 would quietly break. `1e-7` is about a centimetre, which is the precision
 `paths.json` is written at.
@@ -308,14 +417,22 @@ and again from each alone only when that joint search had to pass over a
 pairing — one that walks less than the weld, or whose way on and way off are
 the same place on the network, so that its walk would only go somewhere and
 come back — since it keeps only the cheapest way to each vertex, and that can
-be exactly the pairing passed over. About 0.4 ms between two places, 0.6 ms for
-an arbitrary point on the campus and 0.9 ms from the streets around it, against
-0.9 ms for the nearest-vertex router it replaced; the tail is about 2 ms at the
-99th percentile, and the slowest route of a thousand takes 2.3 to 3.5 ms from
-one run to the next. A detour is searched once more with the wider reach (§2),
-bounded by the first answer; timed side by side with the router without that,
-in one process, it adds a few percent on average and about a quarter at the
-99th percentile. The absolute figures above want a quiet machine to check:
+be exactly the pairing passed over. Timed side by side in one process under a
+load average of about 3, against the router as last committed (before the
+plaza lines, the wider reach on every request and the rooms' ways out): 0.86
+against 0.53 ms between two places, 0.9 against 0.68 ms between two arbitrary
+points on the campus, and 1.6 against 1.5 ms from the streets. That is about
+1.6 times slower between two places, all of it added a step at a time; when
+the plazas came in it was about 0.4 ms, against 0.9 ms for the nearest-vertex
+router it replaced. The tail is 1.4 to 2.1 ms at the 99th percentile between two
+places, and the slowest of 1,554 takes 3.5 to 6 ms from one run to the next.
+The wider reach (§2) is in that search every time there is
+one; timed side by side in one process against searching it only for a detour,
+that adds about a tenth on the campus, on average and at the 99th percentile,
+and nothing from the streets. Keeping legs out of buildings and charging the
+ones over a path (§2) adds nothing that shows: side by side, 0.79 against
+0.74 ms between two places, 0.99 against 1.02 ms from an arbitrary point.
+The absolute figures above want a quiet machine to check:
 under a load average of 10 to 20, which is how this was last measured, a
 thousand seeded routes came out at a mean of about 1.1 ms and a 99th percentile
 of about 4 ms.
@@ -328,6 +445,7 @@ of about 4 ms.
 {
   "geometry":     { "type": "LineString", "coordinates": [...] },
   "distanceFeet": 1204,
+  "legFeet":      { "from": 38, "to": 0 },        // the dotted legs, not in distanceFeet
   "maneuvers":    [ /* see src/maneuvers.js */ ],
   "snapped":      { "from": [...], "to": [...] },  // where it really began
   "door":         { "from": null, "to": [...] }    // the door used, at a building's end
@@ -340,6 +458,13 @@ than the one asked for; see *A building: any of its doors*.
 
 `snapped` is not decoration — it is the server saying where it *actually*
 started, which may not be where you clicked.
+
+`legFeet` is how far each dotted leg is: from the point asked about to
+`snapped.from`, and from `snapped.to` to the other. `distanceFeet` is the line
+alone and stays so, so nothing reading it changes; the card adds the two. Between
+two places they come to a median 33 m (42 m before the legs were charged), and to
+more than a quarter of the walk in 19% of walks. A building's end is nothing:
+its pin moves to the door the walk used.
 
 Three non-answers, and they are not interchangeable:
 
@@ -405,5 +530,20 @@ other from z14 to z22.
 
 `src/maneuvers.js` runs on the server to turn the path into turn-by-turn
 instructions; `src/directions.js` runs in the browser to turn the distance into
-"12 min · 8:24 PM · 0.3 mi". Both are pure modules with no DOM in them, which is
+"12 min · 8:24 PM · 0.3 mi". The instructions are read off corners, not
+vertices: bends less than 10 m apart are one corner, judged by the bearing 6 m
+either side of it, so the sheet's drawing — curves of 2 m segments, dog-legs
+where a stroke was anchored at a crossing — stops being a stream of "bear
+left, bear right". Given each vertex's degree and branches it also drops a
+gentle bend with no choice on it, says "keep left" at a fork, and given the
+two points asked about, the turn onto the path and the side the destination is
+on. `route()` in `server/graph.js` gives it each vertex's degree and branches —
+the drawn paths and the streets meeting there, not the plaza crossings or the
+lot connectors, which nobody can see to take — and the two points asked about.
+Over the 13,440 walks `buildManeuvers` is measured on, that takes the turns
+said from 68,493 to 64,583, and the "bear"s at a vertex with no other way from
+7,762 to 68. The distance on the card and the banner is the line plus the two dotted
+legs (`legFeet` from the server, or `measureLegs` in `src/route-state.js`
+where it sends none), and both say it in
+`walkLabel`'s words. Both are pure modules with no DOM in them, which is
 why the server can import the second one for `REACH_M` and its refusal wording.

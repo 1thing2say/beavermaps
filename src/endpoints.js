@@ -63,7 +63,8 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
  *        puts one of the route's two pins on the map and returns the marker.
  *        Mapbox's by default; a seam because a Marker wants a whole browser
  *        under it, and the sequencing these pins take part in is exactly what
- *        test/endpoints.test.js has to drive end to end.
+ *        test/endpoints.test.js and test/endpoints-reroute.test.js have to
+ *        drive end to end.
  */
 export function createEndpoints({
   map,
@@ -120,8 +121,27 @@ export function createEndpoints({
    */
   let lastFix = null;
 
-  function resetMap() {
+  /**
+   * Take the walk off the screen and out of reach: the ribbon, its dotted ends,
+   * the route state behind them, and the two buttons that would start it.
+   *
+   * Its own function because it is not only resetMap's. A route that is
+   * refused or never answered has to leave the same nothing behind as Clear
+   * does, and it used to leave the previous walk instead — still drawn, still
+   * set, with Start and Simulate still offering to navigate a route from a
+   * start that was no longer the start. Four lines kept in two places is how
+   * one of the two came to have none of them.
+   */
+  function dropRoute() {
     nav.end();
+    route.clear();
+    map.getSource('calculated-route')?.setData(EMPTY);
+    map.getSource('route-legs')?.setData(EMPTY);
+    setNavButtonsEnabled(false);
+  }
+
+  function resetMap() {
+    dropRoute();
 
     if (startMarker) startMarker.remove();
     if (endMarker) endMarker.remove();
@@ -131,13 +151,7 @@ export function createEndpoints({
     startMarker = null;
     endMarker = null;
 
-    route.clear();
     requestSeq++;
-
-    if (map.getSource('calculated-route')) {
-      map.getSource('calculated-route').setData(EMPTY);
-    }
-    map.getSource('route-legs')?.setData(EMPTY);
 
     clearSelection();
 
@@ -149,7 +163,6 @@ export function createEndpoints({
     startCoordText.value = '';
     endCoordText.value = '';
     setRouteSummary(null);
-    setNavButtonsEnabled(false);
   }
 
   /** Re-route from the existing start to a newly chosen destination. */
@@ -344,7 +357,17 @@ export function createEndpoints({
     // back, and its failure used to write "Locating timed out" over the idle
     // line the reset had just put up. Same guard placeEnd keeps, for the same
     // reason.
+    //
+    // And a walk already drawn runs from the start this is about to replace:
+    // nine seconds is plenty of time to press Start on it, and have the
+    // re-route that follows swap the route out from under the walk. So it
+    // cannot be started while its start is in question. If the start stays
+    // where it was, so does the walk, and the buttons come back; unless
+    // something newer has been asked for in the meantime (the sequence moved),
+    // which owns the buttons now. See placeEnd.
     const seq = requestSeq;
+    setNavButtonsEnabled(false);
+    const keepRoute = () => { if (seq === requestSeq) setNavButtonsEnabled(route.isWalkable); };
 
     // The fixture answers on the next tick, so this spinner is a real wait only
     // for a real GPS — which is exactly when it is worth showing.
@@ -357,6 +380,7 @@ export function createEndpoints({
       if (seq === requestSeq) {
         setStatus(error?.code === 'outside' ? OUTSIDE_FENCE : locationProblem(error), true);
       }
+      keepRoute();
       return false;
     } finally {
       setBusy(false);
@@ -376,7 +400,7 @@ export function createEndpoints({
     // dotted leg from the blue dot to the line is that last bit of ground.
     const node = nearestPoint(point(at), networkPoints()).geometry.coordinates;
     const problem = reachProblem(distance(point(at), point(node)) * 1000);
-    if (problem) { setStatus(problem, true); return false; }
+    if (problem) { setStatus(problem, true); keepRoute(); return false; }
 
     panel.show();
     startPoint = point(at);
@@ -456,6 +480,9 @@ export function createEndpoints({
     if (!routingEnabled()) return;
     panel.show();
     endPoint = point(coords);
+    // Being routed now, so no longer waiting for a start. See the refusal
+    // below, which is the one place that parks it again.
+    pendingEnd = null;
     endMarker?.remove();
     endMarker = plantPin(GOOGLE_RED, 'Destination', coords);
     endCoordText.value = label ?? coordLabel(coords);
@@ -463,6 +490,12 @@ export function createEndpoints({
 
     // Guard against a stale response landing after the user has moved on.
     const seq = ++requestSeq;
+    // The route still drawn is the one this request replaces, so it cannot be
+    // started while the request is out. Left enabled, Start began a walk along
+    // the old line, and the answer then swapped the route out from under it:
+    // navigation kept counting maneuvers the new route did not have, and
+    // threw on every fix after. Enabled again only by an answer that is a walk.
+    setNavButtonsEnabled(false);
     let result;
     let failure = null;
     // The only wait in this app the user asked for directly. "Calculating
@@ -510,23 +543,50 @@ export function createEndpoints({
     if (refusal) {
       setStatus(refusal, true);
       setRouteSummary(null);
+      // THE OLD WALK GOES, AND THE DESTINATION STAYS. This used to do the
+      // opposite. Retyping the start re-routes to the same destination, and
+      // when that came back refused — a start inside the building you are
+      // going to is "the same place" — the walk from the PREVIOUS start stayed
+      // drawn with Start enabled, while the destination it led to was
+      // dropped. The end field still named it, so nothing looked wrong, but
+      // the next start had nowhere to route to and did nothing at all.
+      //
+      // So the walk is taken down, as Clear would, and the destination is
+      // parked exactly as parkDestination leaves one: pin and label where they
+      // are, held in `pendingEnd` for the next start to pick up.
+      dropRoute();
       endPoint = null;
-      endMarker?.remove();
-      endMarker = null;
+      pendingEnd = { coords, name: label };
       return;
     }
+
+    // A walk already running is on the route this replaces. Navigation reads
+    // the route live, so swapping it under a running walk left its step
+    // counter pointing into a maneuver list it no longer had. The buttons
+    // above keep that from starting here; this is for one that already had.
+    nav.end();
 
     // `stepIndex` used to be zeroed here too. It is navigation's, it is only
     // ever read while a walk is running, and nav.start() zeroes it — so this
     // was resetting a counter nothing could have read.
-    route.set(result);
-
+    //
+    // The pins are stood at their doors FIRST, because the legs are measured
+    // from where the pins end up: a building's leg is from the door the walk
+    // used, which is nothing, not from the door it was asked about.
     standAtDoors(result.door);
+    route.set(result, { from: startPoint?.geometry.coordinates, to: endPoint?.geometry.coordinates });
 
-    map.getSource('calculated-route').setData(route.feature());
+    // Optional, as resetMap's is. A basemap, theme or skin change while this
+    // request was out replaces the style, and until style.load rebuilds it
+    // the source does not exist. The throw that followed skipped everything
+    // below — the summary, the buttons, "Route calculated" — and left the panel
+    // on "Calculating route…". Nothing is lost by skipping the line: the
+    // rebuild seeds the source from route.feature(). See src/route-layers.js.
+    map.getSource('calculated-route')?.setData(route.feature());
     paintLegs();
 
-    setRouteSummary(result.distanceFeet);
+    // The whole walk, dotted legs and all; see measureLegs in route-state.js.
+    setRouteSummary(result.distanceFeet + route.legFeet.from + route.legFeet.to);
     const turns = route.maneuvers.length - 2;
     setStatus(`Route calculated — ${turns} turn${turns === 1 ? '' : 's'}.`);
     setNavButtonsEnabled(true);
@@ -661,9 +721,32 @@ export function createEndpoints({
     }
   }
 
+  /**
+   * "Start here" on a pin's card: make the point the start, then route to the
+   * destination there already is, whether drawn or parked.
+   *
+   * placeStart alone only moves the start. With a walk on screen that left
+   * the old one drawn from the old start, with Start still offering to walk
+   * it, under a start field naming the new one. With a destination parked it
+   * left that waiting, though parkDestination promises the next start
+   * routes it. The start field's own pick does placeStart and then
+   * rerouteFromStart, and the cards now go through the same pair.
+   *
+   * @returns {Promise<'refused'|'routed'|'waiting'>} refused when placeStart
+   *          turned the point down (and has said why); waiting when there is
+   *          no destination yet, which the caller may want to say
+   */
+  async function startHere(coords, label) {
+    if (!placeStart(coords, label)) return 'refused';
+    if (!endPoint && !pendingEnd) return 'waiting';
+    await rerouteFromStart();
+    return 'routed';
+  }
+
   return {
     reset: resetMap,
     rerouteFromStart,
+    startHere,
     rerouteTo,
     locateStart,
     placeStart,

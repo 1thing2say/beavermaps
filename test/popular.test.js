@@ -155,3 +155,20 @@ test('the empty-field list never repeats a place or overruns its room', () => {
   assert.equal(new Set(names).size, 2, 'a visited place that is also prominent appears once');
   assert.equal(names[0], 'Library');
 });
+
+test('a place is lifted by every name it goes by, counted once each', () => {
+  // A visit is recorded under the index's name and prominence under the
+  // directory's, and the LRC is spelt differently in the two.
+  stubStorage();
+  forgetVisits();
+  const now = 1_000 * DAY;
+  recordVisit('Learning Resource Center - LRC', now);
+  const bonus = popularity({ directory: directory([['Learning Resource Center (LRC)', 12]]), now });
+  const both = bonus('Learning Resource Center - LRC', 'Learning Resource Center (LRC)');
+  assert.ok(both > bonus('Learning Resource Center - LRC'));
+  assert.ok(both > bonus('Learning Resource Center (LRC)'));
+  assert.equal(both, bonusFor(2));
+  // The same name twice is still one name.
+  assert.equal(bonus('Learning Resource Center - LRC', 'Learning Resource Center - LRC'), bonusFor(1));
+  forgetVisits();
+});

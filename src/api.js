@@ -56,6 +56,23 @@ export const ROUTING_OUTAGE = import.meta.env?.DEV
 const ROUTE_TIMEOUT_MS = 15_000;
 
 /**
+ * How long a boot-time request may take before it counts as failed, in ms.
+ *
+ * Generous, because the largest of them — /api/basemap — is about 1.6 MB, and
+ * the ceiling covers reading the body as well as the response arriving. What
+ * it rules out is the wait being the browser's own. On a connection that has
+ * silently dropped (a handover between networks, a captive portal that took
+ * the connection and never answered) that is minutes, and until it ends
+ * "Loading the campus…" spins and the routing outage can never be said.
+ *
+ * Per attempt, and a timeout is NOT retried: three more ceilings on top of the
+ * first would be well over a minute of spinner before the outage is said, and
+ * a connection that gave nothing for twenty seconds is not the blip
+ * RETRY_DELAYS_MS is for.
+ */
+export const BOOT_TIMEOUT_MS = 20_000;
+
+/**
  * The waits between attempts at a boot-time request, in ms.
  *
  * Three retries over about six seconds: long enough to ride out a machine
@@ -103,27 +120,40 @@ function statusError(what, status) {
 }
 
 /**
- * @param {Function} [request]  stand-in for `fetch`, for tests
- * @param {Function} [sleep]    stand-in for the wait between retries, for tests
+ * @param {Function} [request]        stand-in for `fetch`, for tests
+ * @param {Function} [sleep]          stand-in for the wait between retries, for tests
+ * @param {number}   [bootTimeoutMs]  the ceiling on each boot-time GET, for tests
  */
 export function createApi({
   request = (...args) => globalThis.fetch(...args),
   sleep = sleepFor,
+  bootTimeoutMs = BOOT_TIMEOUT_MS,
 } = {}) {
   /**
-   * One GET, retried. A rejection from `request` itself is a request that never
-   * reached the server — offline, DNS, a connection reset mid-deploy — so it is
-   * marked transient on the way past. A status that is not ok is classed by
-   * statusError.
+   * One GET, retried, each attempt with a ceiling on the wait.
+   *
+   * A rejection from `request` itself is a request that never reached the
+   * server — offline, DNS, a connection reset mid-deploy — so it is marked
+   * transient on the way past, unless it is the ceiling firing: the browser's
+   * TimeoutError, which is final (see BOOT_TIMEOUT_MS). A status that is not ok
+   * is classed by statusError.
+   *
+   * A fresh signal per attempt, since a timeout signal starts counting when it
+   * is made. Feature-tested because AbortSignal.timeout is a 2022 API, and a
+   * browser without it should still load — just without the ceiling.
    */
   function getJson(path, what) {
     return withRetry(async () => {
+      const timeout = globalThis.AbortSignal?.timeout;
       let response;
       try {
-        response = await request(path);
+        response = await request(
+          path,
+          typeof timeout === 'function' ? { signal: AbortSignal.timeout(bootTimeoutMs) } : undefined,
+        );
       } catch (error) {
         const failure = error instanceof Error ? error : new Error(`${what} request failed`);
-        failure.transient = true;
+        failure.transient = failure.name !== 'TimeoutError';
         throw failure;
       }
       if (!response.ok) throw statusError(what, response.status);

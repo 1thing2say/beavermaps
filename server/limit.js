@@ -4,10 +4,10 @@
 // was read once at boot, gzipped once at boot, and is handed out of memory — so
 // the cost of answering it a thousand times is the cost of writing bytes to a
 // socket. A route is a linear scan of every edge to find where each end joins
-// the network, then a Dijkstra over 6,977 vertices from its ways on — about
-// 0.6 ms on average and 2 ms at the 99th percentile on a development Mac (the
-// slowest of a thousand 2.3 to 3.5 ms), more on a shared-cpu-1x machine with
-// 512 MB — and it is reachable by anyone with the URL.
+// the network, then a Dijkstra over 7,313 vertices from its ways on — about
+// 0.9 ms on average on the campus and 2 ms at the 99th percentile on a
+// development Mac (the slowest of 1,554 3.5 to 6 ms), more on a shared-cpu-1x
+// machine with 512 MB — and it is reachable by anyone with the URL.
 //
 // A FIXED WINDOW RATHER THAN A TOKEN BUCKET, and rather than a dependency. The
 // thing being defended against is a loop, not a distributed attack; the window

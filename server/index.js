@@ -36,10 +36,19 @@ const network = readJson('src/paths.json');
  *
  * Unioned rather than merged into paths.json on purpose: that file is my campus's
  * printed linework and one script owns it. This one is OpenStreetMap's, owned by
- * scripts/build-approach-network.mjs, and the join between them is twenty-two
- * connectors that script prints on every build.
+ * scripts/build-approach-network.mjs, and the join between them is sixteen
+ * gate connectors and four across the car parks, which that script prints on
+ * every build.
  */
 const approach = readJson('src/approach-paths.json');
+
+/**
+ * The ways across the sheet's paved plazas, written by the last stage of
+ * scripts/build-walk-network.mjs. Routed, never drawn, like the streets: the
+ * plaza is already on the map as paving, and a walk across it shows on the
+ * route ribbon. Campus network for every rule in graph.js that asks.
+ */
+const plazas = readJson('src/plaza-paths.json');
 
 /**
  * Where each building's drawn approach paths met its walls, so a room inside
@@ -69,11 +78,11 @@ const entrances = directory.features.filter((f) => f.properties.doors)
   .map((f) => ({ doors: f.properties.doors, footprint: f.geometry }));
 
 const buildStart = Date.now();
-const graph = createGraph({ network, approach, doors, boundary, entrances, buildings });
+const graph = createGraph({ network, approach, plazas, doors, boundary, entrances, buildings });
 
 console.log(
   `[beavermaps] graph ready in ${Date.now() - buildStart}ms ` +
-  `(${network.features.length} campus + ${approach.features.length} approach segments, ` +
+  `(${network.features.length} campus + ${plazas.features.length} plaza + ${approach.features.length} approach segments, ` +
   `${graph.vertices.length} vertices)`
 );
 
@@ -152,7 +161,21 @@ const app = createApp({
   distDir: existsSync(distDir) ? distDir : null,
 });
 
-const server = app.listen(PORT, '0.0.0.0', () => {
+/*
+ * Express 5 hands a bind failure (EADDRINUSE, EACCES) to this callback rather
+ * than throwing it. Ignoring the argument meant a port that was already taken
+ * logged "listening" and then exited 0 once the event loop drained, so a
+ * supervisor saw a clean stop and the log claimed success. Say what went
+ * wrong and exit non-zero instead.
+ *
+ * The port in the log is the one actually bound, which differs from PORT when
+ * PORT is 0.
+ */
+const server = app.listen(PORT, '0.0.0.0', (err) => {
+  if (err) {
+    console.error(`[beavermaps] could not listen on port ${PORT}: ${err.message}`);
+    process.exit(1);
+  }
   console.log(`[beavermaps] listening on http://0.0.0.0:${server.address().port}`);
 });
 

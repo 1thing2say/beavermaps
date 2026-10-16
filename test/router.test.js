@@ -16,8 +16,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createGraph, VERTEX_PRECISION, SNAP_WELD_M, SNAP_SLACK_M, STREETSIDE_M, OPEN_GROUND_M, OPEN_GROUND_WIDE_M,
-  DETOUR_SHARE,
+  createGraph, VERTEX_PRECISION, SNAP_WELD_M, STREETSIDE_M, OPEN_GROUND_M, OPEN_GROUND_WIDE_M,
+  OPEN_GROUND_SHARE, OPEN_GROUND_MAX_M, DETOUR_SHARE, WALL_CLIP_M,
 } from '../server/graph.js';
 import { REACH_M } from '../src/directions.js';
 import { load, metresBetween, pointInRing, vertexKey } from './helpers.js';
@@ -28,6 +28,7 @@ import { load, metresBetween, pointInRing, vertexKey } from './helpers.js';
 const graph = createGraph({
   network: load('paths'),
   approach: load('approach-paths'),
+  plazas: load('plaza-paths'),
   doors: load('doors'),
   boundary: load('campus-boundary'),
   entrances: load('directory').features.filter((f) => f.properties.doors)
@@ -50,7 +51,8 @@ test('the graph welds the campus and approach networks into one', () => {
   // ever stopped being true this is where it would show: a route between two
   // campus points would still work, and every route that leaves by a gate
   // would not.
-  assert.equal(graph.segmentCount, load('paths').features.length + load('approach-paths').features.length);
+  assert.equal(graph.segmentCount,
+    load('paths').features.length + load('plaza-paths').features.length + load('approach-paths').features.length);
   assert.ok(graph.vertices.length > 6000, `only ${graph.vertices.length} vertices`);
 });
 
@@ -244,8 +246,12 @@ test('a destination about as far from two paths leaves by the one that leads whe
   assert.notDeepEqual(chosen.snapped.to, nearest.coord, 'the walk took the nearest side anyway');
   assert.ok(total(chosen, STEM) < total(viaNearest, STEM) - 20,
     `${total(chosen, STEM).toFixed(0)} m against ${total(viaNearest, STEM).toFixed(0)} m by the nearest side`);
-  // The side it chose is about as far as the nearest — the slack, no more.
-  assert.ok(metresBetween(STEM, chosen.snapped.to) <= nearest.metres + SNAP_SLACK_M + 0.1);
+  // The side it chose is one it was offered: STEM's place is 30.6 m off the
+  // network, which is open ground (OPEN_GROUND_M), so a way on in any
+  // direction out to the open-ground reach — no further.
+  const leg = metresBetween(STEM, chosen.snapped.to);
+  assert.ok(leg <= Math.min(OPEN_GROUND_SHARE * nearest.metres, nearest.metres + OPEN_GROUND_MAX_M) + 0.1,
+    `a ${leg.toFixed(0)} m leg, ${nearest.metres.toFixed(0)} m from the nearest edge`);
 });
 
 test('a bus stop on the kerb walks onto the campus beside it, not up the street to a gate', () => {
@@ -327,6 +333,23 @@ test('two nearby rooms are walked between, not declared the same place', () => {
   assert.ok(total < 60, `${total.toFixed(0)} m between two rooms 27 m apart`);
 });
 
+test('a walk whose every nearest pairing is passed over does not search the whole graph', () => {
+  // Two rooms 13 m apart in Fine and Applied Arts, each offered the same six
+  // doors. The joint search reaches every door first by a pairing of one door
+  // with itself, passes each over, and so never has a best walk to bound it:
+  // it settled all 7,094 vertices, streets and all, before the search from
+  // each door alone found the walk in 130. Any client could ask for such a
+  // pair and make a request fifty times dearer. A search now stops once it
+  // has settled every way off, since nothing further out pairs with one.
+  const A = [-121.3497585, 38.6523809];
+  const B = [-121.34964205396176, 38.652304032325745];
+  const result = graph.route(A, B);
+  assert.ok(result.ok, `refused: ${result.error}`);
+  // The walk the unbounded search found; stopping early changes no answer.
+  assert.equal(result.distanceFeet, 191);
+  assert.ok(graph.settled < 1000, `settled ${graph.settled} vertices for two rooms 13 m apart`);
+});
+
 test('a point on the network is never moved off it to a path beside it', () => {
   // The alternatives are for points well off the network, where which side is
   // nearest is a matter of a metre. A building's entrance is a node; walking
@@ -402,24 +425,35 @@ test('anywhere inside a building and the building are the same place', () => {
 });
 
 test('a walk that is a detour on not walking the paths at all is no walk', () => {
+  // Two rooms in the Student Center 2.7 m apart both leave by the door between
+  // them, and the walk that was not that went out of one door and round to
+  // another: 124 m. The paths have nothing to add.
+  const RESTROOM = [-121.3469544, 38.6512627];
+  const UNITE_CENTER = [-121.3469545, 38.6512384];
+  const result = graph.route(RESTROOM, UNITE_CENTER);
+  assert.equal(result.reason, 'same-place', result.ok
+    ? `a ${(result.distanceFeet * 0.3048).toFixed(0)} m walk between two rooms 2.7 m apart` : result.reason);
+  assert.match(result.error, /pick a destination/i);
+});
+
+test('a walk across a plaza is a walk, not a detour on not walking at all', () => {
   // The Student Technology Center's way across the grass to the STEM Center
-  // lands on STEM's entrance itself, 32.5 m off. That pairing walks nothing
-  // along the network and is passed over, and the cheapest walk that was one
-  // left by the nearest path and went 60 m round to the same door. Two rooms
-  // in the Student Center 2.7 m apart both leave by the door between them, and
-  // the walk that was not that went out of one door and round to another:
-  // 124 m. The paths have nothing to add to either.
+  // used to land on STEM's entrance itself, 32.5 m off; the cheapest walk that
+  // was one left by the nearest path and went 60 m round to the same door, and
+  // was refused as the same place. The plaza in between is paving the sheet
+  // fills rather than strokes, and with its crossings (src/plaza-paths.json)
+  // the walk goes straight over it: a walk, and the straight line give or
+  // take the slack the build keeps crossings within (3 m and 8%, see
+  // PLAZA_SPANNER in scripts/build-walk-network.mjs).
   const TECHNOLOGY_CENTER = [-121.3477597, 38.6505508];
   const stem = load('directory').features
     .find((f) => f.properties.name === 'Diane Bryant STEM Innovation Center').properties;
-  const RESTROOM = [-121.3469544, 38.6512627];
-  const UNITE_CENTER = [-121.3469545, 38.6512384];
-  for (const [from, to] of [[TECHNOLOGY_CENTER, stem.entrance], [RESTROOM, UNITE_CENTER]]) {
-    const result = graph.route(from, to);
-    assert.equal(result.reason, 'same-place', result.ok
-      ? `a ${(result.distanceFeet * 0.3048).toFixed(0)} m walk from ${from} to ${to}` : result.reason);
-    assert.match(result.error, /pick a destination/i);
-  }
+  const result = graph.route(TECHNOLOGY_CENTER, stem.entrance);
+  assert.ok(result.ok, `refused: ${result.error}`);
+  const total = result.distanceFeet * 0.3048 + metresBetween(TECHNOLOGY_CENTER, result.snapped.from)
+    + metresBetween(result.snapped.to, stem.entrance);
+  const straight = metresBetween(TECHNOLOGY_CENTER, stem.entrance);
+  assert.ok(total <= 1.08 * straight + 3, `${total.toFixed(1)} m, legs and all, for ${straight.toFixed(1)} m as the crow flies`);
 });
 
 test('a room leaves by whichever door of its building suits the walk', () => {
@@ -465,10 +499,20 @@ test('a walk to a building is never longer than one to where its walls come near
   };
   const total = (result, from, to) => result.distanceFeet * 0.3048 + metresBetween(from, result.snapped.from)
     + (result.door?.to ? 0 : metresBetween(to, result.snapped.to));
+  // From outside every building. The two routers treat a START inside one
+  // differently — the one with door lists leaves by the building's ways in,
+  // the plain one by whatever edge is nearest through the wall — and this is a
+  // question about the far end. Room 169 in Howard Hall used to leave by an
+  // edge clipping the roof's east corner; with that edge stood off the wall it
+  // leaves by Howard's doors, 1.7 m longer than the plain router's way out
+  // through the north wall to the Science Success Center, and nothing about
+  // the Center's end differs.
+  const directory = load('directory').features;
+  const indoors = (c) => directory.some((f) => f.geometry.coordinates.some(([ring]) => pointInRing(c, ring)));
   const origins = load('places').features.filter((f) => f.geometry?.type === 'Point')
-    .map((f) => f.geometry.coordinates).filter((_, k) => k % 9 === 0);
+    .map((f) => f.geometry.coordinates).filter((c) => !indoors(c)).filter((_, k) => k % 3 === 0);
   let compared = 0;
-  for (const feature of load('directory').features) {
+  for (const feature of directory) {
     const { entrance, name } = feature.properties;
     if (!entrance) continue;
     const node = wallNode(feature);
@@ -482,6 +526,37 @@ test('a walk to a building is never longer than one to where its walls come near
     }
   }
   assert.ok(compared > 300, `only ${compared} walks compared`);
+});
+
+test('a walk to a building may end at a door on any of its footprints', () => {
+  // The directory used to list only the doors of the footprint a card stands
+  // on. Science & Engineering has drawn doors on two other shards, 2.9 m from
+  // the Science Success Center's wall, and the walk between the two buildings
+  // went 166 m round to the ones it listed; the Student Center to the CTE went
+  // 412 m round to its east wall, past the annexe's door.
+  const entrance = (name) => load('directory').features.find((f) => f.properties.name === name).properties.entrance;
+  for (const [from, to, under] of [
+    ['Science Success Center', 'Science & Engineering', 40],
+    ['Science & Engineering', 'Science Success Center', 40],
+    // 98 m with the annexe's door; 64 m now the plaza's walkways are joined.
+    ['Student Center', 'Career Technical Education (CTE)', 120],
+  ]) {
+    const result = graph.route(entrance(from), entrance(to));
+    assert.ok(result.ok, `${from} to ${to} refused: ${result.error}`);
+    const m = result.distanceFeet * 0.3048;
+    assert.ok(m < under, `${m.toFixed(0)} m from ${from} to ${to}`);
+  }
+});
+
+test('the CTE is reached across its plaza, not round the CDC', () => {
+  // The walkways the sheet draws from the plaza into the CTE and the CDC were
+  // dropped as fragments (see path-links.json), and from the middle of the
+  // plaza, 68 m from the CTE's door, the walk went 405 m south round the CDC.
+  const cte = load('directory').features.find((f) => f.properties.name === 'Career Technical Education (CTE)');
+  const PLAZA = [-121.3458679, 38.6512015];
+  const result = graph.route(PLAZA, cte.properties.entrance);
+  assert.ok(result.ok, `refused: ${result.error}`);
+  assert.ok(result.distanceFeet * 0.3048 < 60, `${(result.distanceFeet * 0.3048).toFixed(0)} m from the plaza to the CTE`);
 });
 
 test('a room at the fork of two walkways leaves by the arm that leads where it is going', () => {
@@ -605,38 +680,254 @@ test('a point on open ground beside a path that leads the long way round may cro
   }
 });
 
-test('the way onto the network from open ground never runs through a building', () => {
-  // The leg from a point to where it joins the network is drawn straight and
-  // walked across whatever is there. A wall is not something to walk across,
-  // so an open-ground way whose leg would cross a footprint is not offered.
-  const footprints = load('buildings').features.map((f) => f.geometry.coordinates[0]);
-  const side = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
-  const crosses = (p, q, ring) => ring.some((a, k) => {
-    const b = ring[(k + 1) % ring.length];
-    return side(p, q, a) !== side(p, q, b) && side(a, b, p) !== side(a, b, q);
+test('a better walk from the wider reach is never hidden by a nearly-as-bad one', () => {
+  // The wider reach used to be asked only when the first answer came out more
+  // than DETOUR_SHARE times the straight line, so a first answer just under
+  // that stood however much better the wider one was: from the drink machine
+  // in the building west of the Soccer Stadium, the walk left by the door
+  // nearest the machine and went 197 m round, where leaving by the building's
+  // way in on its north side is 81 m. The wider reach is always searched now,
+  // its legs charged beyond the first reach (OPEN_GROUND_WIDE_CHARGE).
+  const MACHINE = [-121.3469402, 38.6490244];
+  const SOCCER = [-121.3454879, 38.6490263];
+  const result = graph.route(MACHINE, SOCCER);
+  assert.ok(result.ok, `refused: ${result.error}`);
+  const walked = result.distanceFeet * 0.3048;
+  assert.ok(walked <= 90, `${walked.toFixed(0)} m along the paths from the drink machine to the Soccer Stadium`);
+});
+
+// How far inside each footprint a leg from p to q goes, metres, read every
+// 10 cm: not the stretch it leaves the footprint p stands in by, and not its
+// last SNAP_WELD_M, which stands for the wall of a door the leg ends at. The
+// router's own sum is in server/graph.js; this one is written again, slowly,
+// so the two can disagree.
+const BUILDINGS = load('buildings').features.map((f) => {
+  const ring = f.geometry.coordinates[0];
+  const xs = ring.map((c) => c[0]), ys = ring.map((c) => c[1]);
+  return { ring, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
+});
+function deepestInside(p, q) {
+  const whole = metresBetween(p, q);
+  if (whole <= SNAP_WELD_M) return 0;
+  const steps = Math.ceil((whole - SNAP_WELD_M) / 0.1);
+  const at = (k) => {
+    const t = ((whole - SNAP_WELD_M) / whole) * (k / steps);
+    return [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])];
+  };
+  const fromOutline = (x, ring) => Math.min(...ring.slice(1).map((b, k) => {
+    const a = ring[k];
+    const my = 111195, mx = my * Math.cos((x[1] * Math.PI) / 180);
+    const vx = (b[0] - a[0]) * mx, vy = (b[1] - a[1]) * my, wx = (x[0] - a[0]) * mx, wy = (x[1] - a[1]) * my;
+    const L = vx * vx + vy * vy;
+    const t = L ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / L)) : 0;
+    return Math.hypot(wx - t * vx, wy - t * vy);
+  }));
+  let most = 0;
+  for (const { ring, box } of BUILDINGS) {
+    if (box[0] > Math.max(p[0], q[0]) || box[2] < Math.min(p[0], q[0])
+      || box[1] > Math.max(p[1], q[1]) || box[3] < Math.min(p[1], q[1])) continue;
+    let leaving = pointInRing(p, ring);
+    for (let k = 1; k <= steps; k += 1) {
+      const x = at(k);
+      if (!pointInRing(x, ring)) { leaving = false; continue; }
+      if (!leaving) most = Math.max(most, fromOutline(x, ring));
+    }
+  }
+  return most;
+}
+
+/** Whether the leg from p to q crosses a drawn path more than SNAP_WELD_M before q. */
+const PATHS = load('paths').features.map((f) => f.geometry.coordinates);
+function stepsOverPath(p, q) {
+  const whole = metresBetween(p, q);
+  return PATHS.some(([a, b]) => {
+    const dx = q[0] - p[0], dy = q[1] - p[1], ex = b[0] - a[0], ey = b[1] - a[1];
+    const den = dx * ey - dy * ex;
+    if (den === 0) return false;
+    const wx = a[0] - p[0], wy = a[1] - p[1];
+    const s = (wx * ey - wy * ex) / den, t = (wx * dy - wy * dx) / den;
+    return s >= 0 && s <= 1 && t >= 0 && t <= 1 && (1 - s) * whole > SNAP_WELD_M;
   });
+}
+
+const PLACE_POINTS = load('places').features.filter((f) => f.geometry?.type === 'Point');
+const placeNamed = (name) => PLACE_POINTS.find((f) => f.properties.name === name).geometry.coordinates;
+/** The leg each walk from `from` to every place starts with: [metres, joined]. */
+const legsFrom = (from) => PLACE_POINTS.map((f) => graph.route(from, f.geometry.coordinates))
+  .filter((r) => r.ok).map((r) => [metresBetween(from, r.snapped.from), r.snapped.from]);
+
+test('no way onto the network goes through a building', () => {
+  // The leg from a point to where it joins the network is drawn straight and
+  // walked across whatever is there, and a wall is not something to walk
+  // across. Every leg, not only the ones from open ground: the nearest join
+  // and those beside it used to be taken as found, and a leg to a door was
+  // let through the whole building the door is in (see throughBuilding() in
+  // server/graph.js). A corner clipped or a wall grazed by up to
+  // WALL_CLIP_M is the same leg drawn a hand's width over.
   let seed = 7;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   const [west, south, east, north] = [-121.3504, 38.6448, -121.3424, 38.6535];
-  let far = 0;
+  // Random points, and every place to the next three on the list.
+  const pairs = [];
   for (let n = 0; n < 400; n += 1) {
-    const a = [west + rnd() * (east - west), south + rnd() * (north - south)];
-    const b = [west + rnd() * (east - west), south + rnd() * (north - south)];
+    pairs.push([[west + rnd() * (east - west), south + rnd() * (north - south)],
+      [west + rnd() * (east - west), south + rnd() * (north - south)]]);
+  }
+  PLACE_POINTS.forEach((f, k) => {
+    for (let j = 1; j <= 3; j += 1) pairs.push([f.geometry.coordinates, PLACE_POINTS[(k + j) % PLACE_POINTS.length].geometry.coordinates]);
+  });
+  let legs = 0;
+  for (const [a, b] of pairs) {
     const result = graph.route(a, b);
     if (!result.ok) continue;
     for (const [p, q] of [[a, result.snapped.from], [b, result.snapped.to]]) {
-      const nearest = graph.snap(p).metres;
-      if (metresBetween(p, q) <= nearest + Math.min(SNAP_SLACK_M, nearest * 0.25) + 0.01) continue;
-      if (result.door?.from || result.door?.to) continue;
-      far += 1;
-      for (const ring of footprints) {
-        if (pointInRing(p, ring) || pointInRing(q, ring)) continue;
-        assert.ok(!crosses(p, q, ring), `the leg from ${p} to ${q} crosses a building`);
-      }
+      legs += 1;
+      const depth = deepestInside(p, q);
+      assert.ok(depth <= WALL_CLIP_M + 0.1, `the leg from ${p} to ${q} goes ${depth.toFixed(1)} m into a building`);
     }
   }
-  assert.ok(far > 10, `test premise: only ${far} walks joined the network beyond the slack`);
+  assert.ok(legs > 1200, `test premise: only ${legs} legs`);
 });
+
+test('a way in on a building\'s wall is walked to round the building, not through it', () => {
+  // Para Transit's walk to Technical Education began with a 43.7 m line to the
+  // Arts and Science door, 21 m of it through Arts and Science; the drink
+  // machine west of Administration reached Administration's door by 37.5 m of
+  // its 38.5 m leg inside it. The door's own wall is the last SNAP_WELD_M of
+  // the leg; the rest of the building is a building.
+  const para = graph.route(placeNamed('Para Transit'), placeNamed('Technical Education Division'));
+  assert.ok(para.ok);
+  assert.notDeepEqual(para.snapped.from, [-121.3478707, 38.6524073], 'leaves by the Arts and Science door');
+  assert.ok(deepestInside(placeNamed('Para Transit'), para.snapped.from) <= WALL_CLIP_M + 0.1);
+  const machine = [-121.3494853, 38.6510138];
+  for (const [metres, joined] of legsFrom(machine)) {
+    assert.notDeepEqual(joined, [-121.349925, 38.6509677], 'walks through Administration to its door');
+    assert.ok(metres < 10, `a ${metres.toFixed(1)} m leg from the drink machine`);
+  }
+});
+
+test('the nearest join is not taken through a building either', () => {
+  // A bike rack in the lawn between the portables joined the walk on the far
+  // side of one, 26.6 m with 14.7 m of it through the portable, in 261 walks:
+  // the nearest join was never asked about walls. Behind a building, the way
+  // out is round it — here, between two portables — and the walk still goes.
+  const rack = [-121.3480034, 38.6489348];
+  const legs = legsFrom(rack);
+  assert.ok(legs.length > 100, 'the bike rack still walks');
+  for (const [, joined] of legs) {
+    assert.notDeepEqual(joined, [-121.3482582, 38.6488024], 'joins through the portable');
+    assert.ok(deepestInside(rack, joined) <= WALL_CLIP_M + 0.1);
+  }
+  // And a point behind the Learning Resource Center does not join across it.
+  const behind = [-121.34735, 38.64973];
+  for (const [, joined] of legsFrom(behind)) assert.ok(deepestInside(behind, joined) <= WALL_CLIP_M + 0.1);
+});
+
+test('the way onto the network from beside a wall never runs through a building either', () => {
+  // Only the open-ground ways used to be asked. The nearest join, every way
+  // on within the slack and the campus edge offered from the kerb were not,
+  // and route() chose freely among them. 4 m outside a wall:
+  //   - to the Library, a slack way on 32.5 m off with 20 m of it through the
+  //     STEM Innovation Center, over one 30.1 m off that crossed nothing;
+  //   - a nearest join 39.8 m off, 28.4 m of it through the Pool.
+  const library = load('directory').features.find((f) => f.properties.name === 'Library').properties.entrance;
+  for (const [from, ft] of [[[-121.3484687, 38.6503222], 320], [[-121.3460087, 38.6496456], null]]) {
+    const result = graph.route(from, library);
+    assert.ok(result.ok, `refused: ${result.error}`);
+    // Measured as every leg is (see deepestInside): the walk from beside the
+    // Pool clips a corner of Kinesiology by 0.9 m, which is the drawing's slop.
+    const depth = deepestInside(from, result.snapped.from);
+    assert.ok(depth <= WALL_CLIP_M + 0.1, `the leg from ${from} to ${result.snapped.from} goes ${depth.toFixed(1)} m into a building`);
+    // 274 ft through STEM; 293 ft round it.
+    if (ft) assert.ok(result.distanceFeet < ft, `${result.distanceFeet} ft from beside STEM to the Library`);
+  }
+});
+
+test('a leg that steps over a path to another is charged for stepping over it', () => {
+  // The emergency telephone on the Gym's north wall walked 47.7 m across the
+  // walkway outside and 26 m of lawn to the path beyond, in 104 walks, where
+  // the walkway it stepped over was not offered at all. It is now, where the
+  // leg crosses it, and the leg past it is charged (CROSSING_CHARGE).
+  const phone = [-121.3467086, 38.6482109];
+  for (const [metres, joined] of legsFrom(phone)) {
+    assert.ok(metres < 22, `a ${metres.toFixed(1)} m leg from the telephone`);
+    assert.ok(!stepsOverPath(phone, joined), `steps over a path to ${joined}`);
+  }
+});
+
+test("a room's ways out across a yard stay beside its own building", () => {
+  // The directory gives a building's doors and where its walls come nearest
+  // the network, on every footprint it has; a room inside one footprint was
+  // offered all of them, and walked 50 m and more across the yard to another
+  // footprint's, over the paths on the way. Its own footprint's drawn doors
+  // stay; anything else is offered only within OPEN_GROUND_M of the
+  // footprint and over no path, and the network walks the rest.
+  for (const name of ['Fine and Applied Arts', 'Design Hub', 'MCT HomeBase - CTE, 2nd Floor - Manufacturing, Construction, and Transportation HomeBase']) {
+    const room = placeNamed(name);
+    for (const [, joined] of legsFrom(room)) assert.ok(!stepsOverPath(room, joined), `${name} steps over a path to ${joined}`);
+  }
+  // The Counseling Center to a point on the lawn west of it left by where
+  // Administration's walls come nearest, 35.9 m over the path between.
+  const counseling = placeNamed('Counseling Center');
+  const walk = graph.route(counseling, [-121.3498163, 38.6511516]);
+  assert.ok(walk.ok);
+  assert.ok(!stepsOverPath(counseling, walk.snapped.from), `steps over a path to ${walk.snapped.from}`);
+});
+
+test('a dotted leg is charged for its metres beyond the nearest join', () => {
+  // A leg is walked across whatever is there, and costed at its straight
+  // metres it bought a stride of path with fifty metres of lawn. LEG_CHARGE
+  // weighs the metres beyond the nearest a little more than path. The bike
+  // rack on the lawn beside the Child Development Center took a 61.3 m
+  // leg across the grass in 56 walks. Off the campus the reach stops at the
+  // slack beyond the nearest, because OSM draws the footways that serve a
+  // stop: Bus 1 and 82 Heading West walked 42 m across the pavement to the
+  // street's centreline, with the footway 8.9 m away.
+  const rack = [-121.3460627, 38.6503687];
+  for (const [metres] of legsFrom(rack)) assert.ok(metres < 30, `a ${metres.toFixed(1)} m leg from the bike rack`);
+  const stop = [-121.3510696, 38.650374];
+  const footway = graph.snap(stop);
+  for (const [metres, joined] of legsFrom(stop)) {
+    assert.deepEqual(joined, footway.coord, `the bus stop joins at ${joined}, ${metres.toFixed(1)} m off`);
+  }
+});
+
+test('a walk does not end by stepping past the corner it turns off at', () => {
+  // The way off was the foot of a perpendicular a few metres past the vertex
+  // the walk came along to, so the line ran on past the corner and came back
+  // to it, a hook of 127 degrees drawn at the end of the walk from Room 560 to
+  // CalWORKs, and 40 walks like it. The ends of the edge a point joins are
+  // offered too (see candidates()), and the walk stops at the corner.
+  const turn = (a, b, c) => {
+    const k = Math.cos((b[1] * Math.PI) / 180);
+    const u = [(b[0] - a[0]) * k, b[1] - a[1]], v = [(c[0] - b[0]) * k, c[1] - b[1]];
+    return (Math.acos((u[0] * v[0] + u[1] * v[1]) / Math.hypot(...u) / Math.hypot(...v)) * 180) / Math.PI;
+  };
+  const result = graph.route(placeNamed('Art Division - Fine and Applied Arts, Room 560'), placeNamed('CalWORKs'));
+  assert.ok(result.ok);
+  const line = result.geometry.coordinates;
+  assert.ok(turn(line.at(-3), line.at(-2), line.at(-1)) < 120, 'the walk hooks back at its end');
+  assert.ok(turn(line[2], line[1], line[0]) < 120, 'the walk hooks back at its start');
+});
+
+
+test('the dotted legs are served beside the walk, and the instructions know where the walk was asked from', () => {
+  // distanceFeet is the line; legFeet is the two dotted legs, which the
+  // browser adds for the whole walk. And buildManeuvers is told where the
+  // walk was asked from and to, so a leg long enough to turn from says so.
+  const from = [-121.3460627, 38.6503687];
+  const to = load('directory').features.find((f) => f.properties.name === 'Gym').properties.doors[0];
+  const result = graph.route(from, to);
+  assert.ok(result.ok);
+  const feet = (a, b) => Math.round(metresBetween(a, b) * 3.28084);
+  assert.ok(Math.abs(result.legFeet.from - feet(from, result.snapped.from)) <= 1, JSON.stringify(result.legFeet));
+  // A building's end stands at the door the walk used: no leg.
+  assert.equal(result.legFeet.to, 0);
+  assert.ok(result.maneuvers[0].turn, 'the depart carries the turn off the dotted leg');
+  const plain = graph.route(placeNamed('Kaneko Art Gallery'), placeNamed('Pool'));
+  assert.ok(Math.abs(plain.legFeet.from - feet(placeNamed('Kaneko Art Gallery'), plain.snapped.from)) <= 1);
+});
+
 
 test('the path finder is built at the precision this file says', () => {
   // geojson-path-finder 2.x reads `tolerance`; the option was passed as
@@ -648,11 +939,14 @@ test('the path finder is built at the precision this file says', () => {
 
 test('the vertex precision is tight enough not to weld distinct junctions', () => {
   // The library's default is 1e-5 and the closest pair of distinct campus nodes
-  // is 4.1e-6 apart — the default would already weld five real pairs, the
-  // sub-metre joints the build leaves where it cuts a path at a wall. This is
-  // the assertion that makes that number answerable to the data.
+  // is 2.9e-6 apart — the default would already weld five real pairs in the
+  // drawn network, the sub-metre joints the build leaves where it cuts a path
+  // at a wall, and 69 more among the corners and cuts of the plaza crossings,
+  // which are campus network to the router too. This is the assertion that
+  // makes that number answerable to the data.
   let closest = Infinity;
-  const campus = load('paths').features.flatMap((f) => f.geometry.coordinates);
+  const campus = [...new Map([...load('paths').features, ...load('plaza-paths').features]
+    .flatMap((f) => f.geometry.coordinates).map((c) => [String(c), c])).values()];
   for (let i = 0; i < campus.length; i++) {
     for (let j = i + 1; j < campus.length; j++) {
       const d = Math.hypot(campus[i][0] - campus[j][0], campus[i][1] - campus[j][1]);
@@ -797,4 +1091,18 @@ test('a point on the network inside a building is never moved to a door', () => 
   for (const v of graph.vertices.filter((_, k) => k % 7 === 0).concat(inside)) {
     assert.deepEqual(graph.snap(v).coord, v);
   }
+});
+
+test('a room leaves by a door on another footprint of its own building', () => {
+  // CTE is drawn as two footprints that abut. The MCT HomeBase is in one, and
+  // CTE's north door is on the other, 42 m away. The leg between them never
+  // leaves the building, but it was counted as out of doors (it was outside
+  // the room's own footprint) and the other footprint was held against it as
+  // a wall: the walk to the bike rack north of CTE went round, 97.5 m.
+  const MCT_HOMEBASE = [-121.3456785, 38.6515565];
+  const BIKE_RACK = [-121.3459545, 38.6519019];
+  const walk = graph.route(MCT_HOMEBASE, BIKE_RACK);
+  assert.ok(walk.ok, `refused: ${walk.error}`);
+  const metres = (walk.distanceFeet + walk.legFeet.from + walk.legFeet.to) * 0.3048;
+  assert.ok(metres < 60, `${metres.toFixed(1)} m from the MCT HomeBase to the bike rack outside CTE's north door`);
 });

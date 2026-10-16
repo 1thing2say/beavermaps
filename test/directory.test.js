@@ -102,6 +102,44 @@ test('an entrance is a door where the building has one under its anchor', () => 
   assert.ok(atDoor >= 8, `only ${atDoor} buildings have their entrance at a door`);
 });
 
+test('every door drawn into any footprint of a building is one of its ways in', () => {
+  // A building drawn as several footprints has a door wherever the sheet runs
+  // an approach path into any of them, not only into the one its card stands
+  // on. The directory used to list only that one's: Science & Engineering's
+  // doors into its north wings and the Science annexe, and the CTE's into its
+  // north wing, 4.7 m from the main building and 90 m from the anchor, were
+  // listed nowhere, and walks to the building went round to the main door.
+  // Joined the way build-directory.mjs joins them: by the outline both files
+  // carry, at six decimals.
+  const ringKey = (ring) => JSON.stringify(ring.map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]));
+  const owner = new Map();
+  for (const f of directory) for (const [ring] of f.geometry.coordinates) owner.set(ringKey(ring), f);
+  let checked = 0;
+  for (const d of load('doors').features) {
+    const f = owner.get(ringKey(d.geometry.coordinates[0]));
+    if (!f) continue;
+    const listed = new Set((f.properties.doors ?? []).map(vertexKey));
+    for (const door of d.properties.stubs.flatMap((s) => s.doors)) {
+      assert.ok(listed.has(vertexKey(door)), `${f.properties.officialName}'s door ${door} on sheet ${d.properties.i} is not among its ways in`);
+      checked += 1;
+    }
+  }
+  assert.ok(checked >= 30, `only ${checked} drawn doors checked`);
+});
+
+test('no way in lies inside another building', () => {
+  // Where one building's walls come nearest the network can be inside another
+  // building's footprint: the Pool's and Adaptive PE's were inside the Gym,
+  // on a driveway the Gym is painted over, and a walk from the Gym to the Pool
+  // was 2.4 m. Measured against the directory's own footprints.
+  for (const f of directory) {
+    for (const door of f.properties.doors ?? []) {
+      const inside = directory.filter((g) => g !== f && inAnyPart(door, g) && !inAnyPart(door, f));
+      assert.equal(inside.length, 0, `${f.properties.officialName}'s way in ${door} is inside ${inside.map((g) => g.properties.officialName).join(', ')}`);
+    }
+  }
+});
+
 test('every building is offered where its walls come nearest the network', () => {
   // A door the sheet does not draw is most likely where the network passes
   // closest to the building, and every walk this map gave before the walls

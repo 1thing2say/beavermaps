@@ -18,6 +18,7 @@
 import roomsData from './rooms.json';
 import { buildRoomIndex, lookupRoom } from './rooms.js';
 import { popularity, recordVisit } from './popular.js';
+import { markOption, stepOption } from './listbox.js';
 import {
   MAX_RESULTS, normalise, buildPlaceIndex, search, popularEntries,
 } from './search-rank.js';
@@ -86,6 +87,10 @@ export function createSearchBox({
    */
   let popularBonus = popularity();
   function refreshPopularity() {
+    // The index takes the directory's names as aliases, so if the directory
+    // has landed since it was built, build it again. Either file can arrive
+    // first.
+    if (searchIndexDirectory !== directory() && places()) buildSearchIndex();
     popularBonus = popularity({ directory: directory() });
     renderShortcuts();
   }
@@ -139,11 +144,13 @@ export function createSearchBox({
     );
   }
   let searchIndex = [];
+  let searchIndexDirectory = null;
   let searchHits = [];
   let activeHit = -1;
 
   function buildSearchIndex() {
-    searchIndex = buildPlaceIndex(places().features);
+    searchIndexDirectory = directory();
+    searchIndex = buildPlaceIndex(places().features, searchIndexDirectory);
     // The field is disabled in the markup and opened here, so nobody types into
     // a box that has nothing to search yet.
     searchInput.disabled = false;
@@ -192,15 +199,9 @@ export function createSearchBox({
 
   function highlight(index) {
     activeHit = index;
-    [...searchResults.children].forEach((li, i) => {
-      // `aria-selected` alone: the stylesheet draws the highlight off it, so
-      // the accessible state and the visible one cannot disagree.
-      li.setAttribute('aria-selected', String(i === index));
-    });
-    if (index >= 0) {
-      searchInput.setAttribute('aria-activedescendant', `place-result-${index}`);
-      searchResults.children[index]?.scrollIntoView({ block: 'nearest' });
-    }
+    // `aria-selected` alone draws it: the stylesheet reads the highlight off
+    // it, so the accessible state and the visible one cannot disagree.
+    markOption({ input: searchInput, list: searchResults, index });
   }
 
   /**
@@ -361,9 +362,12 @@ export function createSearchBox({
     const coords = nearestInstance(entry);
     // Remembered here rather than in `openPlace`, which is also how a tap on
     // the map arrives: this is the one path that means somebody LOOKED
-    // something up, which is the thing "most searched" is a claim about.
-    recordVisit(entry.name);
-    refreshPopularity();
+    // something up, which is the thing "most searched" is a claim about. Not
+    // a room or a course row, which is not a place the index can offer back.
+    if (!entry.room) {
+      recordVisit(entry.name);
+      refreshPopularity();
+    }
     searchInput.value = entry.name;
     searchClear.classList.remove('hidden');
     closeResults();
@@ -460,13 +464,15 @@ export function createSearchBox({
       list.classList.add('hidden');
       list.replaceChildren();
       input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
       hits = [];
       active = -1;
     };
 
+    // The same cursor as the search box's — see src/listbox.js.
     const mark = (index) => {
       active = index;
-      [...list.children].forEach((li, i) => li.setAttribute('aria-selected', String(i === index)));
+      markOption({ input, list, index });
     };
 
     const render = (found, query = '') => {
@@ -484,6 +490,7 @@ export function createSearchBox({
       }
       list.replaceChildren(...found.map((entry, i) => {
         const li = document.createElement('li');
+        li.id = `${list.id}-${i}`;
         li.setAttribute('role', 'option');
         const name = document.createElement('div');
         name.className = 'g-result-name';
@@ -504,6 +511,8 @@ export function createSearchBox({
         return li;
       }));
       list.classList.remove('hidden');
+      // A new list has not been navigated yet, whatever the last one had been.
+      list.classList.remove('is-navigating');
       input.setAttribute('aria-expanded', 'true');
       mark(0);
     };
@@ -543,26 +552,20 @@ export function createSearchBox({
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { close(); return; }
       if (!hits.length) return;
-      if (event.key === 'ArrowDown') { event.preventDefault(); mark((active + 1) % hits.length); }
-      else if (event.key === 'ArrowUp') { event.preventDefault(); mark((active - 1 + hits.length) % hits.length); }
+      const next = stepOption({ input, list, key: event.key, from: active, count: hits.length });
+      if (next !== null) { event.preventDefault(); active = next; }
       else if (event.key === 'Enter') { event.preventDefault(); pick(active < 0 ? 0 : active); }
     });
   }
   searchInput.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { closeResults(); return; }
     if (!searchHits.length) return;
-    if (event.key === 'ArrowDown') {
+    const next = stepOption({
+      input: searchInput, list: searchResults, key: event.key, from: activeHit, count: searchHits.length,
+    });
+    if (next !== null) {
       event.preventDefault();
-      // A keyboard cursor exists from the first arrow press and not before.
-      // The highlight is drawn off this class on a phone, where there is no
-      // pointer to have moved and a row shaded before anything was pressed
-      // reads as a row that is already chosen. See .g-results.is-navigating.
-      searchResults.classList.add('is-navigating');
-      highlight((activeHit + 1) % searchHits.length);
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      searchResults.classList.add('is-navigating');
-      highlight((activeHit - 1 + searchHits.length) % searchHits.length);
+      activeHit = next;
     } else if (event.key === 'Enter' && activeHit >= 0) {
       event.preventDefault();
       choosePlace(searchHits[activeHit]);
