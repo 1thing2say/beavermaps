@@ -80,7 +80,7 @@ The same arrangement works for trails, indoor paths, or a video-game grid.
 
 ### The network (`src/paths.json`)
 
-A GeoJSON `FeatureCollection` of **1,345 `LineString` segments over 1,245 nodes**,
+A GeoJSON `FeatureCollection` of **1,341 `LineString` segments over 1,239 nodes**,
 13.8 km in total. It **is** the light-grey paths my campus's printed map draws —
 `scripts/build-walk-network.mjs` takes those polylines verbatim and makes the
 smallest set of edits that turn a drawing into a graph.
@@ -353,19 +353,18 @@ routing network stopped coming from it.
    holds connectors added by hand where the sheet omits something plainly
    visible on the ground, each with a `why` naming what is there and what the
    sheet drew instead. It is a separate file, applied as its own stage, and its
-   count and metres print on every build — currently **10 links, 196 m out of
-   13.7 km (1.4%)**, so the invented share is never in doubt. So does what each
+   count and metres print on every build — currently **13 links, 270 m out of
+   13.8 km (2.0%)**, so the invented share is never in doubt. So does what each
    crosses that the sheet paints as **lawn**, link by link: **24 m** in all, 13.5 m
    of it the apron between the Student Center and CTE, which is concrete on the
    ground and grass on the print. A link is accepted against imagery, and where
    the sheet disagrees that belongs on the record, in the log and in its `why`.
 
-   The walkway strokes the sheet draws out of the filled plaza between the
-   Student Center, the CTE and the CDC are not links: the plaza stage joins
-   them to the network across the paving, and a walk to the CTE from the
-   plaza crosses it rather than going round the CDC.
-
-   Two of the ten are **rescues**: connectors that bring a whole stranded
+   Three of them cross the filled paving of the plaza between the Student
+   Center, the CTE and the CDC, joining walkway strokes the sheet draws out of
+   that fill and the build cannot read as linework: 73 m of connector for 60 m
+   of drawn path and the CTE's and CDC's plaza-side doors. Two others are
+   **rescues**: connectors that bring a whole stranded
    fragment into the largest component. They carry **571 m and 409 m** of
    my campus's own drawn linework — 980 m returned to the routable network for 25 m
    of connector. The largest is the entire perimeter footway around the south car
@@ -449,7 +448,7 @@ routing network stopped coming from it.
    only where the crossings kept so far do not already come within 3 m and 8% of
    it. The 221 lines that survive are cut where they cross each other and the
    drawn edges, as *Node* cuts strokes, and written to `src/plaza-paths.json`:
-   **590 crossings, 4.6 km, routed and never drawn**, because the plaza is
+   **591 crossings, 4.6 km, routed and never drawn**, because the plaza is
    already on the map as paving. Over every walk between two places, 4,302 of
    10,350 come out shorter, by 92 km of walking in all, and none costs more by
    what the router weighs; 121 are longer by what is walked, 25 m at most, each
@@ -1747,7 +1746,7 @@ close to empty. The extraction lives in `scripts/`:
 | script | output |
 |---|---|
 | `build-basemap.mjs` | `basemap.json` — the whole printed sheet, 2,284 features |
-| `build-walk-network.mjs` | `paths.json` — 1,245 nodes, 1,345 segments; the drawn paths, deduplicated, cut at building walls, teed, welded, linked, with a node at every destination and wherever a building's walls come nearest. Also `doors.json` — the 39 doors those walls left on 18 footprints — and `plaza-paths.json`, 590 routed-only crossings, 4.6 km, over the sheet's paved plazas |
+| `build-walk-network.mjs` | `paths.json` — 1,239 nodes, 1,341 segments; the drawn paths, deduplicated, cut at building walls, teed, welded, linked, with a node at every destination and wherever a building's walls come nearest. Also `doors.json` — the 39 doors those walls left on 18 footprints — and `plaza-paths.json`, 591 routed-only crossings, 4.6 km, over the sheet's paved plazas |
 | `build-approach-network.mjs` | `approach-paths.json` — 6,350 segments of OSM street in an 800 m apron, joined to my campus's network by 16 gate connectors and, across the car parks, 4 lot connectors; re-gates the committed streets by default, `--fetch` for live Overpass |
 | `build-buildings.mjs` | `buildings.json` — 96 footprints, 71 of them named |
 | `build-labels.mjs` | `labels.json` — 49 labels: the PDF's text, plus building names |

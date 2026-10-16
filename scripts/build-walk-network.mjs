@@ -10,7 +10,7 @@
  * added by hand where the sheet omits a link that plainly exists on the ground.
  * It is a separate file, applied as its own stage, and its count and metres are
  * printed on every build, so the share of this network that is not my campus's drawing
- * is never in doubt. Today it is 10 links and 196 m out of 13.7 km — 1.4%. The
+ * is never in doubt. Today it is 13 links and 270 m out of 13.8 km — 2.0%. The
  * junction stage below adds the only other undrawn metres, a handful of
  * connectors a few metres long, and so do the walls with two more where a
  * building is drawn over a junction, and the vee stage with a chord across
