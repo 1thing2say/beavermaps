@@ -31,18 +31,45 @@ export const LEG_MIN_FEET = 12;
 
 const empty = () => ({ type: 'FeatureCollection', features: [] });
 
+const feetBetween = (a, b) => (a && b ? distance(point(a), point(b)) * FEET_PER_KM : 0);
+
+/**
+ * How far the two dotted legs are, in feet: from the start pin to where the
+ * line begins, and from where it ends to the destination pin.
+ *
+ * NOT IN `distanceFeet`, which is the network's (see route() in
+ * server/graph.js), and the card and the banner used to show that alone. The
+ * legs are a median 33 m between two places and more than a quarter of the
+ * walk in a fifth of them — Myrtle Parking Lot East's pin is up to 99 m of
+ * tarmac from the line — so "4 min" was a promise about the part of the walk
+ * on paths.
+ *
+ * Measured from the pins as they stand, which is after standAtDoors() has
+ * moved a building's pin to the door the walk used. A door is where the line
+ * ends, so that leg is nothing, and the distance from the door the building
+ * was asked for — across the building — is rightly not counted. The server's
+ * own `legFeet`, where it sends one, is taken as it is.
+ */
+export function measureLegs(from, to, coords, snapped) {
+  return {
+    from: Math.round(feetBetween(from, snapped?.from ?? coords[0])),
+    to: Math.round(feetBetween(snapped?.to ?? coords[coords.length - 1], to)),
+  };
+}
+
 /**
  * Hold one route at a time.
  *
  * `set` takes the server's answer verbatim — the `geometry` and `maneuvers` of
  * a 200 from /api/route — and derives the rest, so a caller cannot supply
- * `cumulative` that disagrees with `coords`.
+ * `cumulative` that disagrees with `coords`. `ends` is the two pins the walk
+ * runs between, where the caller has them; the legs are measured from those.
  */
 export function createRoute() {
   let held = null;
 
   return {
-    set({ geometry, maneuvers }) {
+    set({ geometry, maneuvers, legFeet, snapped }, ends = {}) {
       const coords = geometry.coordinates;
       held = {
         coords,
@@ -58,6 +85,8 @@ export function createRoute() {
         line: coords.length >= 2 ? lineString(coords) : null,
         cumulative: cumulativeDistances(coords),
         maneuvers,
+        ends: { from: ends.from ?? null, to: ends.to ?? null },
+        legFeet: legFeet ?? (coords.length ? measureLegs(ends.from, ends.to, coords, snapped) : { from: 0, to: 0 }),
       };
       return held;
     },
@@ -80,6 +109,10 @@ export function createRoute() {
     get line() { return held?.line ?? null; },
     get cumulative() { return held?.cumulative ?? null; },
     get maneuvers() { return held?.maneuvers ?? null; },
+    /** The two pins the walk runs between, either of them null if unknown. */
+    get ends() { return held?.ends ?? { from: null, to: null }; },
+    /** The dotted legs in feet, `{ from, to }`; see measureLegs. */
+    get legFeet() { return held?.legFeet ?? { from: 0, to: 0 }; },
 
     /** Length of the whole walk in km — the last cumulative distance. */
     get totalKm() {
@@ -103,7 +136,8 @@ export function createRoute() {
     /**
      * The last few metres at each end, which are not on the network.
      *
-     * A route runs between GRAPH VERTICES, and neither end of a journey is one.
+     * A route runs between the points where the walk JOINS AND LEAVES THE
+     * NETWORK, and neither end of a journey is one.
      * my campus binds its destinations to their own node ids, which sit a metre
      * or two off ours because this network is traced from the printed sheet
      * rather than taken from their graph; an amenity is wherever its pictogram

@@ -8,8 +8,9 @@
 //
 // `locating` is the control's own state, kept by its two track events rather
 // than guessed at — see `startLocating` for why guessing is not good enough,
-// and navigation for why the answer matters: dropping the control to background
-// is the one gesture that keeps the dot live and gives the camera up.
+// and for the one transition those events miss — and navigation for why the
+// answer matters: dropping the control to background is the one gesture that
+// keeps the dot live and gives the camera up.
 
 /**
  * @param {object} deps
@@ -63,8 +64,22 @@ export function createLocate({ control }) {
   function startLocating(attempt = 0) {
     // Before the map has loaded there is no control yet. The load handler calls
     // this again once there is, so nothing is lost by returning here.
-    if (!control() || locating) return;
+    if (!control()) return;
     const button = locateButton();
+    // THE ONE TRANSITION THE TRACK EVENTS MISS. A denied permission stops the
+    // control's watch and turns it off, and fires `error` but not
+    // `trackuserlocationend` — so `locating` stayed true for the rest of the
+    // session, and every later press returned here without asking. Directions
+    // then waited nine seconds on a watch that no longer existed and said
+    // "Locating timed out", even after the person had done what the first
+    // sentence told them to and allowed location. The button is the control's
+    // own record of whether a watch is open: Mapbox sets aria-pressed when it
+    // opens one and clears it when it closes one, on every path including
+    // that one. So the flag is believed only while the button agrees with it.
+    if (locating) {
+      if (button?.getAttribute('aria-pressed') !== 'false') return;
+      locating = false;
+    }
     if (!button) {
       if (attempt < 20) setTimeout(() => startLocating(attempt + 1), 100);
       return;

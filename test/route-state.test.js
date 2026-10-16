@@ -12,7 +12,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRoute, LEG_MIN_FEET } from '../src/route-state.js';
+import { createRoute, measureLegs, LEG_MIN_FEET } from '../src/route-state.js';
+import { routeSummary } from '../src/directions.js';
 import { FEET_PER_KM } from '../src/maneuvers.js';
 import { metresBetween } from './helpers.js';
 
@@ -171,4 +172,50 @@ test('each call returns its own empty collection', () => {
   const route = createRoute();
   assert.notEqual(route.feature(), route.feature());
   assert.notEqual(route.legs(null, null), route.legs(null, null));
+});
+
+// The dotted legs are part of the walk. The card and the banner showed the
+// network's `distanceFeet` alone, and the legs are a median 38.5 m between two
+// places.
+
+test('the legs are measured from the pins to the ends of the line', () => {
+  const [first, , , last] = WALK.geometry.coordinates;
+  const from = [first[0] - 0.0003, first[1]];        // about 26 m west
+  const to = [last[0], last[1] + 0.0003];            // about 33 m north
+  const route = createRoute();
+  route.set(WALK, { from, to });
+  const { from: fromFeet, to: toFeet } = route.legFeet;
+  assert.ok(Math.abs(fromFeet - metresBetween(from, first) * 3.28084) < 1, `${fromFeet} ft`);
+  assert.ok(Math.abs(toFeet - metresBetween(last, to) * 3.28084) < 1, `${toFeet} ft`);
+  assert.deepEqual(route.ends, { from, to });
+
+  // And they reach the card: the walk is longer than its network part.
+  const network = Math.round(route.totalKm * FEET_PER_KM);
+  assert.notEqual(routeSummary(network + fromFeet + toFeet).distance, routeSummary(network).distance);
+});
+
+test('a building\'s pin at the door it used has no leg', () => {
+  // standAtDoors() moves the pin to `door`, which is where the line ends. The
+  // distance from the door that was asked about, across the building, is not
+  // walked and is not counted.
+  const coords = WALK.geometry.coordinates;
+  assert.deepEqual(measureLegs(coords[0], coords.at(-1), coords), { from: 0, to: 0 });
+  // `snapped` is where the line really begins and ends, when the server says.
+  const snapped = { from: coords[0], to: coords.at(-1) };
+  assert.equal(measureLegs([coords[0][0], coords[0][1] + 0.0001], null, coords, snapped).to, 0);
+});
+
+test('the server\'s own legFeet is taken as it is', () => {
+  const route = createRoute();
+  route.set({ ...WALK, legFeet: { from: 12, to: 34 } }, { from: [-121.35, 38.65], to: [-121.34, 38.65] });
+  assert.deepEqual(route.legFeet, { from: 12, to: 34 });
+});
+
+test('a route set without pins has no legs, and clear() takes them too', () => {
+  const route = createRoute();
+  route.set(WALK);
+  assert.deepEqual(route.legFeet, { from: 0, to: 0 });
+  route.clear();
+  assert.deepEqual(route.legFeet, { from: 0, to: 0 });
+  assert.deepEqual(route.ends, { from: null, to: null });
 });

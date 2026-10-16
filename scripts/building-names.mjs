@@ -1,11 +1,13 @@
 /**
- * Shared building helpers: where a name goes on a footprint, and what the name
- * should say.
+ * Shared building helpers: where a name goes on a footprint, what the name
+ * should say, and where on the network the building's way in most likely is.
  *
  * Lifted out of build-labels.mjs once build-directory.mjs needed the same two
  * things. Both scripts have to agree about which footprints are one building and
  * what that building is called, or the map would label a building one way and
- * the popup another.
+ * the popup another. The last of them, wallNearest(), is shared for the same
+ * reason between build-walk-network.mjs, which puts a node there, and
+ * build-directory.mjs, which sends the card's Directions to it.
  */
 
 import { readFileSync } from 'node:fs';
@@ -150,4 +152,145 @@ export function groupByName(footprints) {
       pole: poleOfInaccessibility(host.geometry.coordinates[0]),
     }];
   }));
+}
+
+/**
+ * Footprints the printed sheet names and my campus's touchable table does not.
+ *
+ * build-buildings.mjs names a footprint from my campus's Touchable regions, which is
+ * their own hand-authored answer to "what is this shape" and is right 71 times
+ * out of 96. It is not the only answer. The Ranch House is drawn on the sheet,
+ * printed with its name inside its own walls, and has no touchable region at
+ * all — nobody at my campus ever made it a destination — so it arrived as a
+ * nameless 315 m2 polygon and dropped out of `groupByName` before it could
+ * become a building. On the map that reads as a labelled building you can tap
+ * straight through: no card, no directory row, no flyover.
+ *
+ * Applied by build-directory.mjs, where the two naming sources already meet,
+ * rather than upstream — build-labels.mjs reads buildings.json, and naming a
+ * footprint from labels.json in the script that writes it would make the
+ * pipeline a loop. build-walk-network.mjs applies it too, so the buildings it
+ * splices entrances into (see wallNearest) are the directory's buildings.
+ *
+ * A `building` label ONLY, never a plate, and that restriction is the whole
+ * rule. A building label is set inside the shape it names; a plate is set
+ * beside it with a leader line, which means a plate lands on whatever happens
+ * to be under it — Environmental Resources' plate sits on a 76 m2 outbuilding
+ * that is not Environmental Resources, and adopting it would put a second row
+ * of that name in the directory. Measured over the sheet, the restricted rule
+ * claims exactly one footprint.
+ *
+ * Names the footprints in place, and returns them.
+ */
+export function adoptPrintedNames(footprints, labels) {
+  for (const footprint of footprints) {
+    if (footprint.properties.name) continue;
+    const printed = labels.find((l) => l.properties.kind === 'building'
+      && pointInRing(l.geometry.coordinates, footprint.geometry.coordinates[0]));
+    if (printed) footprint.properties.name = printed.properties.text;
+  }
+  return footprints;
+}
+
+/**
+ * Corners whose nearest network is within this of the nearest corner's are
+ * tied for it. A metre, because that is how far a drawn stroke wanders about
+ * its own line (build-walk-network.mjs's FOLD_M says the same of a stroke):
+ * which corner of a building the network passes closest to is not decided by
+ * less than the drawing's own slop.
+ */
+export const WALL_TIE_M = 1.0;
+/** Two points this close are one node; build-walk-network.mjs's WELD_M. */
+const WALL_WELD_M = 2.0;
+
+/**
+ * Where a building's walls come nearest the network: the points on the
+ * network a door most likely is, nearest first.
+ *
+ * The directory's rule for a building the sheet draws no door into, and an
+ * addition to the doors of one it does (build-directory.mjs, entranceFor).
+ * Each corner of each outline is taken to the nearest point on the network —
+ * on an edge, not at a vertex — and every corner within WALL_TIE_M of the
+ * nearest one offers its point; points within a weld of one already offered
+ * are the same one.
+ *
+ * ON AN EDGE, BECAUSE THE BUILD DECIDES WHERE THE VERTICES ARE. This used to
+ * be the network VERTEX nearest a corner, and that is only the nearest point
+ * where the drawing happens to put a vertex. The collapse stage of
+ * build-walk-network.mjs now makes a stroke traced as a run of near-collinear
+ * points the one straight edge it is, and with the vertex gone the entrance
+ * jumped to whichever corner's vertex survived: the Learning Resource Center's
+ * by 53 m, though the network still passed 0.3 m from where it had been, and
+ * walks from it to Davies Hall went from 87 to 145 m. build-walk-network.mjs
+ * splices a node at every point this returns, as it does for every place, so
+ * the directory finds a vertex wherever it looks.
+ *
+ * EVERY CORNER ABOUT AS NEAR, NOT ONLY THE NEAREST. Which corner the network
+ * passes closest to is often a matter of centimetres — the Welcome and Support
+ * Center's two were 0.38 and 0.42 m off — and choosing one moves the whole
+ * building's way in to that side of it. Each is as likely the door as the
+ * other, so each is offered, and the router's any-door rule (see `entrances`
+ * in server/graph.js) lets a walk end at whichever suits it.
+ *
+ * `segments` is the network as [[lon, lat], [lon, lat]] pairs. Returns
+ * [{ at, d }] — the point, and metres from its corner — nearest first.
+ */
+export function wallNearest(group, segments) {
+  const flat = ([lon, lat]) => [lon * M_PER_LON, lat * M_PER_LAT];
+  const flatSegs = segments.map(([a, b]) => [flat(a), flat(b), a, b]);
+  const found = [];
+  for (const member of group.members) {
+    for (const ring of member.geometry.coordinates) {
+      for (const corner of ring) {
+        const [px, py] = flat(corner);
+        let best = null;
+        for (const [[ax, ay], [bx, by], a, b] of flatSegs) {
+          const vx = bx - ax, vy = by - ay;
+          const L = vx * vx + vy * vy;
+          const t = L === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / L));
+          const d = Math.hypot(px - ax - t * vx, py - ay - t * vy);
+          if (!best || d < best.d) best = { d, at: [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])] };
+        }
+        if (best) found.push(best);
+      }
+    }
+  }
+  if (!found.length) return [];
+  found.sort((x, y) => x.d - y.d || x.at[0] - y.at[0] || x.at[1] - y.at[1]);
+  const reach = found[0].d + WALL_TIE_M;
+  const offered = [];
+  for (const point of found) {
+    if (point.d > reach) break;
+    if (offered.some((o) => metresBetween(o.at, point.at) < WALL_WELD_M)) continue;
+    offered.push(point);
+  }
+  return offered;
+}
+
+/**
+ * A way in for every shard of a building, not only the shards nearest the
+ * network.
+ *
+ * wallNearest() ties corners against the nearest corner of the whole group,
+ * so on a building drawn as several footprints the shards further from the
+ * network than the nearest one plus WALL_TIE_M offer nothing: three of the
+ * Portable Village's seven were 66-68 m by the graph from a way in, with a
+ * path 16 m from their own walls, and Technical Education West's southern
+ * portables 48-66 m. So each member is also asked on its own, and its nearest
+ * point is offered when it is within MEMBER_REACH_M of the member's walls.
+ * build-directory.mjs lists it only where no way in already lies within
+ * MEMBER_APART_M of it (see entranceFor); build-walk-network.mjs splices a
+ * node at every one, as at wallNearest()'s. Only for a group of more than one
+ * footprint: a single building's walls are wallNearest()'s question, and a
+ * door on every face of it would be a guess.
+ *
+ * Returns [{ at, d }], one per member that qualifies, in member order.
+ */
+export const MEMBER_REACH_M = 12;
+export const MEMBER_APART_M = 20;
+export function memberNearest(group, segments) {
+  if (group.members.length < 2) return [];
+  return group.members
+    .map((member) => wallNearest({ members: [member] }, segments)[0])
+    .filter((point) => point && point.d <= MEMBER_REACH_M);
 }

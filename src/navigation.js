@@ -29,17 +29,29 @@
 // `makeUserDot` is what lets test/navigation.test.js walk a whole simulated
 // route and check the dot went with it.
 
-import { point } from '@turf/helpers';
+import { lineString, point } from '@turf/helpers';
 import { nearestPointOnLine } from '@turf/nearest-point-on-line';
 import { along } from '@turf/along';
 import { bearing } from '@turf/bearing';
+import { distance } from '@turf/distance';
 import { maneuverIcon } from './nav-icons.js';
-import { instructionFor, niceFeet, FEET_PER_KM } from './maneuvers.js';
+import { instructionFor, thenPhrase, niceFeet, countdownFeet, FEET_PER_KM } from './maneuvers.js';
+import { walkLabel, walkSeconds } from './directions.js';
 
-// Comfortable campus walking pace. Used for the ETA and for the simulator.
+// Comfortable campus walking pace, for the simulator. The ETA is
+// src/directions.js's, so the banner and the route card cannot disagree.
 export const WALK_FEET_PER_SEC = 4.6;
-// How close you must get before a maneuver is considered done, in km.
-export const MANEUVER_REACHED_KM = 25 / FEET_PER_KM;
+// How far short of a corner it counts as taken, in km — about 3 m, a stride
+// and a GPS wobble. It used to be 25 ft, and a step retired 25 ft BEFORE its
+// corner is a step the walker never sees: over 13,347 walks, 15% never showed
+// their first turn, 21.7% of turns were replaced by the next one while still
+// ahead, and 1,781 lost their last corner to the arrival. Now a step is done
+// at or just before its corner, and never sooner than halfway along its own
+// leg (see retireKm), so a turn ten feet from the start is still shown.
+export const MANEUVER_PASSED_KM = 10 / FEET_PER_KM;
+// A corner this close behind the one on the sign goes on the same sign:
+// "Turn left, then turn right".
+export const THEN_FEET = 25;
 export const ARRIVED_FEET = 25;
 export const SIM_TICK_MS = 200;
 export const SIM_SPEED = 4;
@@ -77,6 +89,9 @@ export function createNavigation({
 }) {
   let active = false;
   let stepIndex = 0;
+  // The coordinates of the route this walk was started on — by identity, which
+  // is what changes when the route is set again. See `replaced`.
+  let walking = null;
   let lastBearing = 0;
   let userMarker = null;
 
@@ -96,6 +111,7 @@ export function createNavigation({
 
     active = true;
     stepIndex = 0;
+    walking = route.coords;
     resetBannerAnimation();
     buildings.add();
     // The legend goes with the rest of the chrome here, and an outline with
@@ -134,7 +150,9 @@ export function createNavigation({
     // button while locked on does.
     releaseCameraLock();
 
-    moved(coords[0], { duration: 900 });
+    // From where the walk was asked to start, which for a dotted leg is not
+    // the line: the sign says how to get onto the path until you are on it.
+    moved(route.ends.from ?? coords[0], { duration: 900 });
 
     if (simulate) startSimulation();
   }
@@ -143,6 +161,7 @@ export function createNavigation({
     stopSimulation();
     if (!active) return;
     active = false;
+    walking = null;
     resetBannerAnimation();
 
     document.body.classList.remove('navigating');
@@ -164,25 +183,70 @@ export function createNavigation({
    * make the dot jump between path endpoints instead of sliding along.
    */
   function moved(coords, { duration = SIM_TICK_MS } = {}) {
-    if (!active || !route.isWalkable) return;
+    if (!active) return;
+    if (replaced()) { end(); return; }
+    if (!route.isWalkable) return;
 
     const snapped = nearestPointOnLine(route.line, point(coords));
     const distanceAlong = snapped.properties.location;  // km travelled so far
     const here = snapped.geometry.coordinates;
+    const fix = {
+      // How far off the line, and from either end of the walk, in feet.
+      offLine: snapped.properties.dist * FEET_PER_KM,
+      toStart: feetBetween(coords, route.coords[0]),
+      toPin: route.ends.to ? feetBetween(coords, route.ends.to) : null,
+    };
 
-    advanceSteps(distanceAlong);
-    renderBanner(distanceAlong);
+    advanceSteps(distanceAlong, fix);
+    renderBanner(distanceAlong, fix);
     moveCamera(here, distanceAlong, duration);
   }
 
-  /** Retire every maneuver we have already walked past. */
-  function advanceSteps(distanceAlong) {
-    while (
-      stepIndex < route.maneuvers.length - 1 &&
-      route.maneuverKm(stepIndex) - distanceAlong < MANEUVER_REACHED_KM
-    ) {
+  /**
+   * Whether the route on screen is no longer the one this walk was started on.
+   *
+   * The route holder is read live, not copied at start, so a route set while a
+   * walk is running changes everything under it but `stepIndex` — which then
+   * pointed past the end of a shorter maneuver list, and the next fix threw
+   * reading it. endpoints.js ends the walk before it swaps the route; this is
+   * the backstop for anything that does not. The walk ENDS rather than carrying
+   * on: it was a walk along a line that is gone, and the panel it ends on is
+   * showing the one that replaced it, with its own Start.
+   */
+  function replaced() {
+    return route.coords !== walking;
+  }
+
+  /**
+   * Retire every maneuver we have already walked past.
+   *
+   * `depart` is retired by getting onto the line rather than by distance along
+   * it: it sits at km 0, so by distance it was gone on the first fix, and the
+   * one sign that says which way to turn onto the path was never shown. On
+   * the line is within MANEUVER_PASSED_KM of it, or already some way along it
+   * — a fix that never quite settles on the line still gets you the next sign.
+   */
+  function advanceSteps(distanceAlong, fix) {
+    if (stepIndex === 0) {
+      const onLine = fix.offLine <= MANEUVER_PASSED_KM * FEET_PER_KM;
+      const underway = distanceAlong >= Math.min(ARRIVED_FEET / FEET_PER_KM, route.maneuverKm(1) / 2);
+      if (!onLine && !underway) return;
+      stepIndex = 1;
+    }
+    while (stepIndex < route.maneuvers.length - 1 && distanceAlong >= retireKm(stepIndex)) {
       stepIndex++;
     }
+  }
+
+  /**
+   * Where along the route maneuver `i` counts as taken: MANEUVER_PASSED_KM
+   * short of it, or halfway along the leg that leads to it if that is shorter,
+   * so a corner ten feet from the last one is still on the sign for five.
+   */
+  function retireKm(i) {
+    const km = route.maneuverKm(i);
+    const leg = km - route.maneuverKm(i - 1);
+    return km - Math.min(MANEUVER_PASSED_KM, leg / 2);
   }
 
   function clearBannerTimers() {
@@ -210,15 +274,26 @@ export function createNavigation({
     };
   }
 
-  function paintStep(card, step, feetToStep, arrived) {
-    card.arrow.innerHTML = maneuverIcon(step.type);
+  function paintStep(card, step, feetToStep, arrived, next) {
+    card.arrow.innerHTML = maneuverIcon(step.type, step);
     if (arrived) {
       card.distance.textContent = 'Arrived';
       card.instruction.textContent = 'You have reached your destination';
     } else {
-      card.distance.textContent = niceFeet(feetToStep);
-      card.instruction.textContent = instructionFor(step.type);
+      card.distance.textContent = countdownFeet(feetToStep);
+      const now = instructionFor(step.type, step);
+      card.instruction.textContent = next ? `${now}, ${thenPhrase(next)}` : now;
     }
+  }
+
+  /**
+   * The corner after step `i`, if it is close enough to go on the same sign.
+   * Not for `depart`, whose sign is already two instructions long.
+   */
+  function following(i) {
+    if (i === 0 || i >= route.maneuvers.length - 1) return null;
+    const gapFeet = (route.maneuverKm(i + 1) - route.maneuverKm(i)) * FEET_PER_KM;
+    return gapFeet < THEN_FEET ? route.maneuvers[i + 1] : null;
   }
 
   /**
@@ -226,14 +301,14 @@ export function createNavigation({
    * runs out to the right — both at once, so two complete banners are on screen
    * for the length of the swap.
    */
-  function swapStep(step, feetToStep, arrived, isFirst) {
+  function swapStep(step, feetToStep, arrived, isFirst, next) {
     clearBannerTimers();
     // Clearing the timers also cancelled whatever removal was pending, so any
     // sign still mid-exit has to be swept up here or it leaks into the DOM.
     dom.stack.querySelectorAll('.nav-sign--out').forEach((stale) => stale.remove());
 
     const incoming = createSignCard();
-    paintStep(incoming, step, feetToStep, arrived);
+    paintStep(incoming, step, feetToStep, arrived, next);
 
     const outgoing = isFirst ? null : liveCard;
     if (outgoing) {
@@ -254,29 +329,45 @@ export function createNavigation({
     }, BANNER_SWAP_MS));
   }
 
-  function renderBanner(distanceAlong) {
-    const totalKm = route.totalKm;
+  /**
+   * THE DOTTED LEGS ARE PART OF THE WALK. Remaining is what is left of the
+   * line, plus the leg from its end to the destination pin — or, once you are
+   * on that leg, the distance to the pin — plus, until you are on the line, the
+   * way to its start. Arrival is at the pin where there is a leg to walk, and
+   * at the end of the line where there is not.
+   */
+  function renderBanner(distanceAlong, fix) {
     const step = route.maneuvers[stepIndex];
+    const legTo = route.legFeet.to;
 
-    const feetToStep = Math.max(0, (route.maneuverKm(stepIndex) - distanceAlong) * FEET_PER_KM);
-    const feetRemaining = Math.max(0, (totalKm - distanceAlong) * FEET_PER_KM);
-    const arrived = feetRemaining <= ARRIVED_FEET;
+    const lineLeft = Math.max(0, (route.totalKm - distanceAlong) * FEET_PER_KM);
+    const toPin = fix.toPin === null ? legTo : Math.min(legTo, fix.toPin);
+    const feetRemaining = lineLeft + toPin + (stepIndex === 0 ? fix.toStart : 0);
+    const arrived = (fix.toPin !== null && fix.toPin <= ARRIVED_FEET)
+      || (lineLeft <= ARRIVED_FEET && toPin <= ARRIVED_FEET);
+
+    let feetToStep;
+    if (step.type === 'depart') feetToStep = fix.toStart;
+    else if (step.type === 'arrive') feetToStep = feetRemaining;
+    else feetToStep = Math.max(0, (route.maneuverKm(stepIndex) - distanceAlong) * FEET_PER_KM);
 
     if (arrived) stopSimulation();
 
     if (stepIndex !== renderedStep) {
       const isFirst = renderedStep === -1;
       renderedStep = stepIndex;
-      swapStep(step, feetToStep, arrived, isFirst);
+      swapStep(step, feetToStep, arrived, isFirst, following(stepIndex));
     } else if (!bannerBusy && liveCard) {
       // Between turns only the countdown moves — never re-run the animation.
       if (arrived) paintStep(liveCard, step, feetToStep, true);
-      else liveCard.distance.textContent = niceFeet(feetToStep);
+      else liveCard.distance.textContent = countdownFeet(feetToStep);
     }
 
-    dom.remaining.textContent = niceFeet(feetRemaining);
-    const minutes = feetRemaining / WALK_FEET_PER_SEC / 60;
-    dom.eta.textContent = minutes < 1 ? '< 1 min' : `${Math.round(minutes)} min`;
+    // The ETA in the words the route card uses, from the same function — the
+    // banner used to round where the card rounds up, so a 1 min 29 s walk was
+    // "2 min" on one and "1 min" on the other.
+    dom.remaining.textContent = arrived ? '0 ft' : niceFeet(feetRemaining);
+    dom.eta.textContent = arrived ? 'now' : walkLabel(walkSeconds(feetRemaining));
   }
 
   function moveCamera(here, distanceAlong, duration) {
@@ -336,14 +427,18 @@ export function createNavigation({
   function startSimulation() {
     stopSimulation();
     simAlong = 0;
-    const totalKm = route.totalKm;
+    // The dotted legs are walked too, so the simulator shows the depart sign
+    // on the way to the path and arrives at the pin rather than beside it.
+    const walk = simulatedWalk();
+    const totalKm = walk.km;
     const perTickKm =
       (WALK_FEET_PER_SEC * SIM_SPEED * (SIM_TICK_MS / 1000)) / FEET_PER_KM;
     const viaFixture = Boolean(geolocation.fixture);
 
     simTimer = setInterval(() => {
+      if (replaced()) { end(); return; }
       simAlong = Math.min(simAlong + perTickKm, totalKm);
-      const position = along(route.line, simAlong).geometry.coordinates;
+      const position = along(walk.line, simAlong).geometry.coordinates;
       if (viaFixture) {
         // The wedge points where the camera is already facing, which is the
         // direction of travel — moved() works it out a stride ahead.
@@ -361,6 +456,18 @@ export function createNavigation({
     simTimer = null;
   }
 
+  /** The line with the dotted legs on either end, where there are any. */
+  function simulatedWalk() {
+    const coords = route.coords;
+    const from = route.ends.from && feetBetween(route.ends.from, coords[0]) >= 1 ? route.ends.from : null;
+    const to = route.ends.to && feetBetween(coords[coords.length - 1], route.ends.to) >= 1 ? route.ends.to : null;
+    if (!from && !to) return { line: route.line, km: route.totalKm };
+    const km = route.totalKm
+      + (from ? feetBetween(from, coords[0]) / FEET_PER_KM : 0)
+      + (to ? feetBetween(coords[coords.length - 1], to) / FEET_PER_KM : 0);
+    return { line: lineString([...(from ? [from] : []), ...coords, ...(to ? [to] : [])]), km };
+  }
+
   return {
     start,
     end,
@@ -376,4 +483,8 @@ export function createNavigation({
     stepIndex: () => stepIndex,
     aimKm,
   };
+}
+
+function feetBetween(a, b) {
+  return distance(point(a), point(b)) * FEET_PER_KM;
 }

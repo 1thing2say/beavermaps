@@ -71,7 +71,7 @@ const KEEP = 40;
  * What it can do is reorder the things that landed in the same band, which is
  * the whole of the job.
  */
-const MAX_BONUS = 20;
+export const MAX_BONUS = 20;
 
 /** Where the bonus curve is half-spent, in decayed visits. */
 const BONUS_MIDPOINT = 3;
@@ -197,14 +197,26 @@ export function bonusFor(weight) {
  * has never heard of without checking first, and so the two sources can be
  * summed in one place instead of at every call site.
  *
+ * Takes every name a place goes by, because the two signals are not keyed
+ * alike: a visit is recorded under the search index's name ("Learning Resource
+ * Center - LRC") and prominence under the directory's ("Learning Resource
+ * Center (LRC)"). Asked about one name, the most prominent building on campus
+ * got no cold-start lift at all.
+ *
  * @param {object} [directory] src/directory.json, if it has arrived
  * @param {number} [now]       injectable for tests
- * @returns {(name: string) => number} a bounded score bonus, 0 for anything unknown
+ * @returns {(...names: string[]) => number} a bounded score bonus, 0 for anything unknown
  */
 export function popularity({ directory, now = Date.now() } = {}) {
   const visits = visitWeights(now);
   const prominence = prominenceWeights(directory);
-  return (name) => bonusFor((visits.get(name) ?? 0) + (prominence.get(name) ?? 0));
+  return (...names) => {
+    let weight = 0;
+    for (const name of new Set(names)) {
+      weight += (visits.get(name) ?? 0) + (prominence.get(name) ?? 0);
+    }
+    return bonusFor(weight);
+  };
 }
 
 /**

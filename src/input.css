@@ -9,6 +9,15 @@
 }
 
 :root {
+    /* Which way round the browser's OWN chrome is drawn: scrollbars, form
+       controls, the caret. Stated, because nothing else told it — the theme
+       is an attribute, not the OS preference the browser would otherwise go
+       by — so with data-theme="dark" a classic scrollbar was a bright white
+       track down the edge of the dark glass sidebar, the results list, the
+       legend and the phone sheet. The boot script in index.html writes the
+       attribute before first paint, so this is right from the first frame. */
+    color-scheme: light;
+
     /* One grid colour, one cell size, nudged off the corner so the ruling never
        lines up with the sign's edges. Proportions follow the DS menu that
        inspired it: a 28px cell with a 3px line, roughly its 8:1 ratio. */
@@ -227,6 +236,8 @@
 }
 
 :root[data-theme="dark"] {
+    color-scheme: dark;
+
     /* Not white. The grid IS the object; the ground it is ruled on follows the
        surface it sits in, and a white rectangle here would be the brightest
        thing on a night screen — in the one card that opens without being asked
@@ -326,7 +337,7 @@
 
     /* How much of the viewport the on-screen keyboard is currently covering.
        ------------------------------------------------------------------
-       Written by main.js off `window.visualViewport`, because nothing in CSS
+       Written by src/shell.js off `window.visualViewport`, because nothing in CSS
        can see it. iOS raises the keyboard OVER the page rather than resizing
        the layout viewport, so a sheet anchored to the bottom of the document is
        underneath it. Read twice on a phone: the sheet is lifted clear of the
@@ -335,6 +346,22 @@
        whenever there is no keyboard, which is every pointer device and every
        resting phone. */
     --g-kb-h: 0px;
+
+    /* How tall the VISIBLE part of the viewport is, written beside --g-kb-h.
+       ------------------------------------------------------------------
+       The other half of the same measurement, and the one a height cap needs:
+       iOS shrinks neither `dvh` nor the layout viewport for a keyboard, so a
+       sheet capped at 62dvh and lifted by --g-kb-h is 62% of the WHOLE screen
+       standing on top of the keys. On a 390x844 phone that is 523px of sheet
+       over 464px of screen, and its top edge — the grabber, then the field
+       being typed into — went off the top. 100dvh whenever nothing has
+       written it. */
+    --g-vv-h: 100dvh;
+
+    /* The strip of map a phone's sheet never covers. Same number, same reason
+       as MAP_STRIP in src/sheet.js, which holds the full detent to it; this is
+       the stylesheet holding the resting sheet to it while a keyboard is up. */
+    --g-map-strip: 96px;
 
     /* How tall the bottom sheet currently is, written by a ResizeObserver in
        main.js. Nothing in CSS can measure a sibling, and the credit line has to
@@ -1052,6 +1079,17 @@ body.navigating .app-chrome {
     color: var(--g-text);
     border-radius: var(--g-radius);
     box-shadow: var(--g-shadow), var(--g-rim);
+}
+
+/* The layers popover is a popover, not a card. Apple's map-type control and
+   its popovers are the thin tier — blur(15px) over #fffc — which is what the
+   layers button that opens this already wears, so the button and the menu out
+   of it were two materials in one corner. Through the thin tokens, so the
+   @supports gate and the opaque fallback come with them. */
+[data-skin="apple"] .g-layers-menu {
+    background-color: var(--g-card-bg-thin);
+    -webkit-backdrop-filter: var(--g-card-filter-thin);
+    backdrop-filter: var(--g-card-filter-thin);
 }
 
 .g-icon-btn {
@@ -3259,8 +3297,12 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
 /* Mapbox's own zoom and locate buttons, so the corner stack is the same
    substance as the layers button that now sits on top of it. Written through
    .mapboxgl-control-container for the same 0-3-0 reason the margin reset above
-   needs: mapbox-gl.css is injected after this file and wins every tie. */
-[data-skin="apple"] .mapboxgl-control-container .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+   needs: mapbox-gl.css is injected after this file and wins every tie.
+
+   The scale bar with them. It is one of these controls — see the note on it
+   above — and was left on the opaque --g-surface the base rule gives the whole
+   stack, a solid slot in a column of glass chips. */
+[data-skin="apple"] .mapboxgl-control-container .mapboxgl-ctrl-bottom-right :is(.mapboxgl-ctrl-group, .mapboxgl-ctrl-scale) {
     background-color: var(--g-card-bg-thin);
     background-image: var(--g-sheen);
     -webkit-backdrop-filter: var(--g-card-filter-thin);
@@ -3311,9 +3353,16 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     display: none;
 }
 
+/* A stronger pane of the same glass, not a patch of opaque surface. The
+   resting disc is --g-hover over the card; --g-surface-2 replaced that with a
+   solid colour darker than the dark card and nearly the light one, so hovering
+   a close button made it fade. Fill and sheen as two properties rather than
+   the shorthand, and the sheen restated: .g-place's own hover, at the same
+   specificity, is a shorthand that would otherwise take it off. */
 @media (hover: hover) {
     [data-skin="apple"] .g-icon-btn:hover {
-        background: var(--g-surface-2);
+        background-color: var(--g-active);
+        background-image: var(--g-sheen);
     }
 }
 
@@ -3979,6 +4028,17 @@ body.no-dirbutton .g-directions {
     color: var(--g-text-dim);
 }
 
+/* A little more ink in the Apple dark field. --g-text-dim is measured against
+   the bare material, but these placeholders sit on the field's own fill on
+   top of it: rgba(235,235,245,0.6) over rgba(120,120,128,0.24) on the dark
+   sheet is 4.38:1, under the 4.5 that 14-16px text needs — and with the
+   label visually hidden, the placeholder is the field's only visible name.
+   0.68 is about 5:1 on the same fill. */
+[data-skin="apple"][data-theme="dark"] .g-search-input::placeholder,
+[data-skin="apple"][data-theme="dark"] .g-endpoint-input::placeholder {
+    color: rgba(235, 235, 245, 0.68);
+}
+
 .g-endpoint-input {
     /* ...and the size the row asks for, rather than the one `inherit` brought.
        `font` is a shorthand, so `font: inherit` above resets font-size along
@@ -4429,12 +4489,17 @@ body.no-dirbutton .g-directions {
            all the way down; it is only the content that stops short, which is
            the same trick the 1px is. Zero on anything without an inset, so
            every measurement taken in a desktop browser is unchanged. */
-        padding-bottom: calc(1px + env(safe-area-inset-bottom, 0px));
+        /* ...and NOT while a keyboard is up, which covers the indicator: the
+           inset was then a 34px dead band between the last row and the keys,
+           on the one occasion the sheet has least room to spare. */
+        padding-bottom: calc(1px + max(0px, env(safe-area-inset-bottom, 0px) - var(--g-kb-h)));
         left: 0;
         right: 0;
         width: auto;
         max-width: none;
-        max-height: 62dvh;
+        /* Against the visible screen as well as the whole one. See --g-vv-h:
+           without the second term a keyboard put the field above y = 0. */
+        max-height: min(62dvh, calc(var(--g-vv-h) - var(--g-map-strip)));
         /* ONE SURFACE, not a stack of cards with map showing between them.
            ------------------------------------------------------------------
            This is the same merge the Apple sidebar makes above 641px and for
@@ -4626,7 +4691,10 @@ body.no-dirbutton .g-directions {
     /* With the header on, the sheet keeps its bottom edge and gives up height at
        the top instead — the map above it is what the header is taking from. */
     .has-navbar .g-topleft {
-        max-height: calc(62dvh - var(--g-navbar-h));
+        max-height: min(
+            calc(62dvh - var(--g-navbar-h)),
+            calc(var(--g-vv-h) - var(--g-map-strip) - var(--g-navbar-h))
+        );
     }
 
     /* One material, so the children keep their padding and their type and give

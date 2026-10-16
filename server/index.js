@@ -35,17 +35,53 @@ const network = readJson('src/paths.json');
  *
  * Unioned rather than merged into paths.json on purpose: that file is my campus's
  * printed linework and one script owns it. This one is OpenStreetMap's, owned by
- * scripts/build-approach-network.mjs, and the join between them is fifteen
- * connectors that script prints on every build.
+ * scripts/build-approach-network.mjs, and the join between them is sixteen
+ * gate connectors and four across the car parks, which that script prints on
+ * every build.
  */
 const approach = readJson('src/approach-paths.json');
 
+/**
+ * The ways across the sheet's paved plazas, written by the last stage of
+ * scripts/build-walk-network.mjs. Routed, never drawn, like the streets: the
+ * plaza is already on the map as paving, and a walk across it shows on the
+ * route ribbon. Campus network for every rule in graph.js that asks.
+ */
+const plazas = readJson('src/plaza-paths.json');
+
+/**
+ * Where each building's drawn approach paths met its walls, so a room inside
+ * resolves to the door its path led to rather than to whichever face of the
+ * building a path happens to run past. Written by scripts/build-walk-network.mjs
+ * with paths.json, from the same walls stage; see doorFor() in graph.js.
+ */
+const doors = readJson('src/doors.json');
+
+/**
+ * The line the streets were clipped at. A point inside it whose nearest edge
+ * is a street on the other side is still offered the campus's own network;
+ * see candidates() in graph.js.
+ */
+const boundary = readJson('src/campus-boundary.json');
+
+/**
+ * Every building's doors, from the directory, so a walk to a building can end
+ * at whichever of its doors suits it, with the building's footprint, so
+ * anywhere inside it is the same place as the building; and every footprint on
+ * the sheet, so a way onto the network across open ground is never drawn
+ * through one. Both files are also served as overlays below, from the same reads.
+ */
+const directory = readJson('src/directory.json');
+const buildings = readJson('src/buildings.json');
+const entrances = directory.features.filter((f) => f.properties.doors)
+  .map((f) => ({ doors: f.properties.doors, footprint: f.geometry }));
+
 const buildStart = Date.now();
-const graph = createGraph({ network, approach });
+const graph = createGraph({ network, approach, plazas, doors, boundary, entrances, buildings });
 
 console.log(
   `[beavermaps] graph ready in ${Date.now() - buildStart}ms ` +
-  `(${network.features.length} campus + ${approach.features.length} approach segments, ` +
+  `(${network.features.length} campus + ${plazas.features.length} plaza + ${approach.features.length} approach segments, ` +
   `${graph.vertices.length} vertices)`
 );
 
@@ -69,8 +105,9 @@ console.log(
  * needs a restart.
  */
 const OVERLAY_NAMES = ['buildings', 'basemap', 'amenities', 'places', 'labels', 'directory'];
+const READ = { directory, buildings };
 const OVERLAYS = Object.fromEntries(
-  OVERLAY_NAMES.map((name) => [name, readJson(`src/${name}.json`)]),
+  OVERLAY_NAMES.map((name) => [name, READ[name] ?? readJson(`src/${name}.json`)]),
 );
 
 // ---------------------------------------------------------------------------
@@ -200,8 +237,12 @@ function route(req, res) {
   return res.json({
     geometry: result.geometry,
     distanceFeet: result.distanceFeet,
+    // The dotted legs at either end, which distanceFeet is not: see route()
+    // in graph.js. The browser adds them for the walk's whole length.
+    legFeet: result.legFeet,
     maneuvers: result.maneuvers,
     snapped: result.snapped,
+    door: result.door,
   });
 }
 
@@ -221,9 +262,11 @@ app.get('/api/network', (req, res) => sendWire(req, res, WIRE.network));
 /**
  * Every vertex in the routing graph, campus and approach alike, as bare pairs.
  *
- * The client snaps a click to the nearest one so the marker lands on the graph
- * the instant you tap, rather than waiting a round trip to find out where the
- * route will really begin.
+ * The client measures a start — a GPS fix, or Start here on a dropped pin —
+ * against the nearest one, so a start too far from anything walkable is
+ * refused without a round trip. It no longer moves anything onto them: a
+ * vertex can be tens of metres along a path from where the router would join
+ * it (see dropPin in src/main.js), so the coordinate itself is what is sent.
  *
  * Pairs rather than a FeatureCollection because this is the one payload where
  * the framing costs more than the data: `{"type":"Feature","properties":{},…}`
@@ -302,6 +345,20 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[beavermaps] listening on http://0.0.0.0:${PORT}`);
+/*
+ * Express 5 hands a bind failure (EADDRINUSE, EACCES) to this callback rather
+ * than throwing it. Ignoring the argument meant a port that was already taken
+ * logged "listening" and then exited 0 once the event loop drained, so a
+ * supervisor saw a clean stop and the log claimed success. Say what went
+ * wrong and exit non-zero instead.
+ *
+ * The port in the log is the one actually bound, which differs from PORT when
+ * PORT is 0.
+ */
+const server = app.listen(PORT, '0.0.0.0', (err) => {
+  if (err) {
+    console.error(`[beavermaps] could not listen on port ${PORT}: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`[beavermaps] listening on http://0.0.0.0:${server.address().port}`);
 });

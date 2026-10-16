@@ -41,6 +41,11 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
  * @param {object} deps  every collaborator, named for what it does
  * @param {() => object|null} deps.geolocateControl  a GETTER: the control is
  *        built on map load, long after this is
+ * @param {(colour: string, title: string, at: number[]) => object} [deps.plantPin]
+ *        puts one of the route's two pins on the map and returns the marker.
+ *        Mapbox's by default; a seam because a Marker wants a whole browser
+ *        under it, and the sequencing these pins take part in is exactly what
+ *        test/endpoints-reroute.test.js has to drive end to end.
  */
 export function createEndpoints({
   map,
@@ -58,6 +63,13 @@ export function createEndpoints({
   clearSelection,
   clearSearchField,
   startLocating,
+  plantPin = (colour, title, at) => new mapboxgl.Marker({
+    element: routePin(colour, { title }),
+    anchor: 'bottom',
+    offset: liftedOffset(ROUTE_PIN_W),
+  })
+    .setLngLat(at)
+    .addTo(map),
 }) {
   const { setStatus, setBusy, setRouteSummary, setNavButtonsEnabled, setIdleStatus } = status;
   const { startCoordText, endCoordText } = ui;
@@ -89,8 +101,27 @@ export function createEndpoints({
    */
   let lastFix = null;
 
-  function resetMap() {
+  /**
+   * Take the walk off the screen and out of reach: the ribbon, its dotted ends,
+   * the route state behind them, and the two buttons that would start it.
+   *
+   * Its own function because it is not only resetMap's. A route that is
+   * refused or never answered has to leave the same nothing behind as Clear
+   * does, and it used to leave the previous walk instead — still drawn, still
+   * set, with Start and Simulate still offering to navigate a route from a
+   * start that was no longer the start. Four lines kept in two places is how
+   * one of the two came to have none of them.
+   */
+  function dropRoute() {
     nav.end();
+    route.clear();
+    map.getSource('calculated-route')?.setData(EMPTY);
+    map.getSource('route-legs')?.setData(EMPTY);
+    setNavButtonsEnabled(false);
+  }
+
+  function resetMap() {
+    dropRoute();
 
     if (startMarker) startMarker.remove();
     if (endMarker) endMarker.remove();
@@ -100,13 +131,7 @@ export function createEndpoints({
     startMarker = null;
     endMarker = null;
 
-    route.clear();
     requestSeq++;
-
-    if (map.getSource('calculated-route')) {
-      map.getSource('calculated-route').setData(EMPTY);
-    }
-    map.getSource('route-legs')?.setData(EMPTY);
 
     clearSelection();
 
@@ -118,7 +143,6 @@ export function createEndpoints({
     startCoordText.value = '';
     endCoordText.value = '';
     setRouteSummary(null);
-    setNavButtonsEnabled(false);
   }
 
   /** Re-route from the existing start to a newly chosen destination. */
@@ -239,7 +263,7 @@ export function createEndpoints({
    * Three ways to fail, and all three are said out loud rather than swallowed:
    * the browser refuses or times out (see locationProblem), or the fix lands
    * outside the routing graph (see reachProblem). The last is the quiet one —
-   * the router snaps a start to the nearest vertex with no notion of "too far",
+   * the router snaps a start onto the network with no notion of "too far",
    * so opening this at home ten miles away would otherwise draw a confident
    * eight-minute walk between two places neither of which is where you are.
    *
@@ -253,6 +277,17 @@ export function createEndpoints({
     // failed even when a fix arrived, as did Start here on any card.
     if (!routingEnabled() || !networkPoints()) return false;
 
+    // A walk already drawn runs from the start this is about to replace, and
+    // the wait below can be nine seconds — plenty of time to press Start on
+    // it, and have the re-route that follows swap the route out from under
+    // the walk. So it cannot be started while its start is in question. If
+    // the start stays where it was, so does the walk, and the buttons come
+    // back; unless something newer has been asked for in the meantime (the
+    // sequence moved), which owns the buttons now. See placeEnd.
+    const seq = requestSeq;
+    setNavButtonsEnabled(false);
+    const keepRoute = () => { if (seq === requestSeq) setNavButtonsEnabled(route.isWalkable); };
+
     // The fixture answers on the next tick, so this spinner is a real wait only
     // for a real GPS — which is exactly when it is worth showing.
     setBusy(true);
@@ -262,17 +297,29 @@ export function createEndpoints({
       at = await currentPosition();
     } catch (error) {
       setStatus(locationProblem(error), true);
+      keepRoute();
       return false;
     } finally {
       setBusy(false);
     }
 
+    // The nearest VERTEX is only the reach check here. It is never nearer
+    // than the nearest point on an edge, which is what the server measures,
+    // so this check is the stricter of the two — by nothing that matters,
+    // since the worst point in the graph's bounding box is about 215 m from a
+    // vertex (see REACH_M). What it is not is where the walk starts. It used
+    // to be: the fix was replaced by this vertex before it was sent, and since
+    // the build collapsed straight runs into single long edges that vertex can
+    // be fifty metres along the path you are standing beside, so the walk
+    // began by going there. The fix itself goes to the server, which joins the
+    // network at the nearest point on it and answers where (`snapped`); the
+    // dotted leg from the blue dot to the line is that last bit of ground.
     const node = nearestPoint(point(at), networkPoints()).geometry.coordinates;
     const problem = reachProblem(distance(point(at), point(node)) * 1000);
-    if (problem) { setStatus(problem, true); return false; }
+    if (problem) { setStatus(problem, true); keepRoute(); return false; }
 
     panel.show();
-    startPoint = point(node);
+    startPoint = point(at);
     startIsMine = true;
     // No green pin, for the same reason the fixture plants none: the blue dot
     // is what says where you are, and a marker on top of it is the second pin.
@@ -319,34 +366,52 @@ export function createEndpoints({
     // than replacing it with a GPS fix. See startIsMine.
     startIsMine = false;
     startMarker?.remove();
-    startMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_GREEN, { title: 'Start' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords)
-      .addTo(map);
+    startMarker = plantPin(GOOGLE_GREEN, 'Start', coords);
     startCoordText.value = label ?? coordLabel(coords);
     return true;
+  }
+
+  /**
+   * A BUILDING'S PIN GOES TO THE DOOR THE WALK USED. A building is asked for
+   * by its entrance, and the server may start or end the walk at another of
+   * its doors — whichever suits where you are coming from or going to (`door`
+   * in the answer; see `entrances` in server/graph.js). The pin moves there
+   * rather than staying at the door it was asked about with a dotted line
+   * across the building to it; the label still names the building. Moving the
+   * point too means a re-route asks for the building again by one of its
+   * doors, and is again free to pick.
+   */
+  function standAtDoors(door) {
+    if (door?.to) {
+      endPoint = point(door.to);
+      endMarker?.setLngLat(door.to);
+    }
+    if (door?.from && !startIsMine) {
+      startPoint = point(door.from);
+      startMarker?.setLngLat(door.from);
+    }
   }
 
   async function placeEnd(coords, label) {
     if (!routingEnabled()) return;
     panel.show();
     endPoint = point(coords);
+    // Being routed now, so no longer waiting for a start. See the refusal
+    // below, which is the one place that parks it again.
+    pendingEnd = null;
     endMarker?.remove();
-    endMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Destination' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords)
-      .addTo(map);
+    endMarker = plantPin(GOOGLE_RED, 'Destination', coords);
     endCoordText.value = label ?? coordLabel(coords);
     setStatus('Calculating route…');
 
     // Guard against a stale response landing after the user has moved on.
     const seq = ++requestSeq;
+    // The route still drawn is the one this request replaces, so it cannot be
+    // started while the request is out. Left enabled, Start began a walk along
+    // the old line, and the answer then swapped the route out from under it:
+    // navigation kept counting maneuvers the new route did not have, and
+    // threw on every fix after. Enabled again only by an answer that is a walk.
+    setNavButtonsEnabled(false);
     let result;
     let failure = null;
     // The only wait in this app the user asked for directly. "Calculating
@@ -392,21 +457,50 @@ export function createEndpoints({
     if (refusal) {
       setStatus(refusal, true);
       setRouteSummary(null);
+      // THE OLD WALK GOES, AND THE DESTINATION STAYS. This used to do the
+      // opposite. Retyping the start re-routes to the same destination, and
+      // when that came back refused — a start inside the building you are
+      // going to is "the same place" — the walk from the PREVIOUS start stayed
+      // drawn with Start enabled, while the destination it led to was
+      // dropped. The end field still named it, so nothing looked wrong, but
+      // the next start had nowhere to route to and did nothing at all.
+      //
+      // So the walk is taken down, as Clear would, and the destination is
+      // parked exactly as parkDestination leaves one: pin and label where they
+      // are, held in `pendingEnd` for the next start to pick up.
+      dropRoute();
       endPoint = null;
-      endMarker?.remove();
-      endMarker = null;
+      pendingEnd = { coords, name: label };
       return;
     }
+
+    // A walk already running is on the route this replaces. Navigation reads
+    // the route live, so swapping it under a running walk left its step
+    // counter pointing into a maneuver list it no longer had. The buttons
+    // above keep that from starting here; this is for one that already had.
+    nav.end();
 
     // `stepIndex` used to be zeroed here too. It is navigation's, it is only
     // ever read while a walk is running, and nav.start() zeroes it — so this
     // was resetting a counter nothing could have read.
-    route.set(result);
+    //
+    // The pins are stood at their doors FIRST, because the legs are measured
+    // from where the pins end up: a building's leg is from the door the walk
+    // used, which is nothing, not from the door it was asked about.
+    standAtDoors(result.door);
+    route.set(result, { from: startPoint?.geometry.coordinates, to: endPoint?.geometry.coordinates });
 
-    map.getSource('calculated-route').setData(route.feature());
+    // Optional, as resetMap's is. A basemap, theme or skin change while this
+    // request was out replaces the style, and until style.load rebuilds it
+    // the source does not exist. The throw that followed skipped everything
+    // below — the summary, the buttons, "Route calculated" — and left the panel
+    // on "Calculating route…". Nothing is lost by skipping the line: the
+    // rebuild seeds the source from route.feature(). See src/route-layers.js.
+    map.getSource('calculated-route')?.setData(route.feature());
     paintLegs();
 
-    setRouteSummary(result.distanceFeet);
+    // The whole walk, dotted legs and all; see measureLegs in route-state.js.
+    setRouteSummary(result.distanceFeet + route.legFeet.from + route.legFeet.to);
     const turns = route.maneuvers.length - 2;
     setStatus(`Route calculated — ${turns} turn${turns === 1 ? '' : 's'}.`);
     setNavButtonsEnabled(true);
@@ -456,12 +550,7 @@ export function createEndpoints({
     });
     pendingEnd = { coords, name };
     endMarker?.remove();
-    endMarker = new mapboxgl.Marker({
-      element: routePin(GOOGLE_RED, { title: 'Destination' }),
-      anchor: 'bottom',
-      offset: liftedOffset(ROUTE_PIN_W),
-    })
-      .setLngLat(coords).addTo(map);
+    endMarker = plantPin(GOOGLE_RED, 'Destination', coords);
     endCoordText.value = name ?? coordLabel(coords);
   }
 
@@ -527,9 +616,32 @@ export function createEndpoints({
     }
   }
 
+  /**
+   * "Start here" on a pin's card: make the point the start, then route to the
+   * destination there already is, whether drawn or parked.
+   *
+   * placeStart alone only moves the start. With a walk on screen that left
+   * the old one drawn from the old start, with Start still offering to walk
+   * it, under a start field naming the new one. With a destination parked it
+   * left that waiting, though parkDestination promises the next start
+   * routes it. The start field's own pick does placeStart and then
+   * rerouteFromStart, and the cards now go through the same pair.
+   *
+   * @returns {Promise<'refused'|'routed'|'waiting'>} refused when placeStart
+   *          turned the point down (and has said why); waiting when there is
+   *          no destination yet, which the caller may want to say
+   */
+  async function startHere(coords, label) {
+    if (!placeStart(coords, label)) return 'refused';
+    if (!endPoint && !pendingEnd) return 'waiting';
+    await rerouteFromStart();
+    return 'routed';
+  }
+
   return {
     reset: resetMap,
     rerouteFromStart,
+    startHere,
     rerouteTo,
     locateStart,
     placeStart,

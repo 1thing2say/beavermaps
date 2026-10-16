@@ -112,9 +112,11 @@ export function createShell({ map, panels, isPhone, onSettle, dismiss }) {
   if (viewport) {
     const publishKeyboard = () => {
       const covered = window.innerHeight - viewport.height - viewport.offsetTop;
-      document.documentElement.style.setProperty(
-        '--g-kb-h', `${Math.max(0, Math.round(covered))}px`,
-      );
+      const root = document.documentElement.style;
+      root.setProperty('--g-kb-h', `${Math.max(0, Math.round(covered))}px`);
+      // ...and how much is left above it, which is what caps the sheet's
+      // height. See --g-vv-h: `dvh` does not move for a keyboard.
+      root.setProperty('--g-vv-h', `${Math.round(viewport.height)}px`);
     };
     /*
      * ...and tell the map its box may have moved under it.

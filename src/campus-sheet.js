@@ -1,9 +1,10 @@
 // The college's printed campus map, drawn element for element.
 //
 // Ground cover traced out of the same basemap sheet as the buildings: lawn,
-// paving, courts, bay striping, the HOME BASE badges. Two layers over one
-// source, because the sheet mixes areas with stroked linework and Mapbox will
-// not do both in one.
+// paving, courts, bay striping, the HOME BASE badges. Five layers over one
+// source, because the sheet mixes areas with stroked linework, Mapbox will not
+// do both in one, and a fill layer and a line layer can only be stacked whole —
+// see `sheetBands` for why that took the count from two to five.
 //
 // ITS OWN MODULE BECAUSE OF THE WIDTHS. `groundWidth` converts metres on the
 // ground into pixels at a zoom, through a constant — `M_PER_PIXEL_AT_Z0` — that
@@ -17,13 +18,26 @@
 // style — updates in place.
 
 import { bayRake } from './bay-rake.js';
+import { anchorFor } from './layer-order.js';
 
-// Metres of ground per pixel is 156543.03 * cos(latitude) / 2^zoom, and at this
-// campus's 38.65 degrees that constant is 122275. Dividing a width in metres by
+// Metres of ground per pixel is 78271.52 * cos(latitude) / 2^zoom, and at this
+// campus's 38.65 degrees that constant is 61137. Dividing a width in metres by
 // it, against an exponential-base-2 zoom curve, holds a line at its true ground
 // width instead of a fixed pixel width — so the 26 m entry road stays visibly
 // wider than the 3.3 m footpaths at every zoom.
-export const M_PER_PIXEL_AT_Z0 = 122275;
+//
+// 78271, NOT THE 156543 EVERY WEB MERCATOR TABLE QUOTES. That figure is the
+// equator divided by 256 pixels, the size of a raster tile at zoom 0, and it is
+// right for a slippy map built from 256 px tiles. Mapbox GL's zoom is defined
+// over 512 px tiles — `transform.tileSize` is 512, and z0 is one 512 px world —
+// so the same zoom number shows twice the ground per pixel's worth of detail
+// and the constant halves. This was 122275 for a long time and nothing looked
+// broken, which is the trouble with it: every stroke on the sheet was drawn at
+// exactly half its width, a 3.3 m footpath as 1.65 m, and the only symptom was
+// a campus whose paths looked a little thin. Measured on the live map with
+// map.project, 100 m is 428.8 px at z18 — 0.233 m a pixel, this constant's
+// answer, against the old one's 0.466.
+export const M_PER_PIXEL_AT_Z0 = 61137;
 
 /** The one kind on the sheet that is painted as something other than its name. */
 export const CLOSED_KIND = 'closed';
@@ -83,15 +97,115 @@ export function closedBearing(basemap) {
   return best.angle;
 }
 
+/**
+ * The kinds the walk network is traced from.
+ *
+ * They go in the ground band wherever the sheet put them, because the network
+ * is drawn over the band and has to be drawn over THESE: it is their
+ * centrelines. Thirty-one of their strokes sit late in the print — at i
+ * 2324-2377, which my campus drew after the buildings, the mouths of six
+ * driveway entrances and the shafts of twenty-four lane arrows, all filed as
+ * `crossing`, with the arrows' twenty-four heads as fills between them; and one
+ * 6.6 m driveway at i 3116 — and taken at their index they would land in the
+ * building band, over the ribbon traced along them, as a slab of paint across
+ * every entrance. None of them touches a building,
+ * so lowering them changes nothing the print showed but which is in front
+ * where 102 m of them pass under a tree.
+ */
+export const PAVEMENT_KINDS = ['walkway', 'driveway', 'crossing', 'offsite_road'];
+
+/** The kinds whose first fill opens the canopy band and the building band. */
+const CANOPY_KINDS = ['tree'];
+const BUILDING_KINDS = ['building', CLOSED_KIND];
+
+/**
+ * Where the printed sheet is cut into bands, as values of `i`.
+ *
+ * WHY THERE ARE BANDS AT ALL. The sheet is a painter's algorithm and `i` is
+ * each element's place in it, but a sort key only orders features within ONE
+ * layer. Drawn as one fill layer and one line layer, every stroke on the sheet
+ * was over every fill, whatever `i` said — and the strokes include the
+ * walkways and driveways my campus ran under its buildings and let the roofs
+ * paint out: 449 m of pavement across 29 footprints, drawn through the walls.
+ * The fix is to cut the sheet where the print changes from ground to things
+ * standing on it and stack the pieces, so the order between pieces is the
+ * print's too.
+ *
+ * Two cuts, read off the data rather than typed in, because the sheet is a
+ * generated artifact and a rebuild that renumbers it must move them with it:
+ *
+ *   - `canopy`, the first tree. Everything filled before it is ground (lawn,
+ *     lots, the track, the courts, the walkway paving), and every stroke before
+ *     it is pavement or a ground marking. In this sheet that is i 1441.
+ *   - `upper`, the first building. Between the two cuts there is nothing but
+ *     canopy; from it on are the buildings, the closed block, the stands, the
+ *     pool, the shrubs and the markers. In this sheet, i 1950.
+ *
+ * test/campus-sheet.test.js holds the data to that description — no stroke
+ * between the cuts, nothing but trees between them, every building after the
+ * second — so a sheet that stops being shaped like this fails there rather
+ * than rendering inside out.
+ *
+ * A sheet with no trees collapses the canopy onto the buildings, and one with
+ * no buildings draws everything as ground — which is the old two-layer picture,
+ * and the right fallback for a sheet that has nothing to stand on its ground.
+ */
+export function sheetBands(sheet) {
+  const firstFill = (kinds) => {
+    let first = Infinity;
+    for (const { properties: p } of sheet?.features ?? []) {
+      if (p?.fill && kinds.includes(p.kind) && p.i < first) first = p.i;
+    }
+    return first;
+  };
+  // A finite stand-in for "never", because the cut is written into a style
+  // expression and a style is JSON, which has no Infinity.
+  const NEVER = Number.MAX_SAFE_INTEGER;
+  const upper = Math.min(firstFill(BUILDING_KINDS), NEVER);
+  const canopy = Math.min(firstFill(CANOPY_KINDS), upper);
+  return { canopy, upper };
+}
+
+/**
+ * The three band filters, as style expressions over one feature's properties.
+ *
+ * Ground is everything before the canopy cut, plus the pavement wherever it
+ * was drawn; canopy and upper split the rest at the building cut. The three
+ * are disjoint and cover the sheet, which the tests check by evaluating them —
+ * a feature in no band is a shape that silently stopped drawing, and one in
+ * two is drawn twice, the second copy in the wrong place.
+ */
+export function bandFilters({ canopy, upper }) {
+  const ground = ['any',
+    ['<', ['get', 'i'], canopy],
+    ['match', ['get', 'kind'], PAVEMENT_KINDS, true, false]];
+  return {
+    ground,
+    canopy: ['all', ['!', ground], ['<', ['get', 'i'], upper]],
+    upper: ['all', ['!', ground], ['>=', ['get', 'i'], upper]],
+    // Strokes take two bands, not three. The print has none between the cuts,
+    // and should one appear — a tree outline, say — it stands with the
+    // buildings over the network, where a stroke drawn after the ground belongs.
+    aboveGround: ['!', ground],
+  };
+}
+
+/** Every layer the sheet draws, for the paths that recolour or remove them. */
+const FILL_LAYERS = ['campus-sheet-fill', 'campus-sheet-canopy', 'campus-sheet-upper-fill'];
+const LINE_LAYERS = ['campus-sheet-line', 'campus-sheet-upper-line'];
+export const SHEET_LAYERS = [...FILL_LAYERS, 'campus-rake', ...LINE_LAYERS];
+
 
 /**
  * @param {object} deps
  * @param {object} deps.map
  * @param {Function} deps.litPalette    the palette at the current time of day
  * @param {Function} deps.sheet         the basemap overlay, once it has landed
- * @param {Function} deps.belowNetwork  which layer id these must sit under
+ *
+ * Where each layer goes is not a dependency any more: src/layer-order.js holds
+ * the whole stack, and every layer here asks it for its own place.
  */
-export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowRoute }) {
+export function createCampusSheet({ map, litPalette, sheet }) {
 
   /**
    * How wide a line off the printed sheet is drawn, in metres, before zoom.
@@ -113,13 +227,24 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
     ['coalesce', ['get', 'width'], 1.65],
   ];
 
-  const groundWidth = (floor) => [
+  const groundWidth = (floor, metres = SHEET_WIDTH) => [
     'interpolate', ['exponential', 2], ['zoom'],
     // The floor keeps the thinnest paths from disappearing when zoomed out,
     // where true width would put them below a pixel.
-    14, ['max', floor, ['*', SHEET_WIDTH, 2 ** 14 / M_PER_PIXEL_AT_Z0]],
-    20, ['max', floor, ['*', SHEET_WIDTH, 2 ** 20 / M_PER_PIXEL_AT_Z0]],
+    14, ['max', floor, ['*', metres, 2 ** 14 / M_PER_PIXEL_AT_Z0]],
+    20, ['max', floor, ['*', metres, 2 ** 20 / M_PER_PIXEL_AT_Z0]],
+    // To the zoom ceiling, not just to z20. Mapbox clamps an interpolate past
+    // its last stop, so with z20 last every stroke stopped growing there while
+    // the ground under it kept doubling: a 3.3 m walk froze at 57 px, and by
+    // z22 — the default maxZoom, which this map does not lower, and reachable
+    // with a pinch — it was drawn a quarter of its width. The network ribbon,
+    // which holds a true ground width to z22 (route-layers.js), then spilled
+    // off its own walk onto the lawn either side from about z20.4.
+    22, ['max', floor, ['*', metres, 2 ** 22 / M_PER_PIXEL_AT_Z0]],
   ];
+
+  /** The sheet's own building outline, in metres: all 102 of them are 0.82. */
+  const BUILDING_LINE_M = 0.82;
 
   /**
    * Colour for one of the printed sheet's classes, falling back to the colour
@@ -137,15 +262,24 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
   /**
    * my campus's printed campus map, drawn element for element.
    *
-   * Two layers over one source, because the sheet mixes areas with stroked line
-   * work and Mapbox will not do both in one: the fill layer takes everything
-   * with a fill, the line layer everything with a stroke, and a shape with both
-   * appears in each.
+   * Five layers over one source, in three bands — see `sheetBands`. A fill
+   * layer takes everything with a fill and a line layer everything with a
+   * stroke, so a shape with both appears in one of each; the bands decide WHICH
+   * fill layer and which line layer, by where the shape falls in the print:
    *
-   * The sort keys are load-bearing. A flat vector map is a painter's algorithm —
-   * bay striping over tarmac, trees over lawn — and `i` is the element's index
-   * in the original document. Without them Mapbox is free to reorder within a
-   * layer and the campus renders inside out.
+   *   campus-sheet-fill        ground surfaces
+   *   campus-rake              the bay dividers painted on them
+   *   campus-sheet-line        pavement and ground markings
+   *   campus-sheet-canopy      the trees
+   *     (the lamps and the network go here — src/layer-order.js)
+   *   campus-sheet-upper-fill  buildings, stands, pool, shrubs
+   *   campus-sheet-upper-line  their outlines
+   *
+   * The sort keys are still load-bearing. A flat vector map is a painter's
+   * algorithm — bay striping over tarmac, trees over lawn — and `i` is the
+   * element's index in the original document. The bands put the print's order
+   * back BETWEEN layers; within one, Mapbox is otherwise free to reorder and
+   * the campus renders inside out.
    */
   function add() {
     const colors = litPalette();
@@ -153,7 +287,7 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
 
     // Over imagery there is nothing to add — see SATELLITE.land.
     if (!land) {
-      for (const id of ['campus-rake', 'campus-sheet-line', 'campus-sheet-fill']) {
+      for (const id of SHEET_LAYERS) {
         if (map.getLayer(id)) map.removeLayer(id);
       }
       return;
@@ -214,8 +348,8 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
     );
 
     if (map.getLayer('campus-sheet-fill')) {
-      map.setPaintProperty('campus-sheet-fill', 'fill-color', fillColour);
-      map.setPaintProperty('campus-sheet-line', 'line-color', lineColour);
+      for (const id of FILL_LAYERS) map.setPaintProperty(id, 'fill-color', fillColour);
+      for (const id of LINE_LAYERS) map.setPaintProperty(id, 'line-color', lineColour);
       map.setPaintProperty('campus-rake', 'line-color', land.parking_stripe);
       return;
     }
@@ -272,40 +406,51 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
     // top of that. Drawn on nothing but ground it read as a tinted patch of
     // lawn — which is exactly what it is not.
     const visibleLines = ['all', visible, ['!=', ['get', 'kind'], CLOSED_KIND]];
-    // Under the legend's outlines when they exist, and this is not optional.
-    // The sheet arrives from the server, so on a cold load the highlight layers
-    // are already standing when it lands; anchoring both to the network alone
-    // put the later arrival on top, and my campus's opaque building fills painted out
-    // every outline the legend drew. The sheet is ground and the outline
-    // annotates the ground, so the order is fixed rather than incidental.
-    const anchor = map.getLayer('highlight-fill') ? 'highlight-fill' : belowNetwork();
+    // Where the print is cut, and the filters that cut it. Read off the sheet
+    // now that it is here rather than once at import: the cuts are a property
+    // of this file's numbering, and a rebuild is free to move them.
+    const bands = bandFilters(sheetBands(sheet()));
 
-    map.addLayer({
-      id: 'campus-sheet-fill',
+    // Each layer asks the stack for its own place, at the moment it is added —
+    // see src/layer-order.js. That used to be one anchor shared by all three,
+    // chosen as "under the legend's outlines when they exist, under the network
+    // when they do not", and the first half of that rule survives in the
+    // stack: the sheet arrives from the server, so on a cold load the highlight
+    // layers are already standing when it lands, and my campus's opaque building
+    // fills painting over them wiped out every outline the legend drew. The
+    // difference now is that only the GROUND goes under the network; the
+    // buildings go over it, and the outlines over them.
+    const place = (layer) => map.addLayer(layer, anchorFor(map, layer.id));
+
+    // Everything my campus gave a fill, PLUS the pitches — and the pitches are
+    // the exception because my campus did not give them one.
+    //
+    // Only 2 of the sheet's 22 `sport` shapes carry a fill: the stadium's
+    // track and one other. The remaining 19 are polygons drawn as white
+    // touchlines over the lawn, which is how a printed sheet says "pitch"
+    // and how a vector map says nothing at all — they never entered this
+    // layer, so the soccer, baseball, softball and tennis grounds were lawn
+    // with an outline on top while the one filled shape sat there in pitch
+    // green looking like the odd one out.
+    //
+    // The geometry is already the right shape. It only needed to be allowed
+    // in, and `sheetPaint` has had a colour waiting for it the whole time.
+    // ...and the twelve courts arrive the same way and need the same
+    // exception: stroke-only shapes that have to be let in as surfaces.
+    // ...minus the bay dividers, which are drawn by campus-rake below as
+    // lines. Left in here as well they would be the same 1,004 bars twice
+    // over, and the fill is the copy that cannot be seen at most zooms.
+    const filled = ['all', visible,
+      ['!=', ['get', 'kind'], 'parking_stripe'],
+      ['any', ['has', 'fill'], ['in', ['get', 'kind'], ['literal', ['sport', 'tennis', 'tennis_apron']]]]];
+    const stroked = ['all', visibleLines, ['has', 'stroke']];
+
+    const fillLayer = (id, band) => ({
+      id,
       type: 'fill',
       source: 'campus-sheet',
       slot: 'middle',
-      // Everything my campus gave a fill, PLUS the pitches — and the pitches are the
-      // exception because my campus did not give them one.
-      //
-      // Only 2 of the sheet's 22 `sport` shapes carry a fill: the stadium's
-      // track and one other. The remaining 19 are polygons drawn as white
-      // touchlines over the lawn, which is how a printed sheet says "pitch"
-      // and how a vector map says nothing at all — they never entered this
-      // layer, so the soccer, baseball, softball and tennis grounds were lawn
-      // with an outline on top while the one filled shape sat there in pitch
-      // green looking like the odd one out.
-      //
-      // The geometry is already the right shape. It only needed to be allowed
-      // in, and `sheetPaint` has had a colour waiting for it the whole time.
-      // ...and the twelve courts arrive the same way and need the same
-      // exception: stroke-only shapes that have to be let in as surfaces.
-      // ...minus the bay dividers, which are drawn by campus-rake below as
-      // lines. Left in here as well they would be the same 1,004 bars twice
-      // over, and the fill is the copy that cannot be seen at most zooms.
-      filter: ['all', visible,
-        ['!=', ['get', 'kind'], 'parking_stripe'],
-        ['any', ['has', 'fill'], ['in', ['get', 'kind'], ['literal', ['sport', 'tennis', 'tennis_apron']]]]],
+      filter: ['all', filled, band],
       layout: { 'fill-sort-key': ['get', 'i'] },
       paint: {
         'fill-color': fillColour,
@@ -314,14 +459,13 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
         // through its own model, and the night preset swallows them.
         'fill-emissive-strength': 1,
       },
-    }, anchor);
-
-    map.addLayer({
-      id: 'campus-sheet-line',
+    });
+    const lineLayer = (id, band) => ({
+      id,
       type: 'line',
       source: 'campus-sheet',
       slot: 'middle',
-      filter: ['all', visibleLines, ['has', 'stroke']],
+      filter: ['all', stroked, band],
       layout: { 'line-sort-key': ['get', 'i'], 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': lineColour,
@@ -329,9 +473,15 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
         'line-opacity': ['coalesce', ['get', 'opacity'], 1],
         'line-emissive-strength': 1,
       },
-    }, anchor);
+    });
 
-    // The rake.
+    // In stack order, which `anchorFor` does not need but a reader does.
+    place(fillLayer('campus-sheet-fill', bands.ground));
+
+    // The rake, between the ground it is painted on and the pavement drawn over
+    // it — which is where the print has it: the 1,004 bars are i 52-1055, after
+    // the lots and before the first driveway, so an aisle crosses the ends of
+    // the bays rather than the bays being painted across the aisle.
     //
     // Butt caps, not the round ones the sheet's other strokes take: a divider
     // is a painted bar with a square end, and a round cap would add half its
@@ -341,10 +491,10 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
     // The 1.2 px floor is the whole point of the layer. Below it a divider is
     // sub-pixel and Mapbox can only render it as a fraction of a pixel's worth
     // of coverage, which is what turned a rank of them into a moire; at 1.2 it
-    // is a line. Above about z18.5 the true 0.99 m is wider than the floor and
-    // the floor stops applying, so from there on this draws exactly the bar my campus
-    // drew, in exactly the place they drew it.
-    map.addLayer({
+    // is a line. Above about z16.2 the true 0.99 m is wider than the floor and
+    // the floor stops applying, so from there on this draws exactly the bar my
+    // campus drew, in exactly the place they drew it.
+    place({
       id: 'campus-rake',
       type: 'line',
       source: 'campus-rake',
@@ -355,7 +505,12 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
         'line-width': groundWidth(1.2),
         'line-emissive-strength': 1,
       },
-    }, anchor);
+    });
+
+    place(lineLayer('campus-sheet-line', bands.ground));
+    place(fillLayer('campus-sheet-canopy', bands.canopy));
+    place(fillLayer('campus-sheet-upper-fill', bands.upper));
+    place(lineLayer('campus-sheet-upper-line', bands.aboveGround));
   }
   // -------------------------------------------------------------------------
   // The closed building
@@ -402,11 +557,11 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
     if (!sheet() || !map.getSource('campus-sheet')) return;
 
     const only = ['==', ['get', 'kind'], CLOSED_KIND];
-    // The wash is ground and sits with the ground: under the paths, and under
-    // the legend's outlines when they are up. The outline does not — see
-    // belowRoute, and note the two anchors are deliberately different.
-    const anchor = map.getLayer('highlight-fill') ? 'highlight-fill' : belowNetwork();
-
+    // Both halves take their places from src/layer-order.js. The wash goes
+    // straight over the building band, because the grey it tints is in it —
+    // under that grey it would be painted out entirely — and under the legend's
+    // outlines when they are up. The outline goes higher, over the outlines and
+    // under only the route.
     map.addLayer({
       id: 'campus-closed-fill',
       type: 'fill',
@@ -424,7 +579,7 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
         'fill-opacity': 0.1,
         'fill-emissive-strength': 1,
       },
-    }, anchor);
+    }, anchorFor(map, 'campus-closed-fill'));
 
     map.addLayer({
       id: 'campus-closed-line',
@@ -439,15 +594,21 @@ export function createCampusSheet({ map, litPalette, sheet, belowNetwork, belowR
         // band: this shape is the only red on an otherwise grey-and-mint
         // campus, so it does not need weight to be found — being red is already
         // the whole of the emphasis, and the width was spending it twice.
-        'line-width': groundWidth(0.6),
+        //
+        // And at the width of every OTHER building's outline above the floor,
+        // which is 0.82 m on the sheet. The block carries no stroke width of
+        // its own, so it used to fall through to the 1.65 m a path defaults to
+        // — invisible while every width was drawn at half, and a red band twice
+        // the weight of its neighbours' edges the moment widths came out true.
+        'line-width': groundWidth(0.6, BUILDING_LINE_M),
         // Washed rather than solid, for the same reason. Held above the paths
-        // it crosses (see belowRoute) so the boundary still reads as continuous
-        // — that is what the layer is FOR — but at an opacity where it sits in
-        // the sheet rather than on top of it.
+        // it crosses so the boundary still reads as continuous — that is what
+        // the layer is FOR — but at an opacity where it sits in the sheet
+        // rather than on top of it.
         'line-opacity': 0.45,
         'line-emissive-strength': 1,
       },
-    }, belowRoute());
+    }, anchorFor(map, 'campus-closed-line'));
   }
   return { add, addClosed };
 }

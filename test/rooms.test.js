@@ -147,3 +147,15 @@ test('the artifact says which term it is, because it will go stale', () => {
   // artifact says where it came from, which a name does as well as a link.
   assert.ok(rooms.source && rooms.source.length > 8, 'the artifact does not say where it came from');
 });
+
+test('the Science Portable rooms are in the building numbered 491, not 78 m away', () => {
+  // The schedule's "Science Portable" holds rooms 490, 492 and 493, and my
+  // campus names one footprint "Science Success Center (Rm 491)". Filed under
+  // Science & Engineering, a search for Room 490 flew to that building's
+  // anchor, 78 m off, and labelled it the wrong building.
+  const portable = rooms.buildings['Science Portable'];
+  assert.equal(portable.mapName, 'Science Success Center');
+  const ssc = load('directory').features.find((f) => f.properties.name === 'Science Success Center');
+  assert.ok(metresBetween(portable.coords, ssc.properties.anchor) < 40,
+    `${metresBetween(portable.coords, ssc.properties.anchor).toFixed(0)} m from the Science Success Center`);
+});
