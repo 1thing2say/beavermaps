@@ -547,14 +547,8 @@ const stage = {
   deck: null,
   credits: new Set(),
   owner: null,
-  /**
-   * Set by whichever flyover holds the canvas, so traversals reach the right
-   * card. Called only when a traversal has the ROOF covered by a fine tile —
-   * see showsSubject — because it is what lets the pin drop.
-   */
+  /** Set by whichever flyover holds the canvas, so traversals reach the right card. */
   onReady: null,
-  /** ...a tile arrived, so the credit line may have more to say. */
-  onCredits: null,
   /** ...a tile did not. Counted by the card; see TILE_FAILURES. */
   onTileFailed: null,
   /** ...and the same for a tileset Google refused. See keyedFetch. */
@@ -842,13 +836,10 @@ function makeLayer({ Tile3DLayer, Tiles3DLoader }, key) {
       // first traversal completes on a handful of tiles and the rest of the
       // sources turn up over the next few seconds.
       //
-      // The caption and NOTHING ELSE. This used to call onReady, which is also
-      // what tells the pin the roof has arrived — and the first tiles to arrive
-      // on a cold load are the 64, 32 and 16 m ancestors, so the pin was
-      // falling onto ground that had not loaded, the very thing showsSubject
-      // exists to stop. Only the traversal, which can ask showsSubject, says
-      // the roof is there.
-      stage.onCredits?.();
+      // It is also what lets the pin drop. Leaving that to the traversal alone
+      // (bddded3) meant its showsSubject test never passed in a real browser,
+      // and the pin never fell at all.
+      stage.onReady?.();
     },
     // Counted rather than swallowed. A failed tile is never asked for again, so
     // a card waiting on one waits for ever without this. See TILE_FAILURES.
@@ -1164,7 +1155,6 @@ export function createFlyover({
     if (stage.owner === token) {
       stage.owner = null;
       stage.onReady = null;
-      stage.onCredits = null;
       stage.onTileFailed = null;
       stage.onRefused = null;
       stage.onFailed = null;
@@ -1301,16 +1291,11 @@ export function createFlyover({
       fail('Aerial view unavailable');
     };
 
-    // Called as tiles load and on every traversal, so it has to be safe to call
-    // repeatedly.
-    const paintCredit = () => {
-      credit.textContent = [...stage.credits].join(', ') || FALLBACK_CREDIT;
-    };
-    stage.onCredits = () => { if (!dead) paintCredit(); };
-    // Called only from a traversal that has the roof covered by a fine tile.
+    // Called both when a traversal selects tiles and when one finishes loading,
+    // so it does two jobs and has to be safe to call repeatedly.
     stage.onReady = () => {
       if (dead) return;
-      paintCredit();
+      credit.textContent = [...stage.credits].join(', ') || FALLBACK_CREDIT;
       // HALF of the drop's condition. This one says a fine tile covering the
       // roof has ARRIVED; the other half, `drawn`, says deck.gl has built
       // geometry out of it, and is checked per frame because it becomes true

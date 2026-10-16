@@ -254,29 +254,19 @@ test('the render loop stops when the card closes and resumes for the next', asyn
   next.destroy();
 });
 
-test('a coarse tile arriving does not drop the pin; the roof\'s own tile does', async () => {
+test('a tile arriving drops the pin, and the credit follows the tiles', async () => {
   const roof = [-121.3464, 38.6492, 20];
   const card = await open({ roof });
   const deck = fakes.decks.at(-1);
   const pins = () => deck.props.layers.length - 2;
   deck.draw();
 
-  // A 64 m ancestor lands, as one does first on a cold load. Four seconds is
-  // past HOLD_MS plus the calm ceiling, so a drop would have happened by now.
+  // Four seconds is past HOLD_MS plus the calm ceiling, so the drop is due.
   latestTiles().props.onTileLoad({ content: { gltf: { asset: { copyright: 'Google;Landsat' } } } });
   runFrames(250);
-  assert.equal(pins(), 0, 'no pin on a coarse tile');
-  const caption = card.el.children.find((c) => c.tag === 'figcaption');
-  assert.equal(caption.textContent, 'Google, Landsat', 'the credit still follows the tiles');
-
-  // The traversal finds an 8 m tile over the roof — narrower than maxTileSpan,
-  // or it would be culled as one of the coarse slabs.
-  const box = [[roof[0] - 0.0004, roof[1] - 0.0004, 0], [roof[0] + 0.0004, roof[1] + 0.0004, 40]];
-  latestTiles().props.loadOptions.tileset.onTraversalComplete([{
-    geometricError: 8, contentAvailable: true, boundingBox: box, unselect() {}, _distanceToCamera: 0,
-  }]);
-  runFrames(250);
   assert.ok(pins() > 0, 'the pin is down');
+  const caption = card.el.children.find((c) => c.tag === 'figcaption');
+  assert.equal(caption.textContent, 'Google, Landsat', 'the credit follows the tiles');
   card.destroy();
 });
 
