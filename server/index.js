@@ -1,10 +1,10 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import express from 'express';
 import { createGraph } from './graph.js';
-import { createRateLimit } from './limit.js';
-import { wireForm, sendWire, compressedStatic } from './wire.js';
+import { wireForm } from './wire.js';
+import { createApp } from './app.js';
+import { closeOnSignal } from './shutdown.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -27,25 +27,62 @@ const network = readJson('src/paths.json');
 /**
  * The streets around the campus, so a walk can start outside it.
  *
- * Routed over, never drawn. `/api/network` below still serves my campus's own paths
- * alone, because whichever provider is painting the ground is already drawing
- * these streets and putting ours on top of theirs is the doubled linework at the
- * campus edge that this pair of files exists to avoid. The only thing a visitor
- * ever sees from here is the route ribbon lying along it.
+ * Routed over, never drawn. `/api/network` (in server/app.js) still serves my
+ * campus's own paths alone, because whichever provider is painting the ground
+ * is already drawing these streets and putting ours on top of theirs is the
+ * doubled linework at the campus edge that this pair of files exists to
+ * avoid. The only thing a visitor ever sees from here is the route ribbon
+ * lying along it.
  *
  * Unioned rather than merged into paths.json on purpose: that file is my campus's
  * printed linework and one script owns it. This one is OpenStreetMap's, owned by
- * scripts/build-approach-network.mjs, and the join between them is fifteen
- * connectors that script prints on every build.
+ * scripts/build-approach-network.mjs, and the join between them is sixteen
+ * gate connectors and four across the car parks, which that script prints on
+ * every build.
  */
 const approach = readJson('src/approach-paths.json');
 
+/**
+ * The ways across the sheet's paved plazas, written by the last stage of
+ * scripts/build-walk-network.mjs. Routed, never drawn, like the streets: the
+ * plaza is already on the map as paving, and a walk across it shows on the
+ * route ribbon. Campus network for every rule in graph.js that asks.
+ */
+const plazas = readJson('src/plaza-paths.json');
+
+/**
+ * Where each building's drawn approach paths met its walls, so a room inside
+ * resolves to the door its path led to rather than to whichever face of the
+ * building a path happens to run past. Written by scripts/build-walk-network.mjs
+ * with paths.json, from the same walls stage; see doorFor() in graph.js.
+ */
+const doors = readJson('src/doors.json');
+
+/**
+ * The line the streets were clipped at. A point inside it whose nearest edge
+ * is a street on the other side is still offered the campus's own network;
+ * see candidates() in graph.js.
+ */
+const boundary = readJson('src/campus-boundary.json');
+
+/**
+ * Every building's doors, from the directory, so a walk to a building can end
+ * at whichever of its doors suits it, with the building's footprint, so
+ * anywhere inside it is the same place as the building; and every footprint on
+ * the sheet, so a way onto the network across open ground is never drawn
+ * through one. Both files are also served as overlays below, from the same reads.
+ */
+const directory = readJson('src/directory.json');
+const buildings = readJson('src/buildings.json');
+const entrances = directory.features.filter((f) => f.properties.doors)
+  .map((f) => ({ doors: f.properties.doors, footprint: f.geometry }));
+
 const buildStart = Date.now();
-const graph = createGraph({ network, approach });
+const graph = createGraph({ network, approach, plazas, doors, boundary, entrances, buildings });
 
 console.log(
   `[beavermaps] graph ready in ${Date.now() - buildStart}ms ` +
-  `(${network.features.length} campus + ${approach.features.length} approach segments, ` +
+  `(${network.features.length} campus + ${plazas.features.length} plaza + ${approach.features.length} approach segments, ` +
   `${graph.vertices.length} vertices)`
 );
 
@@ -69,8 +106,9 @@ console.log(
  * needs a restart.
  */
 const OVERLAY_NAMES = ['buildings', 'basemap', 'amenities', 'places', 'labels', 'directory'];
+const READ = { directory, buildings };
 const OVERLAYS = Object.fromEntries(
-  OVERLAY_NAMES.map((name) => [name, readJson(`src/${name}.json`)]),
+  OVERLAY_NAMES.map((name) => [name, READ[name] ?? readJson(`src/${name}.json`)]),
 );
 
 // ---------------------------------------------------------------------------
@@ -110,198 +148,37 @@ console.log(
 
 // ---------------------------------------------------------------------------
 // HTTP
+//
+// Every route, header and fallback is in server/app.js, which takes what was
+// built above as arguments — so it can be tested without any of this, see
+// test/app.test.js. What is left here is the part that only makes sense once:
+// listening, and stopping.
 // ---------------------------------------------------------------------------
-const app = express();
-
-// Nothing here is served faster for having announced which framework served it.
-app.disable('x-powered-by');
-
-/**
- * Behind Fly's edge, so the client address arrives in X-Forwarded-For.
- *
- * ONE HOP, not `true`. `trust proxy: true` tells Express to believe the
- * left-most entry of a header the client itself can write, which turns the rate
- * limiter below into a header field anybody can rotate. One hop means "trust the
- * proxy immediately in front of me and nothing further out", which is exactly
- * the deployment in fly.toml. Run this without a proxy and req.ip is the socket
- * address, which is also correct.
- */
-app.set('trust proxy', 1);
-
-/**
- * The headers a static site and a JSON API both want, and neither had.
- *
- * `nosniff` is the load-bearing one: without it a browser is free to decide for
- * itself that a response is HTML whatever the Content-Type said, and every
- * payload here is attacker-influenced in the trivial sense that a place name
- * comes out of a data file. The frame and referrer lines are cheap and there is
- * no case where this map wants to be in somebody else's iframe or to name the
- * page a visitor came from to a third party.
- */
-app.use((_req, res, next) => {
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('X-Frame-Options', 'DENY');
-  res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  next();
+const app = createApp({
+  graph,
+  wire: WIRE,
+  overlayNames: OVERLAY_NAMES,
+  distDir: existsSync(distDir) ? distDir : null,
 });
 
-// A route request is two coordinates. The default 100 KB is three orders of
-// magnitude more room than that, and the parse is the one piece of work here
-// that happens before any of our own code can decline it.
-app.use(express.json({ limit: '4kb' }));
-
-function parseCoord(value) {
-  const pair = Array.isArray(value) ? value : String(value ?? '').split(',');
-  if (pair.length !== 2) return null;
-  const lon = Number(pair[0]);
-  const lat = Number(pair[1]);
-  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
-  if (Math.abs(lon) > 180 || Math.abs(lat) > 90) return null;
-  return [lon, lat];
-}
-
-const takeRoute = createRateLimit();
-
-function route(req, res) {
-  const quota = takeRoute(req.ip ?? 'unknown');
-  res.set('RateLimit-Limit', String(quota.limit));
-  res.set('RateLimit-Remaining', String(quota.remaining));
-  if (!quota.allowed) {
-    res.set('Retry-After', String(quota.retryAfterSeconds));
-    return res.status(429).json({ error: 'too many route requests — try again shortly' });
+/*
+ * Express 5 hands a bind failure (EADDRINUSE, EACCES) to this callback rather
+ * than throwing it. Ignoring the argument meant a port that was already taken
+ * logged "listening" and then exited 0 once the event loop drained, so a
+ * supervisor saw a clean stop and the log claimed success. Say what went
+ * wrong and exit non-zero instead.
+ *
+ * The port in the log is the one actually bound, which differs from PORT when
+ * PORT is 0.
+ */
+const server = app.listen(PORT, '0.0.0.0', (err) => {
+  if (err) {
+    console.error(`[beavermaps] could not listen on port ${PORT}: ${err.message}`);
+    process.exit(1);
   }
-
-  const source = req.method === 'POST' ? req.body : req.query;
-  const from = parseCoord(source?.from);
-  const to = parseCoord(source?.to);
-
-  if (!from || !to) {
-    return res.status(400).json({
-      error: 'from and to are required as [lon, lat] (note: longitude first)',
-    });
-  }
-
-  const result = graph.route(from, to);
-
-  // 422 rather than 404, and the two are not interchangeable. A 404 means the
-  // graph was asked a sensible question and has no answer — both ends are on it
-  // and nothing joins them. A 422 means the question itself was not answerable:
-  // the coordinate is nowhere near anything this server knows how to walk on.
-  // The client tells them apart to decide what to say, so the wire has to.
-  if (!result.ok) {
-    // 404 is "the graph does not join these two", which is a fact about the
-    // network. 422 is "the request itself does not describe a walk", which is
-    // a fact about what was asked — too far to snap, or both ends in the same
-    // place. Only the second kind is worth putting in front of a person.
-    const status = UNPROCESSABLE.has(result.reason) ? 422 : 404;
-    return res.status(status).json({ error: result.error, reason: result.reason });
-  }
-
-  return res.json({
-    geometry: result.geometry,
-    distanceFeet: result.distanceFeet,
-    maneuvers: result.maneuvers,
-    snapped: result.snapped,
-  });
-}
-
-/** Reasons that mean "well-formed, but not a walk" rather than "no such path". */
-const UNPROCESSABLE = new Set(['unreachable', 'same-place']);
-
-app.get('/api/route', route);
-app.post('/api/route', route);
-
-// The client draws the path network but no longer bundles it — one copy, and
-// editing paths.json no longer means rebuilding the front-end.
-//
-// my campus's paths only. The approach network is deliberately not here: it is routed
-// over and never drawn. See the `approach` import above.
-app.get('/api/network', (req, res) => sendWire(req, res, WIRE.network));
-
-/**
- * Every vertex in the routing graph, campus and approach alike, as bare pairs.
- *
- * The client snaps a click to the nearest one so the marker lands on the graph
- * the instant you tap, rather than waiting a round trip to find out where the
- * route will really begin.
- *
- * Pairs rather than a FeatureCollection because this is the one payload where
- * the framing costs more than the data: `{"type":"Feature","properties":{},…}`
- * around each of these is roughly six times the two numbers inside it.
- */
-app.get('/api/vertices', (req, res) => sendWire(req, res, WIRE.vertices));
-
-for (const name of OVERLAY_NAMES) {
-  app.get(`/api/${name}`, (req, res) => sendWire(req, res, WIRE[name]));
-}
-
-app.get('/healthz', (_req, res) => res.json({ ok: true, vertices: graph.vertices.length }));
-
-/**
- * An unknown /api path is a 404, and says so in the language the caller asked in.
- *
- * BEFORE the SPA fallback, which is the whole point. Without this, every
- * misspelled endpoint fell through to `index.html` and came back 200 with 59 KB
- * of markup — so `fetchOverlay('buidlings')` passed its `response.ok` check and
- * then died inside `response.json()` with a parse error naming a position in a
- * document the caller never asked for. A 404 is four lines and turns that into
- * the sentence it always was.
- */
-app.use('/api', (req, res) => {
-  res.status(404).json({ error: `no such endpoint: ${req.method} /api${req.path}` });
+  console.log(`[beavermaps] listening on http://0.0.0.0:${server.address().port}`);
 });
 
-// Serve the built front-end when it exists. In dev the Vite server handles
-// this and proxies /api back here instead.
-//
-// Two layers, in this order. The first answers compressible files to clients
-// that accept gzip and sets the cache policy — dist/ is 3,576 KB uncompressed
-// and 993 KB gzipped, which is the same argument as the API payloads and the
-// same size of saving. Everything it does not answer falls through to
-// express.static, which keeps ranges, HEAD and the rest where they belong.
-if (existsSync(distDir)) {
-  app.use(compressedStatic(distDir));
-  app.use(express.static(distDir));
-  // Fallback as middleware rather than app.get('*') — Express 5 no longer
-  // accepts a bare wildcard path.
-  //
-  // GET AND HEAD ONLY. A single-page app serves its shell in place of a path it
-  // does not recognise because the router in the browser will recognise it; that
-  // argument is about navigation and navigation is a GET. Answering `DELETE
-  // /anything` with 200 and the whole app said this server has a handler for
-  // every verb at every path, which is both untrue and the sort of untrue that
-  // makes a scanner's report longer than it needs to be.
-  app.use((req, res, next) => {
-    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-    return res.sendFile(path.join(distDir, 'index.html'));
-  });
-  app.use((_req, res) => res.status(405).json({ error: 'method not allowed' }));
-} else {
-  console.log('[beavermaps] no dist/ found — API only. Run `npm run build` to serve the app.');
-}
-
-/**
- * Errors, as JSON.
- *
- * Express's default handler writes an HTML error page, which is the wrong
- * content type for every route above and — outside NODE_ENV=production — has
- * the stack trace and the absolute paths of this filesystem in it. The
- * Dockerfile does set NODE_ENV, so the leak was a development one; the wrong
- * content type was everywhere. A malformed JSON body is the way to reach this
- * in practice, and `err.status` is already 400 by the time body-parser is done
- * with it.
- *
- * Four parameters, because that arity is how Express recognises an error
- * handler. `next` is unused and cannot be dropped.
- */
-app.use((err, _req, res, _next) => {
-  const status = Number.isInteger(err?.status) ? err.status : 500;
-  if (status >= 500) console.error(err);
-  res.status(status).json({
-    error: status >= 500 ? 'internal error' : (err.message ?? 'bad request'),
-  });
-});
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[beavermaps] listening on http://0.0.0.0:${PORT}`);
-});
+// SIGTERM is how Fly stops a machine, on every deploy and every scale-down;
+// let what is in flight finish first. See server/shutdown.js.
+closeOnSignal(server);

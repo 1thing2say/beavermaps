@@ -15,8 +15,10 @@
 // the page changes a token's URL restrictions, so a second telling would be a
 // second telling of something they already know.
 
-import { googleGround } from './google-tiles.js';
-import { mapboxRefusal, MAPBOX_HOST } from './basemap-problem.js';
+import { googleGround, isRefusal } from './google-tiles.js';
+import {
+  mapboxRefusal, MAPBOX_HOST, forVisitor, PLAIN_MAP_PROBLEM, PLAIN_GOOGLE_FALLBACK,
+} from './basemap-problem.js';
 import { styleKey } from './palette.js';
 import { CAMPUS_BOUNDS } from './campus-bounds.js';
 
@@ -31,6 +33,7 @@ import { CAMPUS_BOUNDS } from './campus-bounds.js';
  * @param {Function} deps.appliedStyleKey()     what is currently on the map
  * @param {Function} deps.setAppliedStyleKey
  * @param {Function} deps.setStyleBuilt
+ * @param {Function} deps.isStyleBuilt()   whether there is a style to restyle
  * @param {Function} deps.litPalette
  * @param {Function} deps.setStatus
  * @param {Function} deps.setNotice  for a refusal the app recovered from
@@ -49,6 +52,7 @@ export function createGround({
   appliedStyleKey,
   setAppliedStyleKey,
   setStyleBuilt,
+  isStyleBuilt,
   litPalette,
   setStatus,
   setNotice,
@@ -86,13 +90,19 @@ export function createGround({
     const problem = mapboxRefusal(status, window.location.origin);
     if (!problem) return;
     refusals.add(status);
-    setStatus(problem, true);
+    // The full sentence to the console every time, in a build too — it is the
+    // only place the deployer of a public site will find it. The screen gets
+    // it only in dev or under ?debug; a visitor gets a line they can read
+    // without being handed the token's configuration. See forVisitor.
+    console.error(`[beavermaps] ${problem}`);
+    setStatus(forVisitor(problem, PLAIN_MAP_PROBLEM), true);
   });
 
   // Mapbox Standard hides its layers behind a style package, so when something
   // looks wrong the only way to ask what the map actually built is from the
-  // console. Dev builds only — Vite strips this branch from production.
-  if (import.meta.env.DEV) {
+  // console. Dev builds only — Vite strips this branch from production. The
+  // optional chain is for node --test, which has no `import.meta.env` at all.
+  if (import.meta.env?.DEV) {
     window.map = map;
     // Mapbox reports bad layer specs through this event rather than by throwing,
     // and the message is the only thing that says *which* property it rejected.
@@ -168,9 +178,12 @@ export function createGround({
     } catch (error) {
       // A refused key is not a bug the user can see the shape of, and Google's
       // own message names the cause (API not enabled, referrer not allowed, key
-      // invalid), so the sentence goes to the strip — for the person who
-      // deployed this, who is the only one who can act on it and may well be
-      // reading it on a phone with no console to look in.
+      // invalid). That sentence always goes to the console, and to the strip
+      // in dev or under ?debug — for the person who deployed this, who is the
+      // only one who can act on it and may well be reading it on a phone with
+      // no console to look in. A visitor gets the plain line instead: Google's
+      // wording quotes the key's own settings back, and is no use to them.
+      // See forVisitor.
       //
       // A NOTICE RATHER THAN A REFUSAL, though, and the two lines below are why:
       // the toggle drops back to a provider that works, so by the time this is
@@ -181,16 +194,37 @@ export function createGround({
       // src/status-line.js: it holds the strip the way a problem does and
       // leaves the layout alone.
       console.error('Google basemap unavailable:', error);
-      setNotice(`Google basemap unavailable: ${error.message}`);
+      setNotice(forVisitor(`Google basemap unavailable: ${error.message}`, PLAIN_GOOGLE_FALLBACK));
       if (generation !== groundGeneration) return;
       setProvider('mapbox');
-      providerControl()?.revert();
+      // Remembered past this page only when Google refused, so one dropped
+      // connection does not opt the visitor out of Google's ground for good.
+      providerControl()?.revert({ persist: isRefusal(error) });
       syncBasemapStyle();
     } finally {
       // `revert()` above already repainted the buttons, and `busy(false)` calls
       // the same `paint()`, so the failure path is idempotent rather than
       // fighting itself.
       if (generation === groundGeneration) providerControl()?.busy(false);
+    }
+  }
+
+  /**
+   * Whether a rebuild is running right now.
+   *
+   * A rebuild ends in applyLighting, and applyLighting repaints the campus for
+   * a new light preset by calling back into `sync` — so without this the first
+   * style.load built every layer twice, and so did every preset change that
+   * landed inside a sync. The rebuild already running reads the same palette
+   * the nested one would, so the nested one has nothing to add.
+   */
+  let rebuilding = false;
+  function rebuildOnce() {
+    rebuilding = true;
+    try {
+      rebuild();
+    } finally {
+      rebuilding = false;
     }
   }
 
@@ -207,7 +241,7 @@ export function createGround({
     // them wholesale — and satellite's are not the map style's.
     captureStyleLights(structuredClone(map.getLights() ?? null));
     setStyleBuilt(true);
-    rebuild();
+    rebuildOnce();
     addGoogleGround();
   });
 
@@ -216,8 +250,13 @@ export function createGround({
    * different one. All three toggles route through here: on satellite the theme
    * no longer changes the Mapbox map, so this becomes a no-op and only the page
    * chrome restyles.
+   *
+   * Answers whether the map now shows the current look — false only when there
+   * was no style yet to restyle, so a caller keeping track of what it last
+   * painted (applyLighting's `paintedFor`) knows to ask again.
    */
   function syncBasemapStyle() {
+    if (rebuilding) return true;
     const nextKey = styleKey(provider(), basemap(), theme(), skin());
 
     if (nextKey !== appliedStyleKey()) {
@@ -231,13 +270,21 @@ export function createGround({
       // drop custom layers without firing style.load, leaving a bare basemap.
       // style.load re-adds our layers and re-requests the ground.
       map.setStyle(litPalette().style, { diff: false });
-      return;
+      return true;
     }
 
     // Both toggles call this once on startup to publish their initial state,
     // and that can land before the first style has loaded. There is nothing to
     // restyle yet and every builder below would throw; style.load runs them.
-    if (!map.isStyleLoaded()) return;
+    //
+    // NOT map.isStyleLoaded(), for the reason given at addGoogleGround: that
+    // reports the style IDLE, and it is false whenever a tile, an image or a
+    // pending setData is in flight — any pan, any zoom, every GPS fix during a
+    // walk. Under Mapbox light and dark share one style key, so this is the only
+    // path a theme change or a daylight repaint has, and gating it on idleness
+    // dropped them silently: the chrome turned dark over a map still painted
+    // light, or Standard's city went to night beside a campus painted for day.
+    if (!isStyleBuilt()) return false;
 
     // Same style, different look: light and dark are one Standard style under
     // two light presets. Re-running the builders applies the new palette to
@@ -249,8 +296,9 @@ export function createGround({
     // the hover had written, and a `hoveredPin` still naming the pin underneath
     // would make the next mousemove over it a no-op.
     clearHover();
-    rebuild();
+    rebuildOnce();
     if (map.getLayer('campus-buildings')) standBuildings();
+    return true;
   }
   return { addGoogle: addGoogleGround, sync: syncBasemapStyle };
 }

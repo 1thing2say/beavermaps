@@ -3,7 +3,7 @@
 // Its own module because it is four pure functions with an HTTP contract that
 // has more corners than it looks like it has — `gzip;q=0` means no, Vary is
 // load-bearing for any cache in between, and an ETag has to name the resource
-// rather than the encoding it happened to be sent in. server/index.js reads as
+// rather than the encoding it happened to be sent in. server/app.js reads as
 // a router with these out of it, and test/wire.test.js can hold them to the
 // contract without standing a server up to do it.
 

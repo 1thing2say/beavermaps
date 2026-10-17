@@ -7,7 +7,6 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 // thing it is there to remove.
 import campusBoundary from './campus-boundary.json';
 import { point, featureCollection } from '@turf/helpers';
-import { nearestPoint } from '@turf/nearest-point';
 import { distance } from '@turf/distance';
 import { FEET_PER_KM } from './maneuvers.js';
 import { routeSummary } from './directions.js';
@@ -25,27 +24,31 @@ import {
 import {
   withPoiIcons, withParkingMarks, withAmenityNames, 
 } from './poi.js';
-import { ringOf, centreOf, trimToCampus } from './campus-clip.js';
+import { ringOf, centreOf, trimToCampus, trimPointsAlong } from './campus-clip.js';
+import campusLamps from './lamps.json';
 import { createGeolocation } from './geolocation.js';
 import { createDebugMenu } from './debug.js';
 import { createLitPalette } from './lit-palette.js';
 import { createLightingControl } from './lighting.js';
 import { FONTS, SATELLITE, styleKey } from './palette.js';
 
-import { tokenRefusal, showSetupProblem } from './setup-problem.js';
+import {
+  tokenRefusal, showSetupProblem, webglMissing, WEBGL_PROBLEM,
+} from './setup-problem.js';
 import { CAMPUS_BOUNDS, ROUTABLE_BOUNDS } from './campus-bounds.js';
 import { createRoute } from './route-state.js';
 import { createNavigation, SIM_TICK_MS } from './navigation.js';
 import { createLongPress } from './long-press.js';
 import { FIT_MARGIN, paddingAround } from './viewport.js';
 import { createStatusLine } from './status-line.js';
-import { createApi } from './api.js';
+import { createApi, ROUTING_OUTAGE } from './api.js';
+import { createDrawGate } from './draw-gate.js';
 import { createChoreography } from './pin-choreography.js';
 import { createPinState, POI_LABEL_LAYERS } from './pin-state.js';
 import { createBuildingsLighting, BUILDING_EMISSIVE } from './buildings-lighting.js';
 import { createCampusSheet, CLOSED_TEXT } from './campus-sheet.js';
 import { createMarkerLayers } from './marker-layers.js';
-import { createLabelLayers, NOTHING_SELECTED } from './label-layers.js';
+import { createLabelLayers } from './label-layers.js';
 import { createRouteLayers } from './route-layers.js';
 import { createCamera } from './camera.js';
 import { createCards } from './cards.js';
@@ -55,6 +58,7 @@ import { createEndpoints, GOOGLE_RED } from './endpoints.js';
 import { createSearchBox } from './search-box.js';
 import { createLocate } from './locate.js';
 import { createShell } from './shell.js';
+import { createHardwareBack } from './hardware-back.js';
 import { createDebugFlags } from './debug-apply.js';
 import { createPanels } from './panels.js';
 import { spin } from './spinner.js';
@@ -84,15 +88,75 @@ const CAMPUS_RING = ringOf(campusBoundary);
 // stops meaning "the middle of the campus" the next time the ring is redrawn.
 const CAMPUS_CENTRE = centreOf(CAMPUS_RING);
 
-const setupProblem = tokenRefusal(accessToken);
+/**
+ * A tab left open across a deploy, asking for a chunk that is no longer there.
+ *
+ * Every build renames its chunks by content hash and the old ones are gone
+ * with the old machine, so a tab opened before a redeploy that then opens its
+ * first building card asks for a flyover chunk that does not exist — and the
+ * card said "Failed to fetch dynamically imported module" for as long as it
+ * was open, on every card after it, until somebody thought to reload. Vite
+ * announces exactly that failure as `vite:preloadError`, and a reload is the
+ * whole fix: the fresh page names the chunks the server has.
+ *
+ * ONCE, and only when there is a network to reload from. Offline, the same
+ * event means the connection dropped rather than that the build moved on, and
+ * a reload would swap a working map for the browser's offline page. And a
+ * chunk still missing after a reload is a broken deploy, not a stale tab, so a
+ * second failure inside ten seconds is left to surface rather than looping the
+ * page. sessionStorage holds the mark across the reload; it throws in some
+ * private modes, where the guard simply never fires twice, which is the safe
+ * way round.
+ */
+window.addEventListener('vite:preloadError', (event) => {
+  if (!navigator.onLine) return;
+  let last = 0;
+  try { last = Number(sessionStorage.getItem('chunkReloadAt')) || 0; } catch { /* storage off */ }
+  if (Date.now() - last < 10_000) return;
+  try { sessionStorage.setItem('chunkReloadAt', String(Date.now())); } catch { /* storage off */ }
+  event.preventDefault();
+  window.location.reload();
+});
+
+/**
+ * Put a refusal where the map would have been, in the look the visitor chose.
+ *
+ * The theme and skin attributes are normally published inside startApp(), and
+ * a refusal is by definition a startApp() that did not run — or did not get
+ * far. Published here as well, so the card is drawn from the right tokens
+ * rather than the plain defaults. See showSetupProblem.
+ */
+function refuseToStart(sentence) {
+  applyThemeAttribute(preferredTheme());
+  applySkinAttribute(preferredSkin());
+  showSetupProblem(sentence);
+}
+
+// Two things the app cannot start without, asked before building anything: a
+// token, and a browser that will give the map a WebGL 2 context. Either one
+// missing used to be a blank page — the token's because the whole app was the
+// `else` branch behind a console.warn, WebGL's because Mapbox's constructor
+// threw out of startApp() before a single control existed.
+const setupProblem = tokenRefusal(accessToken) ?? (webglMissing() ? WEBGL_PROBLEM : null);
 if (setupProblem) {
-  // On the screen, not in the console. See src/setup-problem.js — this is the
-  // one failure with no degraded mode to fall back to, so the sentence has to
-  // go where the map would have been.
+  // On the screen, not in the console. See src/setup-problem.js — these are the
+  // failures with no degraded mode to fall back to, so the sentence has to go
+  // where the map would have been.
   console.warn(`[beavermaps] ${setupProblem}`);
-  showSetupProblem(setupProblem);
+  refuseToStart(setupProblem);
 } else {
-  startApp();
+  try {
+    startApp();
+  } catch (error) {
+    // The probe above can pass and the map still be refused — a context lost
+    // between the two, a GPU process that crashed. Mapbox's message names
+    // WebGL when that is the cause, and only that case is turned into the
+    // card: any other exception is a bug, rethrown so it still reads as one,
+    // rather than a working map replaced by a sentence about graphics.
+    if (!/webgl/i.test(error?.message ?? '')) throw error;
+    console.error(error);
+    refuseToStart(WEBGL_PROBLEM);
+  }
 }
 
 /**
@@ -188,6 +252,11 @@ function startApp() {
   // these start empty.
   let customNetwork = null;
   let networkPoints = null;
+  // The lamps that are drawn, trimmed by the same rule as the network they
+  // light — see trimPointsAlong. Until the network arrives that is just the
+  // ones on the campus: the few beyond the fence stand on paths that may or
+  // may not survive the trim, and nothing is drawn under them yet either way.
+  let shownLamps = trimToCampus(campusLamps, CAMPUS_RING);
   let campusBuildings = null;
   // Ground cover, amenity symbols and the destination directory, all traced out
   // of my campus's own basemap. Every one is decoration: the map works without them.
@@ -535,8 +604,6 @@ function startApp() {
     map,
     litPalette,
     sheet: () => campusBasemap,
-    belowNetwork: () => belowNetwork(),
-    belowRoute: () => belowRoute(),
   });
   const addBasemapLayers = () => sheetLayers.add();
   const addClosedLayers = () => sheetLayers.addClosed();
@@ -565,7 +632,12 @@ function startApp() {
   });
   const inkFor = (property) => markers.inkFor(property);
   const addAmenityLayer = () => markers.addAmenity();
-  const addLampLayers = () => markers.addLamps();
+  // marker-layers.js seeds the source from the raw file; it is overwritten here
+  // with the trimmed set on every add, because a style load rebuilds it raw.
+  const addLampLayers = () => {
+    markers.addLamps();
+    map.getSource('campus-lamps')?.setData(shownLamps);
+  };
   const paintLamps = () => markers.paintLamps();
   const addCategoryLayer = () => markers.addCategory();
   const paintCategory = () => markers.paintCategory();
@@ -630,7 +702,7 @@ function startApp() {
       ? SATELLITE.label : pinInk(kind, currentTheme)),
     onDeselect: () => closeBuildingCard(),
     onLift: (hit) => showPlaceCard(pinCard(hit, {
-      onStart: (coords, name) => { clearSelection(); placeStart(coords, name); },
+      onStart: (coords, name) => { clearSelection(); startHere(coords, name); },
       onEnd: (coords, name) => { clearSelection(); setDestination(coords, name); },
       onClose: clearSelection,
     // The pin, kept in view. A tap in the bottom third of a phone screen is
@@ -682,15 +754,10 @@ function startApp() {
   const labelPaint = (kind, colors) => labels.labelPaint(kind, colors);
 
   function highlightBuilding(officialName) {
-    // The name used to be kept in a `selectedBuilding` variable alongside a
-    // second one holding the open card, back when the card was a Mapbox popup
-    // that had to be kept and removed. The card is the contents of #place-panel
-    // now, so the panel's own hidden state is the whole of it — and the name
-    // was written here and read nowhere, which is what a linter is for.
-    const filter = officialName ? ['==', ['get', 'officialName'], officialName] : NOTHING_SELECTED;
-    for (const id of ['campus-directory-fill', 'campus-directory-line']) {
-      if (map.getLayer(id)) map.setFilter(id, filter);
-    }
+    // The name is kept by src/label-layers.js now rather than nowhere: a style
+    // swap rebuilds the outline layers, and they have to come back filtered to
+    // the building whose card is still open.
+    labels.select(officialName);
   }
 
   /**
@@ -724,9 +791,10 @@ function startApp() {
     panels: { placePanel, categoryPanel, sidePanel, legendPanel },
     isPhone: () => phone.matches,
     onSettle: () => revealPoint(camera.focus()),
-    // What going BACK from each panel does — Escape, today — and it is the
-    // same thing the panel's own × does in every case, so the two ways out of
-    // a panel cannot leave the map in two different states. They were not
+    // What going BACK from each panel does — Escape, and the phone's own Back
+    // (see createHardwareBack below) — and it is the same thing the panel's
+    // own × does in every case, so the ways out of a panel cannot leave the
+    // map in different states. They were not
     // quite: this closed a place card without putting its pin down, and hid the
     // route panel with the ribbon still across the campus.
     dismiss: {
@@ -738,6 +806,11 @@ function startApp() {
   });
   const sheet = shell.sheet;
   const refitSheet = () => shell.refit();
+
+  // The phone's own Back is the third way back, after the × and Escape, and
+  // walks the same stack: close what is in front, rather than leave the app
+  // with it open. One history entry while anything is open; src/hardware-back.js.
+  createHardwareBack({ stack: shell.stack });
 
   window.addEventListener('resize', refitSheet);
   shell.viewport?.addEventListener('resize', refitSheet);
@@ -788,6 +861,9 @@ function startApp() {
     provider: () => currentProvider,
     boundary: campusBoundary,
     network: () => customNetwork,
+    // For the roofs: over imagery, the stretches of network under one are
+    // left out of the drawing. See markRoofed.
+    sheet: () => campusBasemap,
     route,
     from: () => endpoints.start()?.geometry.coordinates,
     to: () => endpoints.end()?.geometry.coordinates,
@@ -795,8 +871,6 @@ function startApp() {
   const paintLegs = () => routeLayers.paintLegs();
   const addCampusMask = () => routeLayers.addMask();
   const setConfig = (key, value) => routeLayers.setConfig(key, value);
-  const belowNetwork = () => routeLayers.belowNetwork();
-  const belowRoute = () => routeLayers.belowRoute();
 
   function addNetworkLayers() {
     const colors = litPalette();
@@ -827,19 +901,23 @@ function startApp() {
 
     addCampusMask();
     addBasemapLayers();
-    // Above the sheet it annotates, below the network added further down.
+    // Above the sheet's buildings it annotates. Every layer in this stretch
+    // takes its place from src/layer-order.js rather than from where it is
+    // called, so the order of these calls is no longer what orders the map —
+    // which is what lets the sheet land from the server at any point in it.
     addHighlightLayers();
 
     routeLayers.addNetworkAndRoute();
 
-    // After the route layers rather than after the sheet it belongs to, and
-    // only because of where its OUTLINE goes: belowRoute has to have a route
-    // layer to name, and none of them exist until a few lines above this. The
-    // wash still lands with the ground — the two halves carry their own
-    // anchors, so building them late costs nothing.
+    // After the route layers rather than after the sheet it belongs to. It
+    // used to have to be, because its outline anchored to a route layer by
+    // name; it takes its place from the stack now, so this position is merely
+    // harmless — the two halves land where src/layer-order.js puts them.
     addClosedLayers();
 
     // Last, so the symbols and labels sit above the route rather than under it.
+    // Not the lamps, which only happen to be called here: they are ground, and
+    // the stack puts them under the network wherever this list puts the call.
     addDirectoryLayers();
     addLampLayers();
     addAmenityLayer();
@@ -848,13 +926,16 @@ function startApp() {
 
     if (navigating()) addBuildingsLayer();
 
-    // LAST, and it has to be. `lightPreset` used to be set at the top of this
-    // function beside the other config keys, and moving it in here gave one
-    // function ownership of the property — but applyLighting can also stand the
-    // extrusions up, and addBuildingsLayer inserts below `route-casing`, which
-    // does not exist until addNetworkLayers has finished building. Called any
-    // earlier, a bench with the buildings switched on throws mid-rebuild and
-    // takes the campus mask and the labels down with it, on every style load.
+    // LAST. `lightPreset` used to be set at the top of this function beside the
+    // other config keys, and moving it in here gave one function ownership of
+    // the property — but applyLighting can also stand the extrusions up, and
+    // addBuildingsLayer used to insert below `route-casing` by name, which does
+    // not exist until addNetworkLayers has finished building. Called any
+    // earlier, a bench with the buildings switched on threw mid-rebuild and
+    // took the campus mask and the labels down with it, on every style load.
+    // The extrusions now take their place from CAMPUS_STACK (src/layer-order.js),
+    // which cannot throw that way, but this stays last so that everything they
+    // are placed among is already standing when they arrive.
     applyLighting();
   }
 
@@ -884,6 +965,9 @@ function startApp() {
     camera,
     api,
     geolocateControl: () => geolocateControl,
+    // The fix the fence turned away, which the control will not pass on. See
+    // `last` in src/geolocation.js.
+    lastPosition: () => geolocation.lastPosition(),
     networkPoints: () => networkPoints,
     routingEnabled: () => routingEnabled,
     status: { setStatus, setBusy, setRouteSummary, setNavButtonsEnabled, setIdleStatus },
@@ -904,7 +988,7 @@ function startApp() {
   const resetMap = () => endpoints.reset();
   const locateStart = () => endpoints.locateStart();
   const placeStart = (coords, label) => endpoints.placeStart(coords, label);
-  const placeEnd = (coords, label) => endpoints.placeEnd(coords, label);
+  const startHere = (coords, label) => endpoints.startHere(coords, label);
   const setDestination = (coords, name) => endpoints.setDestination(coords, name);
   const coordLabel = (c) => endpoints.coordLabel(c);
 
@@ -919,6 +1003,7 @@ function startApp() {
     appliedStyleKey: () => appliedStyleKey,
     setAppliedStyleKey: (key) => { appliedStyleKey = key; },
     setStyleBuilt: (on) => { styleBuilt = on; },
+    isStyleBuilt: () => styleBuilt,
     litPalette,
     setStatus: (sentence, isError) => setStatus(sentence, isError),
     setNotice: (sentence) => setNotice(sentence),
@@ -1223,7 +1308,10 @@ function startApp() {
     // on every device. Lost when main.js was split into modules.
     openBuilding: (props) => cards.openBuilding(props),
     openPlace: (place) => openPlace(place),
-    addCategoryLayer: () => markers.addCategory(),
+    // Gated like every other overlay layer: the legend enables itself when the
+    // amenities land, which can be before there is a style to add a layer to.
+    // style.load's rebuild adds it then. See `draw`.
+    addCategoryLayer: () => { if (styleBuilt) markers.addCategory(); },
     buildingSub: (props) => buildingSub(props),
   });
   const shownCategory = () => legend.shownCategory();
@@ -1241,7 +1329,7 @@ function startApp() {
   // looks broken rather than early.
   legend.renderKinds();
 
-  map.on('load', async () => {
+  map.on('load', () => {
     // From here on the sky is followed rather than sampled once. See
     // watchDaylight.
     watchDaylight();
@@ -1280,8 +1368,19 @@ function startApp() {
     // inside one can be raised past the sheet on its own. Raising the whole
     // bottom-RIGHT corner would float the zoom and locate buttons over the card
     // as well. Bottom-left holds nothing but credits, so it can go over the
-    // sheet whole, and the two licence terms end up in one line instead of one
-    // in each corner with a card between them.
+    // sheet whole, and the two licence terms end up in one row instead of one
+    // in each corner with a card between them. One row, not always one line:
+    // on a 390px phone Mapbox's notice fits beside the wordmark whole, and
+    // Google's — longer, with Google's mark and OpenStreetMap's credit in it —
+    // wraps to two lines inside its own pill rather than dropping under the
+    // wordmark. The widths are measured beside the phone rule in the stylesheet.
+    //
+    // ONE ROW, TWO OBJECTS. Mapbox's wordmark stays in that corner under both
+    // providers — their terms want it on any map their SDK draws, whoever's
+    // data is on it — and under Google this notice leads with Google's mark.
+    // Google's policy wants the two marks clearly apart, so the stylesheet
+    // gives the notice a glass pill of its own with map between it and the
+    // wordmark, rather than one strip holding both. See .mapboxgl-ctrl-attrib.
     //
     // Spelled out rather than folded behind an "i". That button was never a
     // good citizen of this corner: Mapbox gives it a 24px container, and the
@@ -1332,8 +1431,17 @@ function startApp() {
       // has to finish inside one tick. At a second apiece every fix would
       // interrupt the last and the dot would slide along a route the camera
       // never catches up with.
-      nav.moved([e.coords.longitude, e.coords.latitude],
-        { duration: nav.isSimulating() ? SIM_TICK_MS : 1000 });
+      //
+      // The fix's own accuracy goes with it: navigation will not let a fix
+      // vaguer than the gap between two walkways move you along the route.
+      // See MAX_ACCURACY_M in src/navigation.js. So does its time, which is
+      // how navigation knows how far you could have walked since the last
+      // one — see SNAP_PACE_MPS.
+      nav.moved([e.coords.longitude, e.coords.latitude], {
+        duration: nav.isSimulating() ? SIM_TICK_MS : 1000,
+        accuracy: e.coords.accuracy,
+        timestamp: e.timestamp,
+      });
     });
 
     // What `locating` is kept in step with — see startLocating for why guessing
@@ -1344,169 +1452,230 @@ function startApp() {
     // A page reloaded with the debug fixture already set asked for the blue dot
     // before this control existed. It exists now.
     if (geolocation.fixture) startLocating();
-
-    // All from the same server, so ask together — and DRAW EACH ONE AS IT
-    // LANDS, rather than waiting for the slowest.
-    //
-    // This used to be one `await Promise.allSettled([...])` with the handling
-    // below it, which meant nothing appeared until every request had finished.
-    // Measured at 8 Mbps: seven of the eight were done at 13.8 s and the
-    // basemap sheet at 15.3 s, so buildings — 37 KB, arrived at 13.5 s — sat in
-    // hand for nearly two seconds waiting on a 1.6 MB file it has no
-    // relationship to. The campus then appeared all at once, which is why a
-    // fully drawn Google basemap with a campus-shaped hole in it was the normal
-    // sight on a phone. Their tiles paint one at a time; ours had one gate.
-    //
-    // Each branch is independent and each one degrades alone: lose a file and
-    // the layer it draws is missing, not the load. Only two orderings exist and
-    // both are stated where they are needed — labels wait on the sheet, and the
-    // routing tail waits on both of its own requests.
-    //
-    // Said out loud while it happens, because until the network settles the map
-    // is a picture — and the hint under the distance is describing a gesture
-    // that will not do anything yet. The failure mode without this is somebody
-    // pressing and holding on a map that has not finished arriving and
-    // concluding the app is broken.
-    setBusy(true);
-    setProgress('Loading the campus…');
-
-    /** A source that failed is one missing layer, so it is logged and stepped over. */
-    const orElse = (whenMissing) => (reason) => { console.error(reason); whenMissing?.(); };
-
-    const buildingsReady = fetchOverlay('buildings').then((data) => {
-      campusBuildings = data;
-      if (navigating()) addBuildingsLayer();
-      buildLegendIndex();
-    }, orElse());
-
-    const basemapReady = fetchOverlay('basemap').then((data) => {
-      // Trimmed to the campus on the way in. my campus's sheet carries the streets
-      // around it, both north arrows and the trees along the verge, and every
-      // one of those lands on a ground that is already drawing them — see
-      // src/campus-clip.js.
-      campusBasemap = trimToCampus(data, CAMPUS_RING);
-      addBasemapLayers();
-      // The sheet arriving is what this was waiting for — the closed block is
-      // one of its shapes, so on a cold load style.load has already been and
-      // gone with nothing for addClosedLayers to draw.
-      addClosedLayers();
-      buildLegendIndex();
-    }, orElse());
-
-    const amenitiesReady = fetchOverlay('amenities').then((data) => {
-      // Named on the way in, the same way the labels are classified: only the
-      // four amenities whose label identifies them keep one to print. See
-      // withAmenityNames — the other eighty said the icon's own meaning, in
-      // type, four times over on a single building.
-      campusAmenities = withAmenityNames(data);
-      addLampLayers();
-      addAmenityLayer();
-      enableCategories();
-      buildLegendIndex();
-    }, orElse());
-
-    const placesReady = fetchOverlay('places').then((data) => {
-      // The directory keeps the rows my campus lists without a room so a search index
-      // can still be built from the file, but a null geometry is not something
-      // a vector source can tile — drop them on the way in.
-      campusPlaces = {
-        type: 'FeatureCollection',
-        features: data.features.filter((feature) => feature.geometry),
-      };
-      buildSearchIndex();
-      enableCategories();
-      buildLegendIndex();
-    }, orElse());
-
-    const directoryReady = fetchOverlay('directory').then((data) => {
-      campusDirectory = data;
-      // The cold-start half of the suggestion order is read off this file, so
-      // the ranking is only complete once it is here.
-      refreshPopularity();
-      addDirectoryLayers();
-      // Built once, on arrival, rather than when the debug menu opens: it is
-      // thirty rows off a file that is already in hand, and doing it now means
-      // the menu is never briefly empty on the frame it is opened.
-      //
-      // No re-frame after it. The list used to be in the left column, where
-      // thirty rows landing was a chunk of canvas that had not been reserved
-      // when the campus was first fitted; a card that floats over the map on
-      // request costs the framing nothing.
-      renderBuildings();
-      buildLegendIndex();
-    }, orElse(() => {
-      // Nothing to list, so the section goes rather than sitting empty under a
-      // heading. Its own hidden state, not the debug menu's — the rest of the
-      // card is unaffected by a directory that failed to load.
-      buildingsPanel.classList.add('hidden');
-    }));
-
-    // THE ONE ORDERING AMONG THE OVERLAYS. Requested now, with the rest, so it
-    // is on the wire in parallel; applied only once the sheet has been dealt
-    // with, because withParkingMarks reads it. `basemapReady` has already
-    // swallowed its own failure, so this runs either way — and if the sheet
-    // never came, withParkingMarks adds nothing and the five named lots still
-    // get their P.
-    const labelsArrived = fetchOverlay('labels');
-    const labelsReady = basemapReady.then(() => labelsArrived).then((data) => {
-      // Classified on the way in rather than in the build script: which disc a
-      // building name earns is presentation, and labels.json stays exactly what
-      // my campus's cartographer set. See src/poi.js.
-      // ...and the lots my campus never named get a marker before that runs, so the
-      // generated ones and the printed ones are classified by the same pass and
-      // cannot end up wearing different discs.
-      campusLabels = withPoiIcons(withParkingMarks(data, campusBasemap));
-      addLabelLayers();
-    }, orElse());
-
-    // The routing tail, which is the only branch that needs two of its own
-    // requests and the only one whose failure is worth telling somebody about:
-    // an overlay that does not arrive costs a layer, and this costs the app.
-    const routingReady = Promise.allSettled([fetchNetwork(), fetchVertices()])
-      .then(([networkResult, vertexResult]) => {
-        if (networkResult.status === 'rejected') {
-          console.error(networkResult.reason);
-          setStatus('Routing server unreachable — is `npm run dev` still running?', true);
-          return;
-        }
-        const routable = networkResult.value;
-
-        // Snapping targets come from /api/vertices, which is the whole routing
-        // graph. Falling back to the drawn network keeps clicks working on
-        // campus if that one request fails — degraded, not broken: a start point
-        // outside the fence would be dragged in to the nearest campus path.
-        const vertices = vertexResult.status === 'fulfilled'
-          ? vertexResult.value.vertices
-          : [...new Map(routable.features
-            .flatMap((f) => f.geometry.coordinates)
-            .map((c) => [`${c[0]},${c[1]}`, c])).values()];
-        if (vertexResult.status === 'rejected') console.error(vertexResult.reason);
-        networkPoints = featureCollection(vertices.map(v => point(v)));
-
-        // The moment a press-and-hold starts meaning something, and therefore
-        // the moment it is honest to advertise one. Until here the strip has
-        // been showing "Loading the campus…" over a map that could not be
-        // routed on.
-        setIdleStatus();
-
-        // Drawn only as far as the fence. my campus's driveways are drawn running out
-        // to the public road, and past the boundary that white ribbon lands on
-        // top of a road the basemap is already drawing. Cut rather than dropped,
-        // so a driveway still reaches the gate instead of stopping at the
-        // junction inside it — the route still runs the whole way, over their
-        // linework.
-        customNetwork = trimToCampus(routable, CAMPUS_RING);
-
-        map.getSource('custom-network').setData(customNetwork);
-      });
-
-    // The spinner belongs to the whole errand, so it stops when the last of
-    // these does — not when the first layer appears.
-    await Promise.allSettled([
-      buildingsReady, basemapReady, amenitiesReady, placesReady,
-      directoryReady, labelsReady, routingReady,
-    ]).finally(() => setBusy(false));
   });
+
+  // All from the same server, so ask together — and DRAW EACH ONE AS IT
+  // LANDS, rather than waiting for the slowest.
+  //
+  // AND ASK NOW, NOT ON `load`. These used to be sent from inside the map's
+  // `load` handler, and `load` waits for the whole first basemap render — the
+  // style, its imports, the sprite, every tile in view and the landmark models.
+  // So the campus, the search index and the routing graph queued behind
+  // somebody else's tiles, and one stalled tile meant they were never asked
+  // for at all: no search, no legend, no routing, from a server that was fine.
+  // They go out with the basemap now, and each one is drawn when there is a
+  // style to draw it into — see `draw` below.
+  //
+  // This used to be one `await Promise.allSettled([...])` with the handling
+  // below it, which meant nothing appeared until every request had finished.
+  // Measured at 8 Mbps: seven of the eight were done at 13.8 s and the
+  // basemap sheet at 15.3 s, so buildings — 37 KB, arrived at 13.5 s — sat in
+  // hand for nearly two seconds waiting on a 1.6 MB file it has no
+  // relationship to. The campus then appeared all at once, which is why a
+  // fully drawn Google basemap with a campus-shaped hole in it was the normal
+  // sight on a phone. Their tiles paint one at a time; ours had one gate.
+  //
+  // Each branch is independent and each one degrades alone: lose a file and
+  // the layer it draws is missing, not the load. Only two orderings exist and
+  // both are stated where they are needed — labels wait on the sheet, and the
+  // routing tail waits on both of its own requests.
+  //
+  // Said out loud while it happens, because until the network settles the map
+  // is a picture — and the hint under the distance is describing a gesture
+  // that will not do anything yet. The failure mode without this is somebody
+  // pressing and holding on a map that has not finished arriving and
+  // concluding the app is broken.
+  setBusy(true);
+  setProgress('Loading the campus…');
+
+  /**
+   * A source that failed is one missing layer, so it is logged and stepped
+   * over. "Failed" means after the api's retries — see withRetry — so a
+   * server that blinked during a deploy no longer costs a layer for the
+   * session; one that stayed away for six seconds still does.
+   */
+  const orElse = (whenMissing) => (reason) => { console.error(reason); whenMissing?.(); };
+
+  /**
+   * Draw into the map if there is a style to draw into; otherwise leave it to
+   * style.load, whose rebuild (addNetworkLayers) draws every layer from the
+   * data stored by then. See src/draw-gate.js.
+   *
+   * There often is not: data can land before the first style has, and during
+   * any setStyle. The throw that followed used to land in the middle of these
+   * handlers, inside a `.then` whose `orElse` cannot catch its own callback's
+   * error: the rest of the handler never ran, and basemapReady rejected —
+   * taking labelsReady with it, so the building names were never stored and
+   * no later style.load could draw them. So every handler stores its data and
+   * does its map-free work first, and draws LAST, through this.
+   */
+  const draw = createDrawGate(() => styleBuilt);
+
+  const buildingsReady = fetchOverlay('buildings').then((data) => {
+    campusBuildings = data;
+    buildLegendIndex();
+    if (navigating()) draw(addBuildingsLayer);
+  }, orElse());
+
+  const basemapReady = fetchOverlay('basemap').then((data) => {
+    // Trimmed to the campus on the way in. my campus's sheet carries the streets
+    // around it, both north arrows and the trees along the verge, and every
+    // one of those lands on a ground that is already drawing them — see
+    // src/campus-clip.js. Its perimeter walkways are trimmed by the same rule
+    // as the network drawn over them, so the band and the ribbon break, or
+    // do not, in the same places.
+    campusBasemap = trimToCampus(data, CAMPUS_RING);
+    buildLegendIndex();
+    // The footprints the network is cut against for imagery have landed;
+    // a network that came first is re-cut now. A no-op before it.
+    routeLayers.paintNetwork();
+    // The sheet arriving is what this was waiting for — the closed block is
+    // one of its shapes, so on a cold load style.load has already been and
+    // gone with nothing for addClosedLayers to draw.
+    draw(addBasemapLayers, addClosedLayers);
+  }, orElse());
+
+  const amenitiesReady = fetchOverlay('amenities').then((data) => {
+    // Named on the way in, the same way the labels are classified: only the
+    // four amenities whose label identifies them keep one to print. See
+    // withAmenityNames — the other eighty said the icon's own meaning, in
+    // type, four times over on a single building.
+    campusAmenities = withAmenityNames(data);
+    // Its category layer is drawn through `draw` too — see addCategoryLayer
+    // where the legend is built — so the legend is enabled either way.
+    enableCategories();
+    buildLegendIndex();
+    draw(addLampLayers, addAmenityLayer);
+  }, orElse());
+
+  /**
+   * The places file, which is the whole of search.
+   *
+   * A FUNCTION, because it may be asked for twice. The field is disabled in
+   * the markup until an index exists, and this was the only thing that ever
+   * enabled it — so one failed request, retries and all, left the search
+   * field greyed out for the rest of the session with nothing on screen
+   * saying why or what to do. A failure now opens the field as its own
+   * retry button instead. See offerSearchRetry.
+   */
+  const loadPlaces = () => fetchOverlay('places').then((data) => {
+    // The directory keeps the rows my campus lists without a room so a search index
+    // can still be built from the file, but a null geometry is not something
+    // a vector source can tile — drop them on the way in.
+    campusPlaces = {
+      type: 'FeatureCollection',
+      features: data.features.filter((feature) => feature.geometry),
+    };
+    searchAvailable();
+    buildSearchIndex();
+    enableCategories();
+    buildLegendIndex();
+  }, orElse(() => offerSearchRetry(loadPlaces)));
+  const placesReady = loadPlaces();
+
+  const directoryReady = fetchOverlay('directory').then((data) => {
+    campusDirectory = data;
+    // The cold-start half of the suggestion order is read off this file, so
+    // the ranking is only complete once it is here.
+    refreshPopularity();
+    // Built once, on arrival, rather than when the debug menu opens: it is
+    // thirty rows off a file that is already in hand, and doing it now means
+    // the menu is never briefly empty on the frame it is opened.
+    //
+    // No re-frame after it. The list used to be in the left column, where
+    // thirty rows landing was a chunk of canvas that had not been reserved
+    // when the campus was first fitted; a card that floats over the map on
+    // request costs the framing nothing.
+    renderBuildings();
+    buildLegendIndex();
+    draw(addDirectoryLayers);
+  }, orElse(() => {
+    // Nothing to list, so the section goes rather than sitting empty under a
+    // heading. Its own hidden state, not the debug menu's — the rest of the
+    // card is unaffected by a directory that failed to load.
+    buildingsPanel.classList.add('hidden');
+  }));
+
+  // THE ONE ORDERING AMONG THE OVERLAYS. Requested now, with the rest, so it
+  // is on the wire in parallel; applied only once the sheet has been dealt
+  // with, because withParkingMarks reads it. Whatever happened to the sheet,
+  // this runs — `basemapReady` swallows a failed request, and the catch here
+  // covers anything else — and if the sheet never came, withParkingMarks adds
+  // nothing and the five named lots still get their P.
+  const labelsArrived = fetchOverlay('labels');
+  // Held until it is read, so an early failure is not an unhandled rejection.
+  labelsArrived.catch(() => {});
+  const labelsReady = basemapReady.catch(() => {}).then(() => labelsArrived).then((data) => {
+    // Classified on the way in rather than in the build script: which disc a
+    // building name earns is presentation, and labels.json stays exactly what
+    // my campus's cartographer set. See src/poi.js.
+    // ...and the lots my campus never named get a marker before that runs, so the
+    // generated ones and the printed ones are classified by the same pass and
+    // cannot end up wearing different discs.
+    campusLabels = withPoiIcons(withParkingMarks(data, campusBasemap));
+    draw(addLabelLayers);
+  }, orElse());
+
+  // The routing tail, which is the only branch that needs two of its own
+  // requests and the only one whose failure is worth telling somebody about:
+  // an overlay that does not arrive costs a layer, and this costs the app.
+  const routingReady = Promise.allSettled([fetchNetwork(), fetchVertices()])
+    .then(([networkResult, vertexResult]) => {
+      // Already retried by the api — see withRetry — so a rejection here is
+      // a server that stayed away for the whole schedule, and nothing in this
+      // session will bring the graph back short of loading the page again.
+      // The sentence says so, rather than asking a visitor about a dev server.
+      if (networkResult.status === 'rejected') {
+        console.error(networkResult.reason);
+        setStatus(ROUTING_OUTAGE, true);
+        return;
+      }
+      const routable = networkResult.value;
+
+      // Snapping targets come from /api/vertices, which is the whole routing
+      // graph. Falling back to the drawn network keeps clicks working on
+      // campus if that one request fails — degraded, not broken: a start point
+      // outside the fence would be dragged in to the nearest campus path.
+      const vertices = vertexResult.status === 'fulfilled'
+        ? vertexResult.value.vertices
+        : [...new Map(routable.features
+          .flatMap((f) => f.geometry.coordinates)
+          .map((c) => [`${c[0]},${c[1]}`, c])).values()];
+      if (vertexResult.status === 'rejected') console.error(vertexResult.reason);
+      networkPoints = featureCollection(vertices.map(v => point(v)));
+
+      // The moment a press-and-hold starts meaning something, and therefore
+      // the moment it is honest to advertise one. Until here the strip has
+      // been showing "Loading the campus…" over a map that could not be
+      // routed on.
+      setIdleStatus();
+
+      // Drawn only as far as the fence. my campus's driveways are drawn running out
+      // to the public road, and past the boundary that white ribbon lands on
+      // top of a road the basemap is already drawing. Cut rather than dropped,
+      // so a driveway still reaches the gate instead of stopping at the
+      // junction inside it — the route still runs the whole way, over their
+      // linework. A perimeter walkway that strays over the line and comes
+      // back is NOT cut: the line is OpenStreetMap's, and the walkway is
+      // campus on both sides of it. See EXCURSION_M in src/campus-clip.js.
+      customNetwork = trimToCampus(routable, CAMPUS_RING);
+
+      // Through route-layers rather than straight onto the source, which
+      // marks the stretches under a roof for the imagery filter on the way.
+      routeLayers.paintNetwork();
+
+      // The lamps along it follow: dropped from the stubs that were cut away,
+      // restored on the stretches past the fence that were kept.
+      shownLamps = trimPointsAlong(campusLamps, customNetwork, CAMPUS_RING);
+      map.getSource('campus-lamps')?.setData(shownLamps);
+    });
+
+  // The spinner belongs to the whole errand, so it stops when the last of
+  // these does — not when the first layer appears.
+  Promise.allSettled([
+    buildingsReady, basemapReady, amenitiesReady, placesReady,
+    directoryReady, labelsReady, routingReady,
+  ]).finally(() => setBusy(false));
 
   // -------------------------------------------------------------------------
   // Setting the two ends
@@ -1616,7 +1785,12 @@ function startApp() {
   });
 
   map.on('click', (e) => {
-    if (navigating() || !networkPoints) return;
+    // NOT gated on the routing graph. Nothing a tap does here routes — a pin
+    // lifts, a card opens, a category clears — and the card's own buttons ask
+    // endpoints, which checks for the graph itself. Gated, every tap was
+    // ignored until /api/network landed, and for the whole session if it
+    // failed, while search and Browse opened the very same cards.
+    if (navigating()) return;
     // The release at the end of a press-and-hold. That gesture has already done
     // its work; without this the same finger would drop a route point and then
     // immediately clear the selection on the way back up.
@@ -1727,34 +1901,42 @@ function startApp() {
     if (building) { cards.openBuilding(building); return; }
     plantPin(coords, name);
     showPlaceCard(pinCard({ coords, kind, name, sub }, {
-      onStart: (at) => { clearSelection(); placeStart(at, name); },
+      onStart: (at) => { clearSelection(); startHere(at, name); },
       onEnd: (at) => { clearSelection(); setDestination(at, name); },
       onClose: clearSelection,
     }), null, { at: coords });
   }
 
   function dropPin(lngLat) {
-    const clicked = point([lngLat.lng, lngLat.lat]);
-    // Snapping the click locally keeps the marker instant; the server snaps
-    // again on its own side, and lands on the same vertex.
-    const snapped = nearestPoint(clicked, networkPoints).geometry.coordinates;
+    // THE PIN IS WHERE THE FINGER WAS, NOT THE NEAREST VERTEX. It used to be
+    // moved to the nearest vertex of /api/vertices before anything else saw
+    // it, and since the build collapsed straight runs into single long edges
+    // that vertex is a median 6 m and up to 68 m from where the server would
+    // have joined the network — a hold 6 m beside the middle of a 144 m path
+    // put the pin 51 m along it. A vertex also snaps to itself, so the server
+    // never got to ask whether the press was inside a building with doors.
+    // The press itself is what is sent now, as a GPS start is (see
+    // locateStart in src/endpoints.js): the server joins the network at the
+    // nearest point on it, or at the building's doors, and the walk's dotted
+    // leg runs from the line to the pin. Seven decimals, ~1 cm, which is what
+    // every coordinate the router holds is written at.
+    const at = [lngLat.lng, lngLat.lat].map((n) => Number(n.toFixed(7)));
 
-    plantPin(snapped, 'Dropped pin');
+    plantPin(at, 'Dropped pin');
 
     showPlaceCard(pinCard(
       // The coordinates are the subtitle because they are the only true thing
       // there is to say about a point somebody chose off the map. Apple prints
       // them on its dropped pin for the same reason.
-      { coords: snapped, kind: 'dropped', name: 'Dropped pin', sub: coordLabel(snapped) },
+      { coords: at, kind: 'dropped', name: 'Dropped pin', sub: coordLabel(at) },
       {
-        onStart: (coords) => {
+        onStart: async (coords) => {
           clearSelection();
-          placeStart(coords, 'Dropped pin');
-          // A destination chosen before a start has been waiting for this.
-          const parked = endpoints.takeParked();
-          if (parked) {
-            placeEnd(parked.coords, parked.name);
-          } else {
+          // Routed on to the destination already drawn or parked, if there
+          // is one; see startHere. Said only when there is none. A refusal
+          // (the pin too far from any path) has said so already, and this
+          // must not write over it.
+          if (await startHere(coords, 'Dropped pin') === 'waiting') {
             setStatus('Starting from the dropped pin. Now pick where you are going.');
           }
         },
@@ -1765,13 +1947,14 @@ function startApp() {
     // particular spot on the ground, and zooming would pull that ground out
     // from under the finger that just chose it. The pin still gets lifted clear
     // of the sheet if the sheet lands on it.
-    ), null, { at: snapped, zoom: 0 });
+    ), null, { at, zoom: 0 });
   }
 
   const longPress = createLongPress({
     map,
-    // Not during a walk, and not before the network has landed — there is
-    // nothing to snap a dropped pin to until it has.
+    // Not during a walk, and not before the network has landed — until it
+    // has, a dropped pin's Start here has nothing to check its reach against
+    // (see placeStart in src/endpoints.js).
     enabled: () => !navigating() && Boolean(networkPoints),
     onHold: dropPin,
   });
@@ -1802,6 +1985,43 @@ function startApp() {
   });
   const searchInput = searchBox.input;
   const searchClear = searchBox.clear;
+
+  /**
+   * The search field as its own retry button, for a places file that never came.
+   *
+   * THE FIELD RATHER THAN A NEW CONTROL. It is where somebody goes to search,
+   * so it is where the news that search is down has to be, and it already wears
+   * the glass every other control does — a separate "retry" chip would be one
+   * more thing to style and one more place to look. Enabled so it can be
+   * tapped, read-only so nothing can be typed into an index that does not
+   * exist, and the placeholder says both what happened and what to do.
+   *
+   * Enter as well as a tap, so a keyboard can reach it. The retry goes through
+   * the api's own schedule again; while it runs the placeholder says so, and a
+   * second failure puts the offer back.
+   */
+  let searchPlaceholder = null;
+  function offerSearchRetry(load) {
+    searchPlaceholder ??= searchInput.placeholder;
+    searchInput.disabled = false;
+    searchInput.readOnly = true;
+    searchInput.placeholder = 'Search unavailable — tap to retry';
+    const retry = (event) => {
+      if (event.type === 'keydown' && event.key !== 'Enter') return;
+      searchInput.removeEventListener('click', retry);
+      searchInput.removeEventListener('keydown', retry);
+      searchInput.placeholder = 'Loading search…';
+      load();
+    };
+    searchInput.addEventListener('click', retry);
+    searchInput.addEventListener('keydown', retry);
+  }
+  /** The field back to itself once places have landed. A no-op on a clean boot. */
+  function searchAvailable() {
+    if (searchPlaceholder === null) return;
+    searchInput.readOnly = false;
+    searchInput.placeholder = searchPlaceholder;
+  }
   const closeResults = () => searchBox.closeResults();
   const buildSearchIndex = () => searchBox.buildIndex();
   const refreshPopularity = () => searchBox.refreshPopularity();

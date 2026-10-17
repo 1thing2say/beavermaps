@@ -80,11 +80,11 @@ export function createProviderToggle({ surfaces, onChange }) {
   /** Every surface says what pressing it will DO, not what is on screen. */
   function paint() {
     // Published the way the theme and the skin are, and for a reason the other
-    // two do not have: under Google the Mapbox style is BLANK — no sources, no
-    // layers, nothing of theirs drawn — so the wordmark their control pins to
-    // the corner is crediting data that is not on the map, next to Google's own
-    // required copyright line for the data that is. The stylesheet hides it on
-    // this attribute. See the note beside that rule before changing either.
+    // two do not have: the credit line in the corner changes with it. Under
+    // Google the notice leads with Google's mark, set by the stylesheet on this
+    // attribute (see .mapboxgl-ctrl-attrib-inner there). Mapbox's wordmark is
+    // NOT hidden on it — it used to be, and their terms want it on any map
+    // their SDK draws, whoever's data is on it.
     document.documentElement.dataset.provider = provider;
 
     const target = provider === 'google' ? 'mapbox' : 'google';
@@ -142,10 +142,21 @@ export function createProviderToggle({ surfaces, onChange }) {
       }
     },
 
-    /** Drop back to Mapbox without re-notifying the caller that asked us to. */
-    revert() {
+    /**
+     * Drop back to Mapbox without re-notifying the caller that asked us to.
+     *
+     * `persist` is whether the fallback outlives this page, and it is only
+     * for a REFUSAL. A key Google turned down will be turned down on the next
+     * load as well, and remembering that is what spares every later visit the
+     * same failed request (see preferredProvider). A request that never got an
+     * answer is not one: a dropped connection, a captive portal or a Google
+     * 5xx says nothing about tomorrow, and remembering it used to opt the
+     * visitor out of Google's ground for good on the strength of one bad
+     * moment, with nothing but the toggle to put it back.
+     */
+    revert({ persist = true } = {}) {
       provider = 'mapbox';
-      writeText(STORAGE_KEY, provider);
+      if (persist) writeText(STORAGE_KEY, provider);
       paint();
     },
   };

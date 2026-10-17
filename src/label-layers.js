@@ -156,6 +156,28 @@ export function createLabelLayers({
         : colors.label
   );
 
+  /**
+   * The building whose card is open, by its directory `officialName`.
+   *
+   * Kept here rather than only written into the two layers' filters, because a
+   * style swap throws those layers away and addDirectory builds them again — and
+   * a filter that lived only on the old layers came back as NOTHING_SELECTED,
+   * so a Satellite tap or (under Google) a Light/Dark change took the outline
+   * off a building whose card was still open.
+   */
+  let selected = null;
+  const selectedFilter = () => (
+    selected ? ['==', ['get', 'officialName'], selected] : NOTHING_SELECTED
+  );
+
+  /** Outline one building, or none. */
+  function select(officialName) {
+    selected = officialName || null;
+    for (const id of ['campus-directory-fill', 'campus-directory-line']) {
+      if (map.getLayer(id)) map.setFilter(id, selectedFilter());
+    }
+  }
+
   // Two constants used to live here — the widths a floating card had to clear
   // before it stopped opening underneath the route panel. The card is IN the
   // column with the route panel now rather than over the map, so there is
@@ -187,7 +209,7 @@ export function createLabelLayers({
       type: 'fill',
       source: 'campus-directory',
       slot: 'middle',
-      filter: NOTHING_SELECTED,
+      filter: selectedFilter(),
       paint: { 'fill-color': colors.route, 'fill-opacity': 0.22, 'fill-emissive-strength': 1 },
     });
     map.addLayer({
@@ -195,7 +217,7 @@ export function createLabelLayers({
       type: 'line',
       source: 'campus-directory',
       slot: 'middle',
-      filter: NOTHING_SELECTED,
+      filter: selectedFilter(),
       paint: { 'line-color': colors.route, 'line-width': 2, 'line-emissive-strength': 1 },
     });
   }
@@ -416,5 +438,5 @@ export function createLabelLayers({
       },
     });
   }
-  return { addPrinted, addDirectory, labelPaint, labelInk };
+  return { addPrinted, addDirectory, select, labelPaint, labelInk };
 }

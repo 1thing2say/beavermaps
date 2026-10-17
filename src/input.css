@@ -9,6 +9,15 @@
 }
 
 :root {
+    /* Which way round the browser's OWN chrome is drawn: scrollbars, form
+       controls, the caret. Stated, because nothing else told it — the theme
+       is an attribute, not the OS preference the browser would otherwise go
+       by — so with data-theme="dark" a classic scrollbar was a bright white
+       track down the edge of the dark glass sidebar, the results list, the
+       legend and the phone sheet. The boot script in index.html writes the
+       attribute before first paint, so this is right from the first frame. */
+    color-scheme: light;
+
     /* One grid colour, one cell size, nudged off the corner so the ruling never
        lines up with the sign's edges. Proportions follow the DS menu that
        inspired it: a 28px cell with a 3px line, roughly its 8:1 ratio. */
@@ -227,6 +236,8 @@
 }
 
 :root[data-theme="dark"] {
+    color-scheme: dark;
+
     /* Not white. The grid IS the object; the ground it is ruled on follows the
        surface it sits in, and a white rectangle here would be the brightest
        thing on a night screen — in the one card that opens without being asked
@@ -326,7 +337,7 @@
 
     /* How much of the viewport the on-screen keyboard is currently covering.
        ------------------------------------------------------------------
-       Written by main.js off `window.visualViewport`, because nothing in CSS
+       Written by src/shell.js off `window.visualViewport`, because nothing in CSS
        can see it. iOS raises the keyboard OVER the page rather than resizing
        the layout viewport, so a sheet anchored to the bottom of the document is
        underneath it. Read twice on a phone: the sheet is lifted clear of the
@@ -335,6 +346,22 @@
        whenever there is no keyboard, which is every pointer device and every
        resting phone. */
     --g-kb-h: 0px;
+
+    /* How tall the VISIBLE part of the viewport is, written beside --g-kb-h.
+       ------------------------------------------------------------------
+       The other half of the same measurement, and the one a height cap needs:
+       iOS shrinks neither `dvh` nor the layout viewport for a keyboard, so a
+       sheet capped at 62dvh and lifted by --g-kb-h is 62% of the WHOLE screen
+       standing on top of the keys. On a 390x844 phone that is 523px of sheet
+       over 464px of screen, and its top edge — the grabber, then the field
+       being typed into — went off the top. 100dvh whenever nothing has
+       written it. */
+    --g-vv-h: 100dvh;
+
+    /* The strip of map a phone's sheet never covers. Same number, same reason
+       as MAP_STRIP in src/sheet.js, which holds the full detent to it; this is
+       the stylesheet holding the resting sheet to it while a keyboard is up. */
+    --g-map-strip: 96px;
 
     /* How tall the bottom sheet currently is, written by a ResizeObserver in
        main.js. Nothing in CSS can measure a sibling, and the credit line has to
@@ -639,6 +666,48 @@
         --g-card-bg: rgba(46, 46, 49, 0.80);
         --g-card-bg-thick: rgba(38, 38, 41, 0.92);
         --g-card-bg-thin: rgba(46, 46, 49, 0.80);
+    }
+}
+
+/* ...AND NONE OF IT FOR SOMEBODY WHO HAS ASKED THE SYSTEM FOR LESS.
+   ---------------------------------------------------------------------------
+   iOS and macOS both have a Reduce Transparency switch, and every system
+   material honours it by going solid; Increase Contrast does the same and
+   more. A web page hears the first as `prefers-reduced-transparency: reduce`
+   and the second as `prefers-contrast: more`, and this page heard neither —
+   so the one group of people who had said in so many words that glass gets in
+   their way were the only ones still reading through it.
+
+   The answer is the block above, undone: the opaque values the Apple look
+   already falls back to where there is no compositor, restated for the same
+   two scopes in the same order, filter and all. Not a third set of colours —
+   these are the solids the ink contrasts in the token blocks were already
+   checked against, and they are what Apple's own material flattens to.
+
+   AFTER the @supports block on purpose. The selectors are the same specificity
+   and a media query adds none, so this wins on order and only on order; moved
+   above it, the translucent values would come back for exactly these people.
+
+   The classic look needs nothing here: its cards are opaque already and its
+   filters are `none` (see --g-card-* in the :root block), which
+   test/html-shell.test.js asserts alongside these. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    :root[data-skin="apple"] {
+        --g-card-bg: var(--g-surface-2);
+        --g-card-bg-thick: var(--g-surface-2);
+        --g-card-bg-thin: var(--g-surface);
+        --g-card-filter: none;
+        --g-card-filter-thick: none;
+        --g-card-filter-thin: none;
+    }
+
+    :root[data-skin="apple"][data-theme="dark"] {
+        --g-card-bg: var(--g-surface-2);
+        --g-card-bg-thick: var(--g-surface-2);
+        --g-card-bg-thin: var(--g-surface-2);
+        --g-card-filter: none;
+        --g-card-filter-thick: none;
+        --g-card-filter-thin: none;
     }
 }
 
@@ -1054,6 +1123,17 @@ body.navigating .app-chrome {
     box-shadow: var(--g-shadow), var(--g-rim);
 }
 
+/* The layers popover is a popover, not a card. Apple's map-type control and
+   its popovers are the thin tier — blur(15px) over #fffc — which is what the
+   layers button that opens this already wears, so the button and the menu out
+   of it were two materials in one corner. Through the thin tokens, so the
+   @supports gate and the opaque fallback come with them. */
+[data-skin="apple"] .g-layers-menu {
+    background-color: var(--g-card-bg-thin);
+    -webkit-backdrop-filter: var(--g-card-filter-thin);
+    backdrop-filter: var(--g-card-filter-thin);
+}
+
 .g-icon-btn {
     display: inline-flex;
     align-items: center;
@@ -1415,6 +1495,24 @@ body.navigating .app-chrome {
     overflow: hidden;
 }
 
+/* The row a list shows when what was typed matches nothing. It sits in the
+   same .g-results material as the rows it stands in for — the list keeps its
+   glass and its corners — but it is not one of them: secondary ink rather than
+   a name's, no pointer, and no hover or press fill, because a row that lights
+   up under the cursor is a row that promises to do something when pressed.
+   Written at 0-3-1 so it outranks both `.g-results li:hover` and the press
+   fills in the rows block near the end of this file without depending on
+   which comes first. */
+.g-results li.g-result-empty {
+    cursor: default;
+    color: var(--g-text-dim);
+}
+
+.g-results li.g-result-empty:hover,
+.g-results li.g-result-empty:active {
+    background: transparent;
+}
+
 /* THE SHELF, which is the row the shortcuts sit in.
    ---------------------------------------------------------------------------
    ONE LINE THAT SCROLLS, not a paragraph of chips. This had nothing but
@@ -1505,6 +1603,17 @@ body.navigating .app-chrome {
     font-size: 16px;
     font-weight: 500;
     color: var(--g-text);
+}
+
+/* A card's heading takes focus from script — picking a search result sends it
+   there, so a screen reader reads the place that opened (src/search-box.js) —
+   and it is not a control. A ring round a title says "press me" about the one
+   thing on the card that does nothing, and Chrome would draw it on a mouse
+   pick too: focus arrives from a text field, which always counts as keyboard
+   focus. tabindex="-1" in the selector so a heading that ever becomes a real
+   Tab stop gets its ring back. */
+.g-panel-title[tabindex="-1"]:focus {
+    outline: none;
 }
 
 .g-panel-sub {
@@ -1903,7 +2012,8 @@ body.navigating .app-chrome {
     height: 100%;
 }
 
-/* Google's, and required — see the note on `credits` in src/flyover-view.js.
+/* Google's, and required — see the note on `onTileLoad` in src/flyover-view.js
+   and on `tileCredits` in src/google-tiles.js.
    Set over the imagery rather than under the box because the imagery is what it
    is a credit for, and the scrim is what keeps it legible over a dark roof and
    a bright car park alike without knowing which is under it. */
@@ -1914,8 +2024,8 @@ body.navigating .app-chrome {
     left: 0;
     padding: 10px 8px 4px;
     /* Google's credit for this imagery is not a line, it is a paragraph —
-       "Google, Data SIO, NOAA, U.S. Navy, NGA, GEBCO, Landsat / Copernicus,
-       Data LDEO-Columbia, NSF, NOAA, IBCAO" — and across a phone-width box it
+       "Google; Data SIO, NOAA, U.S. Navy, NGA, GEBCO; Landsat / Copernicus;
+       Data LDEO-Columbia, NSF, NOAA; IBCAO" — and across a phone-width box it
        wrapped to three lines and covered the bottom third of the photograph.
        Smaller and tighter rather than truncated: it is required text, and it is
        still perfectly legible at this size against its scrim. */
@@ -1933,6 +2043,34 @@ body.navigating .app-chrome {
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
     background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.12) 70%, transparent);
     pointer-events: none;
+    /* A ROW: Google's mark at the left edge, the sources taking the rest and
+       still set right. Bottom-aligned, so when the sources wrap to a second
+       line the mark stays on the bottom one with them rather than floating
+       up between the two. */
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+/* Google's mark, bottom-left over the imagery, where the policy for 3D tiles
+   puts it. Text until the official logo asset is dropped in — see the TODO in
+   src/flyover-view.js — and set like Google's own text attribution: their
+   face, a medium weight, a size above the 9px of the sources so the mark
+   reads as the mark and the list reads as the footnote. White on the same
+   scrim and shadow as the sources, which is what the logo's outlined
+   variant is for: it is the one meant for imagery. */
+.g-flyover-mark {
+    flex: none;
+    font-family: Roboto, Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.g-flyover-sources {
+    flex: 1;
+    min-width: 0;
 }
 
 /* A view that will not load keeps its box and says why, rather than collapsing.
@@ -2727,10 +2865,13 @@ body.navigating .app-chrome {
  * still grows upward from the corner, and DOM order still runs top to bottom.
  * `float` is simply ignored on a flex item.
  *
- * The bottom padding rather than a margin is deliberate: the last child is the
- * attribution, and 10px of padding puts it exactly level with the Mapbox
- * wordmark in the opposite corner, which carries a 10px margin of its own. The
- * bottom of the screen is one credit band across both corners.
+ * The bottom padding rather than a margin is deliberate: 10px of it puts the
+ * bottom of this stack exactly level with the credit row in the opposite
+ * corner, which stands on 10px of padding of its own (see the row rule beside
+ * the wordmark further down). The attribution is not in this stack — it went
+ * to bottom-left, beside the wordmark (see the note on the AttributionControl
+ * in main.js) — so the bottom of the screen is one line across both corners:
+ * the credits on the left, the controls on the right, standing on it together.
  *
  * The layers switcher is a member of this stack too, added from main.js rather
  * than placed by this file, so it is spaced by the same `gap` as the rest. */
@@ -2805,19 +2946,20 @@ body.navigating .app-chrome {
    — which a left rail used to, clipping the first 56px and putting the credit
    on screen reading "pbox".
 
-   Hidden when Google is drawing the ground, and only then. That is not a
-   cosmetic call: under Google the Mapbox style is BLANK — `sources: {}`,
-   `layers: []`, see BLANK_STYLE in src/palette.js — and every road, label and
-   photograph on screen came from Google's Map Tiles API, which supplies its own
-   required copyright line in the opposite corner. A wordmark next to it credits
-   a supplier whose data is not being shown. The one thing still coming from
-   Mapbox on this path is the glyph endpoint the campus labels are set from, so
-   whether their terms want the mark up regardless is a judgment about the
-   licence rather than about the layout; flip this rule off if the answer is
-   that they do. Under the Mapbox provider it is never hidden. */
-[data-provider="google"] .mapboxgl-ctrl-logo {
-    display: none;
-}
+   AND IT IS NEVER HIDDEN, under either provider. It used to be, whenever
+   Google drew the ground, on the reasoning that the Mapbox style is BLANK
+   there — `sources: {}`, `layers: []`, see BLANK_STYLE in src/palette.js — so
+   a Mapbox mark beside Google's copyright credits a supplier whose data is
+   not on screen. That reads the mark as a DATA credit, and it is not one:
+   Mapbox's attribution terms require the wordmark on any map drawn with
+   their SDK, whoever's data it is drawing, and the mapbox-gl licence ends
+   automatically when those terms are broken. The renderer is theirs under
+   Google too — and so is the glyph endpoint every campus label is set from.
+
+   Not restyled, recoloured or inverted, in either theme: it is their mark and
+   their artwork, which already carries its own halo for legibility over a map.
+   What keeps it apart from Google's mark is placement, not paint — see the
+   credit line below, which is a pill of its own beside it. */
 
 /* The scale bar's fill is set with the rest of the stack above, not here — this
    rule's `!important` background would otherwise beat it, which is how it came
@@ -2832,13 +2974,35 @@ body.navigating .app-chrome {
    phone block, where that corner is held clear of the control stack in the
    opposite one. Wraps rather than truncates: an ellipsis would be the obvious
    fix and is the wrong one, because a notice that has been cut off is a notice
-   that has not been given. */
+   that has not been given.
+
+   A PILL OF ITS OWN, with the wordmark standing bare beside it. Under Google
+   this line leads with Google's mark (below), and Google's attribution policy
+   wants its mark clearly apart from any other provider's — which a single
+   strip holding both, the arrangement this used to have, is not. Two objects
+   with map between them are: the wordmark is Mapbox's artwork on the map,
+   the notice is a chip of chrome. */
 .mapboxgl-ctrl-attrib {
     background: color-mix(in srgb, var(--g-surface) 82%, transparent) !important;
     color: var(--g-text-dim) !important;
     font-size: 11px;
     max-width: 100%;
     white-space: normal;
+    padding: 2px 8px !important;
+    border-radius: var(--g-radius-sm);
+}
+
+/* ...and under Apple it is the same glass as every other chip on the map: the
+   thin material the zoom pair and the layers button wear, the sheen, the rim.
+   Through .mapboxgl-control-container for the 0-3-0 the stack rules above
+   need, and `!important` because the base rule's is — between two important
+   declarations the more specific one wins. */
+[data-skin="apple"] .mapboxgl-control-container .mapboxgl-ctrl-attrib {
+    background-color: var(--g-card-bg-thin) !important;
+    background-image: var(--g-sheen) !important;
+    -webkit-backdrop-filter: var(--g-card-filter-thin);
+    backdrop-filter: var(--g-card-filter-thin);
+    box-shadow: var(--g-shadow-sm), var(--g-rim);
 }
 
 /* The wordmark leads. `addControl` prepends for a bottom corner, so adding the
@@ -2862,6 +3026,38 @@ body.navigating .app-chrome {
     order: -1;
 }
 
+/* ...AND ABOVE THE PHONE, A ROW AS WELL, with the two apart.
+   ---------------------------------------------------------------------------
+   The phone block has made this corner a flex row for a while; above it the
+   corner was still Mapbox's floats, and that only looked right while the
+   wordmark was hidden under Google. Brought back, it was measured at 1280:
+   the notice pill at x0 hard against the window edge — Mapbox zeroes the
+   attribution's margin — and the wordmark stacked directly under it with no
+   space at all, Google's mark and Mapbox's touching edge to edge. Which is
+   the one arrangement Google's policy rules out.
+
+   So the same row the phone uses, the same 12px of map between the marks,
+   and the corner's own padding standing in for the per-control margins Mapbox
+   gives the wordmark and not the notice — `--g-gap` is the 10px those margins
+   were, so the wordmark sits exactly where it always has and the notice
+   comes level with it. Desktop-only because the phone block positions this
+   corner itself, from the screen's safe-area edges, and padding here would
+   be added to that. Through .mapboxgl-control-container for the 0-3-0 that
+   beats mapbox-gl.css's `.mapboxgl-ctrl-bottom-left .mapboxgl-ctrl`. */
+@media (min-width: 641px) {
+    .mapboxgl-control-container .mapboxgl-ctrl-bottom-left {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 12px;
+        padding: 0 0 var(--g-gap) var(--g-gap);
+    }
+
+    .mapboxgl-control-container .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl {
+        margin: 0;
+    }
+}
+
 .mapboxgl-ctrl-scale {
     color: var(--g-text-dim) !important;
     font-size: 11px;
@@ -2877,79 +3073,59 @@ body.navigating .app-chrome {
    text in the corner is theirs verbatim, fetched per viewport, and it is left
    exactly as served. This puts their mark in front of it, which is what the
    line is missing: "Map data ©2026 Google" as bare grey text is a footnote,
-   where every other map on a phone shows whose map it is.
+   and Google's attribution policy asks for the Google Maps logo with it.
+
+   THE WORDS "Google Maps", NOT A LOGO, AND THAT IS A STOPGAP. This was the
+   four-colour "G", which is Google's company mark and not the one their maps
+   policy names. The right asset is the Google Maps logo, and it has to be
+   Google's own file — nothing in this repo or in node_modules is that file,
+   and a logo is not something to redraw. Until it is added the mark is the
+   text wordmark, which is what the policy allows where the logo is not shown.
+   TODO: drop the official Google Maps logo into src/ and replace the
+   `content` below with it as a background image (0.95-1.25em tall, keeping
+   its aspect ratio), the way the "G" was set.
 
    A ::before rather than markup, so the licence string is never touched. The
    attribution element's contents are Mapbox's — it writes them from the
-   source's `attribution` property — and reaching in to prepend an <img> would
+   sources' `attribution` properties — and reaching in to prepend a node would
    mean either editing that string in src/google-tiles.js (mixing a mark into a
    legal notice) or writing into a node another library owns and rewrites.
 
-   `inline-block` and an em-relative size so it flows and wraps with the text it
-   leads, and shrinks with it in the phone block below. 0.95em rather than 1em
-   is an optical match, not a mistake: the glyph fills its own box top to bottom
-   where a capital G reaches about three quarters of an em, so a mark set to the
-   text's em-size stands visibly taller than the letters beside it.
-
-   Scoped to the Google provider for the same reason the Mapbox wordmark is
-   hidden there — see that rule above. Under Mapbox this line credits Mapbox and
-   OpenStreetMap, and their marks are not this one. */
+   In the notice's own pill, which is what keeps it apart from Mapbox's
+   wordmark — see the note at .mapboxgl-ctrl-attrib. Scoped to the Google
+   provider because under Mapbox this line credits Mapbox and OpenStreetMap,
+   and Google's mark is not theirs. */
 [data-provider="google"] .mapboxgl-ctrl-attrib-inner {
     /* A ROW, so the mark and the words are centred against each other rather
-       than sat on a shared baseline.
-       -----------------------------------------------------------------------
-       This was `vertical-align`, which is the obvious way to put a box in a
-       line of text and the wrong one here: it aligns the mark's BOTTOM EDGE to
-       an offset from the baseline, and the mark is a full-height glyph where a
-       capital G reaches about three quarters of an em. So the two are centred
-       on nothing, the offset has to be re-derived every time the size changes,
-       and at 11px being one pixel out is visible.
+       than sat on a shared baseline — the mark is set larger than the notice,
+       and a baseline would hang the notice off the bottom of it. `wrap`, so a
+       notice longer than the pill drops to a second line under the mark rather
+       than being squeezed into a column beside it.
 
        Safe because this whole block is scoped to the Google provider, whose
-       notice is a plain string. Mapbox's is three links and a button, and each
-       would become a flex item of its own. */
+       notice is a plain string and, at most, OpenStreetMap's one link (see
+       OSM_ATTRIBUTION in src/route-layers.js). Mapbox's is three links and a
+       button, and each would become a flex item of its own. */
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.36em;
+    column-gap: 0.45em;
 }
 
 [data-provider="google"] .mapboxgl-ctrl-attrib-inner::before {
-    content: "";
+    content: "Google Maps";
     flex: none;
-    /* BIGGER THAN THE CAPS, on purpose, and this is the second thing that was
-       wrong. At 0.95em the mark was 10px of four-colour logo with a counter two
-       pixels across — the white gap that makes a G a G goes to whatever is
-       behind it, and on a dark scrim that is dark, so it closed up and the mark
-       read as a coloured blob rather than as a letter. A logo has a size below
-       which it stops being the logo. 1.25em against a cap height of about
-       0.72em is the proportion Google's own placements use. */
-    width: 1.25em;
-    height: 1.25em;
-    background: url('/src/google-g.svg') center / contain no-repeat;
+    /* Set the way Google sets its own text attribution: their face and a
+       medium weight. Full-strength text rather than the notice's dimmed ink,
+       and a step larger than its 11px, so the mark reads as the mark and the
+       string reads as the footnote it is. Never wraps — a mark broken over
+       two lines is not one. */
+    font-family: Roboto, Arial, sans-serif;
+    font-size: 1.1em;
+    font-weight: 500;
+    color: var(--g-text);
+    white-space: nowrap;
 }
-
-/* ...AND THE HIDDEN WORDMARK STOPS HOLDING A PLACE IN THE LINE.
-   ---------------------------------------------------------------------------
-   `[data-provider="google"] .mapboxgl-ctrl-logo { display: none }` above hides
-   the mark. It does not hide the `.mapboxgl-ctrl` div Mapbox wraps it in, and
-   that div is a FLEX ITEM of the credit strip: zero wide, but with the strip's
-   6px gap on both sides of it and its own box between them.
-
-   Measured on a 390px phone: the strip's content ran 34 to 180.3 inside a box
-   whose padding ended at 18 and 180.3. Sixteen pixels of nothing on the left,
-   none on the right — which is not a rounding error, it is the notice sitting
-   visibly off-centre in its own pill.
-
-   Under Mapbox the wrapper holds a wordmark and must stay.
-
-   `!important` because Mapbox writes `style="display: block"` onto that div
-   from LogoControl, and an inline style beats any selector. Same reason the
-   attribution's own background above carries one. */
-[data-provider="google"] .mapboxgl-ctrl-bottom-left > .mapboxgl-ctrl:has(> .mapboxgl-ctrl-logo) {
-    display: none !important;
-}
-
-
 
 /* Turn-by-turn keeps the locate button and drops the rest: zoom and a scale bar
    are map-reading tools, and while walking they only collide with the remaining
@@ -3259,8 +3435,12 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
 /* Mapbox's own zoom and locate buttons, so the corner stack is the same
    substance as the layers button that now sits on top of it. Written through
    .mapboxgl-control-container for the same 0-3-0 reason the margin reset above
-   needs: mapbox-gl.css is injected after this file and wins every tie. */
-[data-skin="apple"] .mapboxgl-control-container .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-group {
+   needs: mapbox-gl.css is injected after this file and wins every tie.
+
+   The scale bar with them. It is one of these controls — see the note on it
+   above — and was left on the opaque --g-surface the base rule gives the whole
+   stack, a solid slot in a column of glass chips. */
+[data-skin="apple"] .mapboxgl-control-container .mapboxgl-ctrl-bottom-right :is(.mapboxgl-ctrl-group, .mapboxgl-ctrl-scale) {
     background-color: var(--g-card-bg-thin);
     background-image: var(--g-sheen);
     -webkit-backdrop-filter: var(--g-card-filter-thin);
@@ -3311,9 +3491,16 @@ body.navigating .mapboxgl-ctrl-group:not(:has(.mapboxgl-ctrl-geolocate)) {
     display: none;
 }
 
+/* A stronger pane of the same glass, not a patch of opaque surface. The
+   resting disc is --g-hover over the card; --g-surface-2 replaced that with a
+   solid colour darker than the dark card and nearly the light one, so hovering
+   a close button made it fade. Fill and sheen as two properties rather than
+   the shorthand, and the sheen restated: .g-place's own hover, at the same
+   specificity, is a shorthand that would otherwise take it off. */
 @media (hover: hover) {
     [data-skin="apple"] .g-icon-btn:hover {
-        background: var(--g-surface-2);
+        background-color: var(--g-active);
+        background-image: var(--g-sheen);
     }
 }
 
@@ -3979,6 +4166,17 @@ body.no-dirbutton .g-directions {
     color: var(--g-text-dim);
 }
 
+/* A little more ink in the Apple dark field. --g-text-dim is measured against
+   the bare material, but these placeholders sit on the field's own fill on
+   top of it: rgba(235,235,245,0.6) over rgba(120,120,128,0.24) on the dark
+   sheet is 4.38:1, under the 4.5 that 14-16px text needs — and with the
+   label visually hidden, the placeholder is the field's only visible name.
+   0.68 is about 5:1 on the same fill. */
+[data-skin="apple"][data-theme="dark"] .g-search-input::placeholder,
+[data-skin="apple"][data-theme="dark"] .g-endpoint-input::placeholder {
+    color: rgba(235, 235, 245, 0.68);
+}
+
 .g-endpoint-input {
     /* ...and the size the row asks for, rather than the one `inherit` brought.
        `font` is a shorthand, so `font: inherit` above resets font-size along
@@ -4269,15 +4467,22 @@ body.no-dirbutton .g-directions {
 
 /* The count, and it is not decoration: "1 building" is the difference between
    a tile worth pressing and one that will answer with a single row you could
-   have searched for. Set in the tile's own ink at reduced opacity rather than
-   in a grey, because a grey mixed over ten different hues is ten different
-   greys. */
+   have searched for. Set in the tile's own ink rather than in a grey, because a
+   grey mixed over ten different hues is ten different greys.
+
+   AT FULL INK. It was the tile's ink at 0.78 opacity, to sit a step behind the
+   name, and that step was paid for in contrast the tile did not have to spare.
+   The ink is chosen by textInk in src/legend.js to clear 4.5:1 on each fill —
+   11px is small text, so 4.5 is the bar — and the closest tile clears it at
+   4.96. Faded by a fifth towards the fill, four of the ten fell under it —
+   arts to 3.6, food and sport to 3.8, works to 4.45.
+   The name above is set 600 and two pixels larger, which is hierarchy enough
+   without taking it out of the contrast. */
 .g-kind-count {
     display: block;
     margin-top: 2px;
     font-size: 11px;
     line-height: 1.2;
-    opacity: 0.78;
 }
 
 /* --- the sheet's head ------------------------------------------------------
@@ -4429,12 +4634,17 @@ body.no-dirbutton .g-directions {
            all the way down; it is only the content that stops short, which is
            the same trick the 1px is. Zero on anything without an inset, so
            every measurement taken in a desktop browser is unchanged. */
-        padding-bottom: calc(1px + env(safe-area-inset-bottom, 0px));
+        /* ...and NOT while a keyboard is up, which covers the indicator: the
+           inset was then a 34px dead band between the last row and the keys,
+           on the one occasion the sheet has least room to spare. */
+        padding-bottom: calc(1px + max(0px, env(safe-area-inset-bottom, 0px) - var(--g-kb-h)));
         left: 0;
         right: 0;
         width: auto;
         max-width: none;
-        max-height: 62dvh;
+        /* Against the visible screen as well as the whole one. See --g-vv-h:
+           without the second term a keyboard put the field above y = 0. */
+        max-height: min(62dvh, calc(var(--g-vv-h) - var(--g-map-strip)));
         /* ONE SURFACE, not a stack of cards with map showing between them.
            ------------------------------------------------------------------
            This is the same merge the Apple sidebar makes above 641px and for
@@ -4626,7 +4836,10 @@ body.no-dirbutton .g-directions {
     /* With the header on, the sheet keeps its bottom edge and gives up height at
        the top instead — the map above it is what the header is taking from. */
     .has-navbar .g-topleft {
-        max-height: calc(62dvh - var(--g-navbar-h));
+        max-height: min(
+            calc(62dvh - var(--g-navbar-h)),
+            calc(var(--g-vv-h) - var(--g-map-strip) - var(--g-navbar-h))
+        );
     }
 
     /* One material, so the children keep their padding and their type and give
@@ -4661,7 +4874,7 @@ body.no-dirbutton .g-directions {
        one past the column, which is the only thing it has to clear.
 
        A row, because Mapbox floats these and two floated credits in a corner
-       that is now only one line tall would stack rather than sit side by side.
+       that is now only one row tall would stack rather than sit side by side.
 
        IT RIDES ABOVE THE SHEET RATHER THAN ON IT, and the difference is the
        whole design. Laying it over the card was the first attempt and it fails
@@ -4706,12 +4919,23 @@ body.no-dirbutton .g-directions {
            since moved to the top-right, and then by a scale bar that is gone
            (see below) — so the reservation outlived both things it was
            reserving for, and it was the only reason the notice and the wordmark
-           could not sit on one line. 252 + 88 needs 348; this gives 370. */
+           could not sit on one row. This gives 370: under Mapbox at 390 the
+           row is one line in 364 of it; under Google, whose notice is longer,
+           it is still one row, with the notice wrapping inside its own pill
+           (see the zero-basis rule on .mapboxgl-ctrl-attrib further down). */
         right: var(--g-edge-right);
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px;
+        /* Twice as wide across as down. Across is the space between Mapbox's
+           wordmark and the notice, which under Google is led by Google's mark,
+           and Google's policy wants the two marks clearly apart — 6px of map
+           between two logos reads as one lock-up. Down is only a notice that
+           wrapped under the wordmark, and needs no more than it had.
+           10 + 84 of wordmark, 12 and the 258px notice pill still fit the
+           370 under Mapbox; under Google the pill is narrowed to fit instead
+           (see the zero-basis rule on .mapboxgl-ctrl-attrib further down). */
+        gap: 6px 12px;
     }
 
     /* AND THE SCALE BAR GOES.
@@ -5131,56 +5355,81 @@ body.no-dirbutton .g-directions {
         box-shadow: none;
     }
 
-    /* ONE CREDIT STRIP, not three things at three heights.
+    /* ONE CREDIT ROW, not three things at three heights.
        ------------------------------------------------------------------
        The notice, the wordmark and the scale bar sat at y717, y743 and y753 —
        a staircase down the bottom of the map, each on its own background or
        none. They are all the same KIND of thing: small print that has to be
-       legible and must not be covered. So the strip carries one surface behind
-       all of it, the notice stops carrying its own, and the wordmark loses the
-       bottom margin that was floating it 6px off the baseline the scale bar
-       already sits on.
+       legible and must not be covered. So they share one row, and the
+       wordmark loses the bottom margin that was floating it 6px off it.
+
+       ONE ROW, NOT ONE SURFACE, which it was. The strip carried a single
+       scrim behind both the wordmark and the notice, and under Google that
+       put Mapbox's mark and Google's on one chip, run together — where
+       Google's policy wants its mark clearly apart from any other. So the
+       notice keeps the pill it wears everywhere else (see the note at
+       .mapboxgl-ctrl-attrib) and the wordmark stands on the map beside it,
+       as it was drawn to.
 
        The notice itself is untouched in every way that matters — same words,
-       same size, still wrapping rather than truncating, still never hidden
-       under Mapbox. See the note at .mapboxgl-ctrl-attrib. */
+       same size, still wrapping rather than truncating, never hidden. */
     .mapboxgl-ctrl-bottom-left {
-        /* ONE LINE. Stacked, the notice and the wordmark made a 63px block that
+        /* ONE ROW. Stacked, the notice and the wordmark made a 63px block that
            read as a second sheet above the real one — which is the opposite of
-           what small print should do. Side by side they measure 252 + 88 and
-           fit the 370px between the margins with room over. Still wrapping
-           rather than truncating if a device disagrees about the font: the
-           block grows, and a notice that has been cut off is a notice that has
-           not been given.
-
-           A scrim rather than a surface, for the same reason. Enough to carry
-           11px type over a map and not enough to be a panel in its own right. */
+           what small print should do. Measured at 390 under Mapbox, side by
+           side they are the wordmark's 10px margin and 84px, the 12px gap and
+           a 258px pill — 364 of the 370 between the margins, one line, 33px
+           tall. Under Google the notice is longer — Google's mark in front of
+           it, OpenStreetMap's credit after it — and the pill alone is 315px,
+           which cannot share a line with the wordmark at its full length.
+           That is what the rule below is for. Still wrapping rather than truncating
+           if a device disagrees about the font: the block grows, and a notice
+           that has been cut off is a notice that has not been given. */
         display: flex;
         flex-direction: row;
         align-items: center;
-        gap: 8px;
         flex-wrap: wrap;
         /* Hugs its own words. `left` and `right` are both set, to bound the
            wrap, and a box with both set and no width fills the span between
-           them — so under Google, whose notice is six words rather than the
-           Mapbox line's twelve, the scrim stretched the width of the phone
-           behind a caption that used half of it. Over-constrained with a width,
-           `right` drops out and the box takes the size of what is in it. */
+           them — which, when this box carried the scrim, stretched it the
+           width of the phone behind a caption that used half of it. There is
+           no scrim now, and this stays so the corner's box is the size of what
+           is in it rather than of the gap it is allowed to fill. */
         width: fit-content;
         max-width: 100%;
-        background: color-mix(in srgb, var(--g-surface) 55%, transparent);
-        -webkit-backdrop-filter: blur(12px);
-        backdrop-filter: blur(12px);
-        border-radius: var(--g-radius-sm);
-        padding: 3px 8px;
-    }
-
-    .mapboxgl-ctrl-attrib {
-        background: transparent !important;
     }
 
     .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl-logo {
         margin-bottom: 0;
+    }
+
+    /* THE NOTICE WRAPS INSIDE ITS PILL, NOT UNDER THE WORDMARK.
+       ------------------------------------------------------------------
+       A flex item wraps to the next line on its full max-content width, so a
+       pill wider than what is left beside the wordmark drops whole beneath it
+       — which under Google at 390 it always did: a 315px pill against the 264
+       the row has over (370 less the wordmark's 10 + 84 and the 12px gap),
+       and the corner stood 63px tall above the sheet in exactly the stacked
+       arrangement the rule above says was taken out.
+
+       A zero basis is what changes that. The line is now broken on the pill's
+       MIN-content width — the "Google Maps" mark, which never wraps — so it
+       always stays beside the wordmark, and `grow` hands it the rest of the
+       row, where its own words wrap (see the flex row on
+       .mapboxgl-ctrl-attrib-inner). Measured at 390 under Google: the pill
+       264 wide on two lines, the corner 44px tall rather than 63, the
+       wordmark centred against it. Under Mapbox at 390 nothing moves — the
+       corner is `fit-content`, sized from the pill's max-content, so `grow`
+       gives it exactly its own words' width and it is the same one 33px
+       line. Narrower phones gain under both: at 375 and 320 Mapbox's pill no
+       longer fits whole either, and the corner is 44px rather than 63 (and
+       Google's 64 rather than 83 at 320).
+
+       `min-width` is left at `auto`, which for a flex item is its min-content:
+       the notice can be narrowed to its longest unbreakable run and never
+       past it, so nothing is clipped. */
+    .mapboxgl-ctrl-bottom-left > .mapboxgl-ctrl-attrib {
+        flex: 1 1 0;
     }
 
     /* THE LIST IS A SECTION OF THE SHEET.

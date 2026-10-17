@@ -15,8 +15,14 @@ const ARRIVE =
   '<path d="M12 21s7-7.6 7-12a7 7 0 1 0-14 0c0 4.4 7 12 7 12z"/>' +
   '<circle cx="12" cy="9" r="2.5"/>';
 
-export function maneuverIcon(type) {
-  const shape = type === 'arrive' ? ARRIVE : (SHAPES[type] ?? SHAPES.straight);
+/**
+ * `detail` is the maneuver, for a depart at the end of a dotted leg: its arrow
+ * is the turn onto the path, since "walk to the path, then turn left" under a
+ * straight-ahead arrow is a sign arguing with itself.
+ */
+export function maneuverIcon(type, detail = {}) {
+  const shown = type === 'depart' && SHAPES[detail.turn] ? detail.turn : type;
+  const shape = shown === 'arrive' ? ARRIVE : (SHAPES[shown] ?? SHAPES.straight);
   return (
     '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" ' +
     'stroke="currentColor" stroke-width="2.6" stroke-linecap="round" ' +

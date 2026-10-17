@@ -494,8 +494,18 @@ test('imagery belongs to neither look, and an unknown look is classic', () => {
 // the block a naive matcher thinks it is in. Which is exactly what happened:
 // the :root block came back 39 characters long and every token in it read as
 // undefined.
+//
+// The reduced-transparency block is cut out second, and for the opposite of
+// tidiness too. `tokens` below reads every rule whose selector matches, nested
+// or not, later ones winning — which is what makes the @supports glass values
+// count. The accessibility fallback restates the same two selectors with
+// OPAQUE values after that block, so left in, every check in this file would
+// quietly be measuring the solid fallback instead of the glass most visitors
+// see, and the contrast floors below would pass against the easy case. That
+// block is checked on its own terms in test/html-shell.test.js.
 const css = readFileSync(path.join(root, 'src', 'input.css'), 'utf8')
-  .replace(/\/\*[\s\S]*?\*\//g, '');
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/@media \(prefers-reduced-transparency: reduce\)[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, '');
 
 /** Every `--name: value` inside the blocks whose selector matches. */
 function tokens(selector) {
@@ -674,5 +684,38 @@ test('the chrome and the map agree about the two colours they share', () => {
         );
       }
     }
+  }
+});
+
+test('the browser draws its own chrome the way round the theme is', () => {
+  // Scrollbars and form controls follow `color-scheme`, not data-theme, and a
+  // dark sidebar with a white scrollbar track down its edge is what not saying
+  // so looks like.
+  const scheme = (selector) => [...css.matchAll(/^([^\n{}]+)\{([^{}]*)\}/gm)]
+    .filter(([, head]) => head.trim() === selector)
+    .map(([, , body]) => body.match(/color-scheme:\s*(\w+)/)?.[1])
+    .find(Boolean);
+  assert.equal(scheme(':root'), 'light');
+  assert.equal(scheme(':root[data-theme="dark"]'), 'dark');
+});
+
+test("the Apple dark field's placeholder survives the fill it sits on", () => {
+  // The placeholder is the only visible label the field has, and it is not on
+  // the bare card: the field is a --g-hover fill laid over the card, which is
+  // laid over the map. --g-text-dim measured 4.38:1 there.
+  const rule = css.match(
+    /\[data-skin="apple"\]\[data-theme="dark"\] \.g-search-input::placeholder[^{]*\{([^}]*)\}/,
+  );
+  assert.ok(rule, 'the Apple dark placeholder rule has gone');
+  const t = resolved('apple', 'dark');
+  const ink = colour(rule[1].match(/color:\s*([^;]+);/)[1], t);
+  const fill = colour(t['--g-hover'], t);
+  const surface = colour(t['--g-card-bg'], t);
+  // This theme's own ground, and the opaque sheet the reduced-transparency
+  // fallback paints.
+  for (const backdrop of [...Object.values(groundsOf(LOOKS.apple.dark)), '#2c2c2e']) {
+    const field = flatten(fill.hex, flatten(surface.hex, backdrop, surface.alpha), fill.alpha);
+    const ratio = contrast(flatten(ink.hex, field, ink.alpha), field);
+    assert.ok(ratio >= 4.5, `placeholder over ${backdrop} is ${ratio.toFixed(2)}:1`);
   }
 });

@@ -102,9 +102,87 @@ function devCompression() {
   };
 }
 
+/**
+ * Strip index.html's comments from the page that ships, and only from that one.
+ *
+ * index.html documents itself the way the rest of this codebase does, in long
+ * notes about WHY a meta tag or a wrapper div is there, and those notes are
+ * most of the file: measured at 69.7 KB built, 18.8 KB gzipped, against
+ * 27.6 KB built, 4.7 KB gzipped once they are gone. Every visitor downloaded the essay on every cold
+ * load, ahead of the bundle that actually draws the map, and the page is served
+ * `no-cache` (see server/wire.js) so it is revalidated rather than remembered.
+ *
+ * `apply: 'build'` because the comments are FOR the source: `npm run dev`
+ * serves index.html as written so view-source still explains itself, and only
+ * the copy in dist/ is cut down.
+ *
+ * `enforce: 'post'` so this runs after Vite has rewritten the page — the script
+ * and stylesheet tags it injects are already in the string and nothing it adds
+ * later can bring a comment back.
+ *
+ * Conditional comments (`<!--[if IE]>`) are kept, because they are the one kind
+ * a browser reads as markup rather than as prose. There are none in this page
+ * today; the exception is there so a future one is not silently deleted. Blank
+ * lines left behind are folded to one so the output is not a column of gaps.
+ *
+ * Nothing in this page puts `<!--` inside a <script> or a string, which is the
+ * one case a regex over raw HTML would get wrong — and the build test in
+ * test/html-shell.test.js runs this over the real index.html and checks that
+ * the scripts, the theme bootstraps and every id the app looks up survive.
+ */
+export function stripHtmlComments() {
+  return {
+    name: 'beavermaps-strip-html-comments',
+    apply: 'build',
+    enforce: 'post',
+    transformIndexHtml: (html) => html
+      .replace(/<!--(?!\s*\[if)[\s\S]*?-->/g, '')
+      .replace(/\n[ \t]*\n+/g, '\n'),
+  };
+}
+
 export default defineConfig({
+  build: {
+    rolldownOptions: {
+      output: {
+        /**
+         * mapbox-gl in a chunk of its own, apart from the app.
+         *
+         * Left to itself the bundler put the library and this app's code in one
+         * index-*.js, about 552 KB gzipped, of which this app is roughly 76 KB.
+         * The file name is a hash of the whole chunk, so every deploy that
+         * touched one line of src/ renamed it and every returning visitor
+         * downloaded half a megabyte of map renderer they already had. Split
+         * out, the library's chunk keeps its hash until the dependency itself
+         * is upgraded, and a deploy costs a returning visitor the app's share.
+         *
+         * Only mapbox-gl, deliberately. deck.gl and loaders.gl are already their
+         * own chunks because src/flyover-view.js loads them with a dynamic
+         * import(), and grouping those here would pull them back into the
+         * entry's static graph — the opposite of what that import is for.
+         *
+         * AND ONLY ITS JAVASCRIPT. The obvious test, /node_modules\/mapbox-gl/,
+         * also catches mapbox-gl.css, which main.js imports — and a CSS module
+         * in a group becomes that group's own stylesheet, linked from the page
+         * AHEAD of the app's. In one bundle it came after src/input.css, so the
+         * library's rules won every tie of specificity; split out, the order
+         * flipped and the app's won instead. Same selectors, a different page,
+         * and dev (where the import is injected after the <link>) would have
+         * disagreed with production about it. Matching only .js/.mjs/.cjs leaves
+         * the stylesheet where it was: the built CSS is byte-for-byte what it
+         * was before this group existed.
+         */
+        codeSplitting: {
+          groups: [
+            { name: 'mapbox-gl', test: /node_modules[\\/]mapbox-gl[\\/].*\.[cm]?js$/ },
+          ],
+        },
+      },
+    },
+  },
   plugins: [
     devCompression(),
+    stripHtmlComments(),
     tailwindcss(),
     // Spread rather than a falsy entry: Vite accepts `false` in the array, but
     // an unconditional basicSsl() would flip HTTPS on for `npm run dev:http`

@@ -17,7 +17,7 @@
  *      Complex as nine footprints, and outlining one ninth of it because that is
  *      the shard the defibrillator landed in would be worse than not outlining
  *      anything. The directory has already done that grouping.
- *   2. The footprints directory.json did not claim — 38 of the 96 in
+ *   2. The footprints directory.json did not claim — 24 of the 96 in
  *      buildings.json, the ones with no name to group by. Worth including for
  *      exactly what it buys: one of the six defibrillators, two bike shelters
  *      and four motorcycle bays are inside an unnamed building, and without

@@ -15,6 +15,7 @@
 import { loadAmenityIcons, AMENITY_KINDS, pinInk } from './map-images.js';
 import { SATELLITE } from './palette.js';
 import { sizeExpr, LABEL_MAX_EM, AMBIENT_SIZE, CATEGORY_SIZE } from './pin-select.js';
+import { anchorFor } from './layer-order.js';
 import campusLamps from './lamps.json';
 
 /** Nothing to draw, in the shape every geojson source expects. */
@@ -94,7 +95,7 @@ export function createMarkerLayers({
    *
    * NO LAMP POSTS, deliberately. A post is a piece of street furniture the map
    * does not otherwise draw, at a scale where it would be two pixels of grey,
-   * and drawing 251 of them would say "here is some clutter" rather than "this
+   * and drawing 238 of them would say "here is some clutter" rather than "this
    * is lit". What a person actually navigates by after dark is the LIGHT — which
    * way is bright — so the light is the thing drawn.
    *
@@ -111,7 +112,7 @@ export function createMarkerLayers({
    * `circle-blur: 1` is the whole of the softness: at 1 the gradient runs from
    * the centre to the full radius with no hard edge anywhere, which is the only
    * way to get a falloff out of a circle layer. The alternative is a raster
-   * sprite per lamp, which is 251 textures to draw a gradient.
+   * sprite per lamp, which is 238 textures to draw a gradient.
    */
   const LAMP_WARM = '#ffc266';
   const LAMP_CORE = '#fff0d0';
@@ -123,7 +124,17 @@ export function createMarkerLayers({
     // Under everything that carries meaning — the paths, the pins, the labels —
     // because this is ground and not information. A pin lost inside its own
     // glow would be the light winning an argument it should not be in.
-    const before = map.getLayer('campus-paths') ? 'campus-paths' : undefined;
+    //
+    // This anchored to `campus-paths` for as long as it existed, and for some
+    // time after: the network was renamed out from under it, `getLayer` said
+    // no, the anchor fell through to undefined, and every glow on campus was
+    // drawn at the top of the slot — over the paths and over the route. Its
+    // place comes from src/layer-order.js now: over the canopy, so a pool under
+    // a tree is not painted out by the tree, and directly under the network.
+    // That holds in either add order. Added first — this runs at style load
+    // and again when the amenities land — the network is put over it when it
+    // arrives; added after, it goes under the network that is already there.
+    const before = (id) => anchorFor(map, id);
     if (!map.getLayer('campus-lamp-pool')) {
       map.addLayer({
         id: 'campus-lamp-pool',
@@ -142,7 +153,7 @@ export function createMarkerLayers({
           'circle-emissive-strength': 1,
           'circle-pitch-alignment': 'map',
         },
-      }, before);
+      }, before('campus-lamp-pool'));
     }
     if (!map.getLayer('campus-lamp-core')) {
       map.addLayer({
@@ -159,7 +170,7 @@ export function createMarkerLayers({
           'circle-emissive-strength': 1,
           'circle-pitch-alignment': 'map',
         },
-      }, before);
+      }, before('campus-lamp-core'));
     }
     paintLamps();
   }
@@ -184,8 +195,8 @@ export function createMarkerLayers({
      * brightness.
      *
      * AND NOT AT ALL UNTIL YOU ARE CLOSE ENOUGH FOR IT TO BE LIGHT. The whole
-     * campus frames at z14.7, and there a lamp's pool is a 3px circle: 251 of
-     * them are not a lit campus, they are 251 orange specks, and they were
+     * campus frames at z14.7, and there a lamp's pool is a 3px circle: 238 of
+     * them are not a lit campus, they are 238 orange specks, and they were
      * comfortably the busiest thing on the night map — over the buildings, the
      * fields and the paths they are supposed to be lighting. The effect needs
      * the pools to be big enough to read as pools, which is a walking scale.

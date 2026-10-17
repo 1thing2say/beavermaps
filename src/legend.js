@@ -25,6 +25,7 @@ import { poiFor, POI_CLASSES } from './poi.js';
 import { pinColour, glyphInk, glyphSvg, textInk } from './map-images.js';
 import { paintIcons } from './g-icons.js';
 import { niceFeet } from './maneuvers.js';
+import { anchorFor } from './layer-order.js';
 
 /** Nothing to draw, in the shape every geojson source expects. */
 const EMPTY = { type: 'FeatureCollection', features: [] };
@@ -121,12 +122,14 @@ export function createLegend({
   /**
    * Three layers over two sources, added together and taken down never.
    *
-   * They sit between the printed sheet and the road ribbon, which is where a
-   * ground annotation belongs: over my campus's own tarmac and lawn, under the white
-   * paths and under the route, so lighting up every car park on campus cannot
-   * bury the directions someone is following. Insertion order does it — the
-   * network layers are added after this in addNetworkLayers, and within a slot
-   * Mapbox honours the order it was given.
+   * They sit over the printed sheet's buildings and under the route — over
+   * the white paths too, now, which they used to sit under. That is the cost
+   * of the network going under the buildings (src/layer-order.js): an outline
+   * round a building has to be over the building's fill or my campus's opaque
+   * grey paints it out, and the paths are below that fill. The wash is 0.16 on
+   * a car park, so a path through a highlighted lot is tinted rather than
+   * hidden, and lighting up every car park on campus still cannot bury the
+   * directions someone is following — the route is above all three.
    */
   function addHighlightLayers() {
     const colors = litPalette();
@@ -163,7 +166,7 @@ export function createLegend({
         'fill-opacity': ['match', ['get', 'kind'], 'zone', 0.16, 0.26],
         'fill-emissive-strength': 1,
       },
-    });
+    }, anchorFor(map, 'highlight-fill'));
     map.addLayer({
       id: 'highlight-line',
       type: 'line',
@@ -175,7 +178,7 @@ export function createLegend({
         'line-width': 2.5,
         'line-emissive-strength': 1,
       },
-    });
+    }, anchorFor(map, 'highlight-line'));
     // The ones with no shape to outline: the bike racks bolted to a path, the
     // three bus stops out on the perimeter. A ring on the ground under the pin
     // that is already there, rather than a second pin competing with it.
@@ -192,7 +195,7 @@ export function createLegend({
         'circle-stroke-width': 2,
         'circle-emissive-strength': 1,
       },
-    });
+    }, anchorFor(map, 'highlight-points'));
 
     // A style swap drops the layers with a row still selected, so what the
     // legend thinks is showing has to be pushed back at the new ones.

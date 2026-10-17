@@ -40,6 +40,29 @@ export function createGeolocation({ real = globalThis.navigator?.geolocation ?? 
   let heading = 0;
   const watches = new Map();
   let nextId = 1;
+  /**
+   * The last position anyone was handed, real or fixed, as { at, when }.
+   *
+   * WHY THIS OBJECT REMEMBERS IT, when the locate control already hears every
+   * fix. The control only passes a fix on as `geolocate` while it is inside the
+   * map's maxBounds. Outside the fence it fires `outofmaxbounds` instead, and
+   * that event is built by copying the position's OWN properties — which a real
+   * GeolocationPosition has none of, because `coords` and `timestamp` are
+   * getters on its prototype. So the one event that says "you are off the map"
+   * arrives with no say of where, and Directions sat for nine seconds and then
+   * reported a timeout for a phone that had answered at once. This object is the
+   * only thing on that path that sees the position whole, so it is where it is
+   * read — through the getters, into plain numbers.
+   */
+  let last = null;
+  const remember = (ok) => (position) => {
+    const lon = position?.coords?.longitude;
+    const lat = position?.coords?.latitude;
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      last = { at: [lon, lat], when: Number(position.timestamp) || Date.now() };
+    }
+    ok?.(position);
+  };
 
   const fix = () => ({
     coords: {
@@ -133,16 +156,19 @@ export function createGeolocation({ real = globalThis.navigator?.geolocation ?? 
 
   return {
     getCurrentPosition(ok, err, options) {
+      const seen = remember(ok);
       if (!fixed) {
-        if (real) real.getCurrentPosition(ok, err, options);
+        if (real) real.getCurrentPosition(seen, err, options);
         else setTimeout(() => err?.({ code: 2, message: 'Geolocation is unavailable' }), 0);
         return;
       }
-      setTimeout(() => { ok?.(fix()); pulseCompass(); }, 0);
+      setTimeout(() => { seen(fix()); pulseCompass(); }, 0);
     },
 
     watchPosition(ok, err, options) {
-      const entry = { id: nextId, ok, err, options };
+      // Wrapped once here, so the real watch and the fixture both deliver
+      // through it and neither path can forget to. See `last`.
+      const entry = { id: nextId, ok: remember(ok), err, options };
       nextId += 1;
       watches.set(entry.id, entry);
       start(entry);
@@ -183,6 +209,14 @@ export function createGeolocation({ real = globalThis.navigator?.geolocation ?? 
     /** Whether the fixture is currently standing in for the real thing. */
     get fixture() {
       return fixed ? [...fixed] : null;
+    },
+
+    /**
+     * The last position delivered to anybody, as { at: [lon, lat], when }, or
+     * null before the first. A copy, so a caller cannot move it. See `last`.
+     */
+    lastPosition() {
+      return last ? { at: [...last.at], when: last.when } : null;
     },
   };
 }

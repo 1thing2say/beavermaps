@@ -168,13 +168,93 @@ for (const [name, size, scale] of [
   console.log(`${name.padEnd(20)} ${size}x${size}  ${image.length} bytes  (mark at ${scale}x, ${ink})`);
 }
 
+// ------------------------------------------------------------ the maskable one
+//
+// A FOURTH TILE, for the launchers that cut their own shape. Android draws an
+// installed app in whatever mask the phone's launcher uses — a circle, a
+// squircle, a teardrop — and an icon the manifest does not mark `maskable` is
+// shrunk into a white disc first so the mask cannot reach it: the 512 above,
+// already a rounded tile with a margin, ends up a small rounded square inside
+// a circle inside the launcher's own shape.
+//
+// So this one is the opposite of the tiles above in two ways. NO CORNER — the
+// launcher supplies the shape, and a corner cut here would show up as four
+// transparent notches inside a circle. And a SMALLER MARK, because the only
+// part of a maskable icon every launcher promises to show is the safe zone: a
+// circle centred on the tile with a radius of 40% of its width. Everything
+// outside that may be cut away. "10% padding", which is the advice this is
+// usually reduced to, is a square inset and the circle is not one — the corners
+// of a square mark 10% in sit well outside it.
+//
+// The scale is named, like the others, and the assertion in `maskable` is what
+// holds it to the circle: every corner of every drawn block is measured against
+// SAFE_ZONE and the build stops if one is outside. 12 is the largest whole
+// scale that passes (13 puts a corner of the pin's head 2 px past the edge),
+// and it is not the one used: at 12 the drawing's extremes sit on the circle
+// itself, so a circular launcher draws the mark touching its own rim. 10 puts
+// the farthest drawn pixel 0.32 of the width from the centre — a margin of
+// about 40 px between the mark and the circle at its closest — and the mark
+// 250x280.
+const SAFE_ZONE = 0.4;
+
+{
+  const [name, size, scale] = ['icon-maskable-512.png', 512, 10];
+  const image = maskable(size, scale);
+  writeFileSync(resolve(pub, name), image);
+  const ink = `${(box.right - box.left) * scale}x${(box.bottom - box.top) * scale}`;
+  console.log(`${name.padEnd(20)} ${size}x${size}  ${image.length} bytes  (mark at ${scale}x, ${ink}, inside the ${SAFE_ZONE * 100}% safe zone)`);
+}
+
 /** One tile: white ground, the mark centred on it, Apple's corner cut out. */
 function tile(size, scale) {
+  const radius = size * 0.328;
+  const { pixels } = paint(size, scale);
+
+  // The corner, last, so it cuts the finished tile rather than the ground it
+  // was painted on.
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const covered = coverage(x, y, size, radius);
+      if (covered === 1) continue;
+      pixels[(y * size + x) * 4 + 3] = Math.round(covered * 0xff);
+    }
+  }
+
+  return encode(size, size, pixels);
+}
+
+/**
+ * The full-bleed square a launcher masks, with the mark held to the safe zone.
+ *
+ * Checked on the blocks the mark is drawn in rather than on its bounding box:
+ * the box's corners are empty on this drawing, and holding them to the circle
+ * would shrink the mark for pixels it does not have.
+ */
+function maskable(size, scale) {
+  const { pixels, originX, originY } = paint(size, scale);
+  const centre = size / 2;
+  const limit = size * SAFE_ZONE;
+  for (let sy = 0; sy < mark.height; sy++) {
+    for (let sx = 0; sx < mark.width; sx++) {
+      if (mark.pixels[(sy * mark.width + sx) * 4 + 3] === 0) continue;
+      for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+        const x = originX + (sx + cx) * scale;
+        const y = originY + (sy + cy) * scale;
+        const r = Math.hypot(x - centre, y - centre);
+        if (r > limit) {
+          throw new Error(`the mark at ${scale}x reaches ${r.toFixed(1)} px from the centre of a ${size} maskable icon; the safe zone ends at ${limit.toFixed(1)}`);
+        }
+      }
+    }
+  }
+  return encode(size, size, pixels);
+}
+
+/** White ground with the mark centred on it, at a whole-number scale. */
+function paint(size, scale) {
   const inkW = (box.right - box.left) * scale;
   const inkH = (box.bottom - box.top) * scale;
   if (inkW > size || inkH > size) throw new Error(`the mark is ${inkW}x${inkH} at ${scale}x, which will not fit a ${size} tile`);
-
-  const radius = size * 0.328;
 
   // Where the source's own origin lands once the ink is centred.
   const originX = Math.round(size / 2 - (box.left * scale + inkW / 2));
@@ -205,17 +285,7 @@ function tile(size, scale) {
     }
   }
 
-  // The corner, last, so it cuts the finished tile rather than the ground it
-  // was painted on.
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const covered = coverage(x, y, size, radius);
-      if (covered === 1) continue;
-      pixels[(y * size + x) * 4 + 3] = Math.round(covered * 0xff);
-    }
-  }
-
-  return encode(size, size, pixels);
+  return { pixels, originX, originY };
 }
 
 // ------------------------------------------------------------------ PNG parts

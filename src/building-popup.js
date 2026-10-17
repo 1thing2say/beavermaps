@@ -68,9 +68,20 @@ function section(title, tag = 'dl') {
  * have to be told which.
  */
 function head(title, onClose) {
+  // Whatever had focus as the card was being built, which is whatever opened
+  // it: a row in a results list, the map's canvas, the search field. Read now
+  // because by the time Close is pressed the card itself holds focus.
+  const opener = document.activeElement;
+
   const row = el('div', 'g-panel-head');
   const text = el('div', 'g-place-head-text');
-  text.append(el('h2', 'g-panel-title', title));
+  const heading = el('h2', 'g-panel-title', title);
+  // Focusable from script, not from Tab. Picking a search result sends focus
+  // here so a screen reader announces the place that opened — see choosePlace
+  // in src/search-box.js — and -1 is the value that allows that without adding
+  // a Tab stop that does nothing when it is reached.
+  heading.tabIndex = -1;
+  text.append(heading);
 
   const close = el('button', 'g-icon-btn');
   close.type = 'button';
@@ -83,10 +94,54 @@ function head(title, onClose) {
   const glyph = el('span', 'g-icon');
   glyph.innerHTML = icon('close');
   close.append(glyph);
-  close.addEventListener('click', onClose);
+  close.addEventListener('click', () => {
+    // Asked BEFORE the card goes, because afterwards the answer is always no:
+    // onClose empties #place-panel, and a focused element that leaves the
+    // document hands focus to <body>. That was the bug — a keyboard user
+    // pressed Close and was put back at the top of the page.
+    //
+    // Only when focus was in the card. A pointer press in Safari does not
+    // focus a button at all, and moving focus for somebody who never had it
+    // in here would be the app grabbing it rather than giving it back.
+    const hadFocus = Boolean(close.closest('.g-place')?.contains(document.activeElement));
+    onClose();
+    if (hadFocus) returnFocus(opener);
+  });
 
   row.append(text, close);
   return { row, text };
+}
+
+/**
+ * Where focus goes when a card is closed with its own button.
+ *
+ * Back to whatever opened the card, when that is still there to go back to;
+ * otherwise to the search button beside the field, which is the start of the
+ * column and on screen whenever the column is — checked before it is used,
+ * since navigation hides the chrome and a hidden button cannot take focus.
+ *
+ * Never to a text field. The search field and the two route fields all open
+ * their suggestion lists on focus, so "returning" focus to one reopens the
+ * list the card was picked from — a close that opens something. Which is also
+ * why this lives in the button's own handler rather than in the shared close
+ * path (clearSelection): that path also runs when a tap on the map or a new
+ * search replaces the card, and in both of those focus is already somewhere
+ * the person put it.
+ *
+ * A turn later rather than now. The column is a stack (src/sheet-stack.js)
+ * that notices the card leaving through a MutationObserver, and it is the
+ * stack that brings back the panel underneath — the results list a row was
+ * picked from — so whether the opener is visible is only true once it has run.
+ */
+function returnFocus(opener) {
+  setTimeout(() => {
+    const visible = (node) => Boolean(node?.isConnected && node.getClientRects().length);
+    const usable = opener && opener !== document.body && visible(opener)
+      && !opener.matches('input, textarea, [role="combobox"]')
+      && !opener.closest('#place-panel');
+    const target = usable ? opener : document.getElementById('search-go');
+    if (visible(target)) target.focus({ preventScroll: true });
+  }, 0);
 }
 
 /**

@@ -179,3 +179,77 @@ test('a cleared watch stays quiet', async () => {
   await settled();
   assert.equal(count, 0, 'a watch cleared before its first fix still delivered one');
 });
+
+// --- the last position, for the fix the locate control will not pass on -----
+
+/**
+ * A position shaped the way the browser's really is: `coords` and `timestamp`
+ * are GETTERS on the prototype, not own properties. That is the whole reason
+ * lastPosition exists — Mapbox builds its `outofmaxbounds` event by copying
+ * own properties, so a real position arrives there with no coords at all, and
+ * a plain object literal in a test would hide exactly that.
+ */
+class GetterPosition {
+  #lon;
+  #lat;
+  constructor(lon, lat) { this.#lon = lon; this.#lat = lat; }
+  get coords() { return { longitude: this.#lon, latitude: this.#lat, accuracy: 12 }; }
+  get timestamp() { return 1_700_000_000_000; }
+}
+
+test('a getter-only position copies to nothing, which is the bug being worked round', () => {
+  const copied = { ...new GetterPosition(-121.5, 38.7) };
+  assert.equal(copied.coords, undefined);
+});
+
+test('the last real fix is remembered, read through its getters', () => {
+  let deliver;
+  const real = {
+    getCurrentPosition: () => {},
+    watchPosition: (ok) => { deliver = ok; return 1; },
+    clearWatch: () => {},
+  };
+  const geo = createGeolocation({ real });
+  assert.equal(geo.lastPosition(), null, 'a position before any fix');
+
+  const seen = [];
+  geo.watchPosition((position) => seen.push(position));
+  // Ten miles off campus — the case the fence turns into `outofmaxbounds`.
+  const far = new GetterPosition(-121.5, 38.7);
+  deliver(far);
+
+  // Passed through untouched: the control still gets the browser's object.
+  assert.equal(seen[0], far);
+  assert.deepEqual(geo.lastPosition(), { at: [-121.5, 38.7], when: 1_700_000_000_000 });
+});
+
+test('a one-shot request is remembered too', () => {
+  const real = {
+    getCurrentPosition: (ok) => ok(new GetterPosition(-121.4, 38.6)),
+    watchPosition: () => 1,
+    clearWatch: () => {},
+  };
+  const geo = createGeolocation({ real });
+  let got = null;
+  geo.getCurrentPosition((position) => { got = position; });
+  assert.ok(got);
+  assert.deepEqual(geo.lastPosition().at, [-121.4, 38.6]);
+});
+
+test('the fixture is remembered like any other fix', async () => {
+  const geo = createGeolocation({ real: null });
+  geo.useFixture([-121.347, 38.6495]);
+  geo.watchPosition(() => {});
+  await settled();
+  assert.deepEqual(geo.lastPosition().at, [-121.347, 38.6495]);
+});
+
+test('lastPosition hands out a copy', () => {
+  let deliver;
+  const real = { getCurrentPosition: () => {}, watchPosition: (ok) => { deliver = ok; return 1; }, clearWatch: () => {} };
+  const geo = createGeolocation({ real });
+  geo.watchPosition(() => {});
+  deliver(new GetterPosition(1, 2));
+  geo.lastPosition().at[0] = 99;
+  assert.deepEqual(geo.lastPosition().at, [1, 2]);
+});

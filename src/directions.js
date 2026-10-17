@@ -31,11 +31,12 @@ const METRES_PER_KM = 1000;
  * MEASURED, not chosen. Sampling a 60x60 grid over the graph's own bounding box
  * gives a median distance to the nearest vertex of 26 m, a 99th percentile of
  * 121 m and a worst case of 215 m — so anywhere the graph actually covers, you
- * are within about 200 m of it. 300 m clears that worst case with room for a
+ * are within about 200 m of it, and the nearest point on an edge, which is what
+ * the server measures, is never further. 300 m clears that worst case with room for a
  * poor fix and still fails immediately for somebody two suburbs away.
  *
  * The failure this exists to stop is specific and silent. The router snaps a
- * start to the NEAREST vertex, with no notion of "too far": open the app from
+ * start onto the network, with no notion of "too far": open the app from
  * home ten miles away and it will cheerfully draw a route that begins at the
  * corner of the approach network and announce it as an eight minute walk. The
  * distance is real, the walk is real, and it is not yours.
@@ -106,9 +107,10 @@ const HOLD = 'Press and hold the map to set a starting point instead.';
 /**
  * Why a position cannot be walked from, or null if it can.
  *
- * `metres` is the distance from the fix to the nearest vertex of the routing
- * graph — which is a better question than "how far from campus", because what
- * breaks is the snap and not the geography.
+ * `metres` is the distance from the fix to the routing graph — the nearest point
+ * on it on the server, the nearest vertex in the browser — which is a better
+ * question than "how far from campus", because what breaks is the snap and not
+ * the geography.
  */
 export function reachProblem(metres) {
   if (!Number.isFinite(metres)) return `Could not work out where you are on the map. ${HOLD}`;

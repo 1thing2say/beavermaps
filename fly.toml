@@ -1,8 +1,23 @@
 # Rename `app` to something globally unique before the first deploy, or just
-# let `fly launch` rewrite this file for you.
+# let `fly launch` rewrite this file for you. Then deploy with `npm run deploy`,
+# not a bare `fly deploy` — see the README's Deploy section for why.
 app = "beavermaps"
-primary_region = "dfw"
+# San Jose: the nearest Fly region to a Sacramento campus. It was "dfw", which
+# put every route request and every byte of the app ~2,300km from the people
+# using it. Set before `fly launch` creates the app — moving a running app's
+# region later means new machines, not an edit.
+primary_region = "sjc"
+# How Fly stops a machine — every deploy, every scale-to-zero. SIGTERM is one
+# of the two signals server/shutdown.js catches to finish the requests in
+# flight, and ten seconds is how long Fly then waits before SIGKILL. Its
+# default is five, and GRACE_MS has to finish a second inside whatever this
+# says; test/shutdown.test.js reads both lines to hold it to that.
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
 
+# Deliberately empty. Both front-end keys are --build-arg values supplied by
+# `npm run deploy` from .env; writing them into [build.args] here would publish
+# them in a public repository.
 [build]
 
 [env]
@@ -11,9 +26,29 @@ primary_region = "dfw"
 [http_service]
   internal_port = 8080
   force_https = true
+  # Scale to zero when idle, and the cost/latency trade is left as a human
+  # call. With "stop" and min_machines_running = 0 an idle app costs nothing,
+  # but the first visitor after a quiet spell waits for a cold boot: node
+  # starting, the routing graph built, every /api response gzipped before
+  # `listen`. "suspend" snapshots the machine's memory instead, so it resumes
+  # in well under a second with all of that already warm, for the price of
+  # storing the snapshot; min_machines_running = 1 removes the wait entirely
+  # and costs one machine running around the clock.
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0
+
+  # Count requests, not connections. The default is type = "connections" with
+  # a hard limit of 25, and a single page load fans out into the HTML, the
+  # bundle, the overlay JSON and the routing network, so a handful of visitors
+  # opening the map at once would have been enough to mark the machine full and
+  # queue the rest. Every request here is a static file, a precompressed JSON
+  # blob or an in-memory route lookup, so one machine has room for a few
+  # hundred in flight.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
 
   [[http_service.checks]]
     interval = "30s"
